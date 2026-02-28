@@ -1327,10 +1327,10 @@ function readPM(){
     updatedAt: null,
     columns: [
       { id: 'p0', title: 'Projects', cards: [
-        { id: 'c1', title: 'Clawdbot Clone Spinup', body: 'Spin up a fresh Clawdbot/Moltbot box reliably.', createdAt: new Date().toISOString() },
-        { id: 'c2', title: 'Clawdbot Install Revision', body: 'Make install easier (target: < 30 minutes, not 6 hours).', createdAt: new Date().toISOString() },
-        { id: 'c3', title: 'Manage ClawdConsole Open Source Branch', body: 'Keep OSS repo clean, reviewed, tagged releases.', createdAt: new Date().toISOString() },
-        { id: 'c4', title: 'Test ClawdConsole on New Box (Validation)', body: 'Install + run on a clean box; verify docs + defaults.', createdAt: new Date().toISOString() },
+        { id: 'c1', title: 'Clawdbot Clone Spinup', body: 'Spin up a fresh Clawdbot/Moltbot box reliably.', priority: 'high', createdAt: new Date().toISOString() },
+        { id: 'c2', title: 'Clawdbot Install Revision', body: 'Make install easier (target: < 30 minutes, not 6 hours).', priority: 'ultra', createdAt: new Date().toISOString() },
+        { id: 'c3', title: 'Manage ClawdConsole Open Source Branch', body: 'Keep OSS repo clean, reviewed, tagged releases.', priority: 'normal', createdAt: new Date().toISOString() },
+        { id: 'c4', title: 'Test ClawdConsole on New Box (Validation)', body: 'Install + run on a clean box; verify docs + defaults.', priority: 'planning', createdAt: new Date().toISOString() },
       ]},
       { id: 'p1', title: 'Backlog', cards: [] },
       { id: 'p2', title: 'Doing', cards: [] },
@@ -1376,10 +1376,22 @@ app.get('/pm', (req, res) => {
     .col{border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,.03); overflow:hidden}
     .colHead{padding:12px 12px; border-bottom:1px solid rgba(255,255,255,.08); display:flex; justify-content:space-between; align-items:center}
     .colHead b{font-size:14px}
+    .colActions{display:flex; gap:8px; align-items:center}
+    .addBtn{border:1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.04); color: rgba(231,231,231,.85); border-radius: 999px; padding:6px 10px; cursor:pointer; font-size:12px}
+    .addBtn:hover{background: rgba(255,255,255,.07)}
+
     .cards{padding:12px; display:flex; flex-direction:column; gap:10px; min-height: 120px}
-    .card{border:1px solid rgba(255,255,255,.12); border-radius:12px; background: rgba(17,24,42,.88); padding:10px}
+    .card{border:1px solid rgba(255,255,255,.12); border-radius:12px; background: rgba(17,24,42,.88); padding:10px; position:relative; overflow:hidden}
+    .card::before{content:""; position:absolute; left:0; top:0; bottom:0; width:6px; background: rgba(255,255,255,.08)}
+    .pri-ultra::before{background: rgba(34,198,198,.90)}
+    .pri-high::before{background: rgba(124,255,178,.85)}
+    .pri-normal::before{background: rgba(154,208,255,.85)}
+    .pri-planning::before{background: rgba(231,231,231,.30)}
+
     .card b{display:block}
     .card p{margin:6px 0 0; color: rgba(231,231,231,.78)}
+    .badge{display:inline-flex; padding:3px 8px; border-radius:999px; font-size:11px; border:1px solid rgba(255,255,255,.14); color: rgba(231,231,231,.78); margin-top:8px}
+
     .btn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 12px; padding:8px 10px; cursor:pointer}
     .btn:hover{border-color: rgba(34,198,198,.65)}
     .small{font-size:12px}
@@ -1400,10 +1412,44 @@ app.get('/pm', (req, res) => {
 
   <script>
     const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-    async function load(){
-      const res = await fetch('/api/pm', { credentials:'include', cache:'no-store' });
-      const j = await res.json();
-      const pm = (j && j.ok && j.pm) ? j.pm : { columns: [] };
+    const rand = () => (crypto && crypto.randomUUID) ? crypto.randomUUID() : ('c_' + Math.random().toString(16).slice(2) + Date.now().toString(16));
+
+    let PM = null;
+
+    function priClass(p){
+      const v = String(p||'planning').toLowerCase();
+      if (v === 'ultra') return 'pri-ultra';
+      if (v === 'high') return 'pri-high';
+      if (v === 'normal') return 'pri-normal';
+      return 'pri-planning';
+    }
+
+    async function save(){
+      await fetch('/api/pm', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        body: JSON.stringify({ pm: PM })
+      });
+    }
+
+    async function addCard(colId){
+      const title = (prompt('Card title') || '').trim();
+      if (!title) return;
+      const body = (prompt('Description (optional)') || '').trim();
+      const p = (prompt('Priority: ultra / high / normal / planning', 'normal') || 'normal').trim().toLowerCase();
+      const priority = (['ultra','high','normal','planning'].includes(p)) ? p : 'normal';
+
+      const col = (PM && PM.columns || []).find(c => c && c.id === colId);
+      if (!col) return;
+      col.cards = Array.isArray(col.cards) ? col.cards : [];
+      col.cards.push({ id: rand(), title, body, priority, createdAt: new Date().toISOString() });
+      await save();
+      render();
+    }
+
+    function render(){
+      const pm = PM || { columns: [] };
       const host = document.getElementById('pmBoard');
       host.innerHTML = '';
       for (const col of (pm.columns || [])){
@@ -1411,20 +1457,40 @@ app.get('/pm', (req, res) => {
         el.className = 'col';
 
         const cardsHtml = (col.cards || []).map(c => {
-          return '<div class="card">'
+          const pc = priClass(c.priority);
+          const badge = '<span class="badge">' + esc(String(c.priority || 'planning')) + '</span>';
+          return '<div class="card ' + pc + '">'
             + '<b>' + esc(c.title) + '</b>'
-            + '<p>' + esc(c.body || '') + '</p>'
+            + (c.body ? ('<p>' + esc(c.body) + '</p>') : '')
+            + badge
             + '</div>';
         }).join('');
 
         el.innerHTML = ''
-          + '<div class="colHead"><b>' + esc(col.title) + '</b>'
-          + '<span class="muted small">' + (col.cards || []).length + '</span></div>'
+          + '<div class="colHead">'
+          +   '<b>' + esc(col.title) + '</b>'
+          +   '<div class="colActions">'
+          +     '<span class="muted small">' + (col.cards || []).length + '</span>'
+          +     '<button class="addBtn" type="button" data-add="' + esc(col.id) + '">+ Card</button>'
+          +   '</div>'
+          + '</div>'
           + '<div class="cards">' + cardsHtml + '</div>';
 
         host.appendChild(el);
       }
+
+      Array.from(document.querySelectorAll('button[data-add]')).forEach(b => {
+        b.addEventListener('click', () => addCard(b.getAttribute('data-add')));
+      });
     }
+
+    async function load(){
+      const res = await fetch('/api/pm', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      PM = (j && j.ok && j.pm) ? j.pm : { columns: [] };
+      render();
+    }
+
     document.getElementById('pmRefresh').addEventListener('click', load);
     load();
   </script>

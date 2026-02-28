@@ -1321,6 +1321,117 @@ app.get('/transcript', (req, res) => {
 </html>`);
 });
 
+const PM_FILE = path.join(DATA_DIR, 'pm.json');
+function readPM(){
+  const fallback = {
+    updatedAt: null,
+    columns: [
+      { id: 'p0', title: 'Projects', cards: [
+        { id: 'c1', title: 'Clawdbot Clone Spinup', body: 'Spin up a fresh Clawdbot/Moltbot box reliably.', createdAt: new Date().toISOString() },
+        { id: 'c2', title: 'Clawdbot Install Revision', body: 'Make install easier (target: < 30 minutes, not 6 hours).', createdAt: new Date().toISOString() },
+        { id: 'c3', title: 'Manage ClawdConsole Open Source Branch', body: 'Keep OSS repo clean, reviewed, tagged releases.', createdAt: new Date().toISOString() },
+        { id: 'c4', title: 'Test ClawdConsole on New Box (Validation)', body: 'Install + run on a clean box; verify docs + defaults.', createdAt: new Date().toISOString() },
+      ]},
+      { id: 'p1', title: 'Backlog', cards: [] },
+      { id: 'p2', title: 'Doing', cards: [] },
+      { id: 'p3', title: 'Done', cards: [] },
+    ]
+  };
+  return readJson(PM_FILE, fallback);
+}
+function writePM(pm){
+  const out = pm && Array.isArray(pm.columns) ? pm : readPM();
+  out.updatedAt = new Date().toISOString();
+  writeJson(PM_FILE, out);
+  return out;
+}
+
+app.get('/api/pm', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true, pm: readPM() });
+});
+
+app.post('/api/pm', (req, res) => {
+  const pm = req.body && req.body.pm;
+  const saved = writePM(pm);
+  logWork('pm.saved', { cols: saved.columns?.length || 0 });
+  res.json({ ok: true, pm: saved });
+});
+
+app.get('/pm', (req, res) => {
+  res.type('text/html; charset=utf-8').send(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ClawdPM</title>
+  <style>
+    :root { --bg:#0b0f1a; --card:#11182a; --text:#e7e7e7; --muted: rgba(231,231,231,.70); --border: rgba(231,231,231,.12); --teal:#22c6c6; }
+    body{margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background: var(--bg); color: var(--text)}
+    .wrap{max-width: 1600px; margin:0 auto; padding: 16px;}
+    .top{display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:baseline}
+    .top h1{margin:0; font-size:18px}
+    .muted{color:var(--muted)}
+    .board{display:grid; grid-template-columns: repeat(4, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; align-items:start}
+    .col{border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,.03); overflow:hidden}
+    .colHead{padding:12px 12px; border-bottom:1px solid rgba(255,255,255,.08); display:flex; justify-content:space-between; align-items:center}
+    .colHead b{font-size:14px}
+    .cards{padding:12px; display:flex; flex-direction:column; gap:10px; min-height: 120px}
+    .card{border:1px solid rgba(255,255,255,.12); border-radius:12px; background: rgba(17,24,42,.88); padding:10px}
+    .card b{display:block}
+    .card p{margin:6px 0 0; color: rgba(231,231,231,.78)}
+    .btn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 12px; padding:8px 10px; cursor:pointer}
+    .btn:hover{border-color: rgba(34,198,198,.65)}
+    .small{font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>ClawdPM</h1>
+        <div class="muted small">Trello-style project board (v0). Drag/drop next.</div>
+      </div>
+      <button class="btn" id="pmRefresh" type="button">Refresh</button>
+    </div>
+
+    <div class="board" id="pmBoard"></div>
+  </div>
+
+  <script>
+    const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+    async function load(){
+      const res = await fetch('/api/pm', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      const pm = (j && j.ok && j.pm) ? j.pm : { columns: [] };
+      const host = document.getElementById('pmBoard');
+      host.innerHTML = '';
+      for (const col of (pm.columns || [])){
+        const el = document.createElement('div');
+        el.className = 'col';
+
+        const cardsHtml = (col.cards || []).map(c => {
+          return '<div class="card">'
+            + '<b>' + esc(c.title) + '</b>'
+            + '<p>' + esc(c.body || '') + '</p>'
+            + '</div>';
+        }).join('');
+
+        el.innerHTML = ''
+          + '<div class="colHead"><b>' + esc(col.title) + '</b>'
+          + '<span class="muted small">' + (col.cards || []).length + '</span></div>'
+          + '<div class="cards">' + cardsHtml + '</div>';
+
+        host.appendChild(el);
+      }
+    }
+    document.getElementById('pmRefresh').addEventListener('click', load);
+    load();
+  </script>
+</body>
+</html>`);
+});
+
 app.get('/publish', (req, res) => {
   res.type('text/html; charset=utf-8').send(`<!doctype html>
 <html>
@@ -1983,12 +2094,15 @@ app.get('/', (req, res) => {
         </div>
 
         <div id="panelPM" style="display:flex; flex-direction:column; gap: 10px;">
-          <div style="display:flex; flex-direction:column; gap: 8px;">
-            <div class="muted">Quick links</div>
-            <a href="https://clawdconsole.com/" target="_blank" rel="noopener">Clawd Console</a>
+          <div class="row" style="justify-content:space-between; align-items:center;">
+            <div>
+              <div class="muted">ClawdPM</div>
+              <div style="margin-top:4px;">Trello-style projects, lists, and cards (WIP).</div>
+            </div>
+            <a class="scriptBtn" href="/pm" target="_blank" rel="noopener">Open ClawdPM</a>
           </div>
 
-          <div class="muted" style="margin-top:2px;">(ClawdPM panel will evolve into projects/workspaces/roles. For now: quick links.)</div>
+          <div class="muted" style="margin-top:2px;">Tip: keep ClawdPM on a second monitor.</div>
         </div>
 
         <div id="panelPub" style="display:none; flex-direction:column; gap: 10px;">

@@ -67,11 +67,15 @@
   // --- ClawdApps tabs (sidebar) ---
   const tabPM = document.getElementById('tabPM');
   const tabRepo = document.getElementById('tabRepo');
+  const tabSec = document.getElementById('tabSec');
+  const tabOps = document.getElementById('tabOps');
   const tabPub = document.getElementById('tabPub');
   const tabBuild = document.getElementById('tabBuild');
 
   const panelPM = document.getElementById('panelPM');
   const panelRepo = document.getElementById('panelRepo');
+  const panelSec = document.getElementById('panelSec');
+  const panelOps = document.getElementById('panelOps');
   const panelPub = document.getElementById('panelPub');
   const panelBuild = document.getElementById('panelBuild');
 
@@ -82,6 +86,8 @@
     const map = [
       { k: 'pm', tab: tabPM, panel: panelPM },
       { k: 'repo', tab: tabRepo, panel: panelRepo },
+      { k: 'sec', tab: tabSec, panel: panelSec },
+      { k: 'ops', tab: tabOps, panel: panelOps },
       { k: 'pub', tab: tabPub, panel: panelPub },
       { k: 'build', tab: tabBuild, panel: panelBuild },
     ];
@@ -128,6 +134,8 @@
 
   if (tabPM) tabPM.addEventListener('click', () => setAppTab('pm'));
   if (tabRepo) tabRepo.addEventListener('click', () => { setAppTab('repo'); loadRepoCommits(); });
+  if (tabSec) tabSec.addEventListener('click', () => setAppTab('sec'));
+  if (tabOps) tabOps.addEventListener('click', () => setAppTab('ops'));
   if (tabPub) tabPub.addEventListener('click', () => setAppTab('pub'));
   if (tabBuild) tabBuild.addEventListener('click', () => setAppTab('build'));
   if (repoRefresh) repoRefresh.addEventListener('click', loadRepoCommits);

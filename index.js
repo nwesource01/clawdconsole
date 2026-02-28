@@ -2176,6 +2176,8 @@ app.get('/', (req, res) => {
         <div class="row" style="gap: 8px; margin-bottom: 10px;">
           <button id="tabPM" type="button" class="pill" style="cursor:pointer;">ClawdPM</button>
           <button id="tabRepo" type="button" class="pill" style="cursor:pointer;">ClawdRepo</button>
+          <button id="tabSec" type="button" class="pill" style="cursor:pointer;">ClawdSec</button>
+          <button id="tabOps" type="button" class="pill" style="cursor:pointer;">ClawdOps</button>
           <button id="tabPub" type="button" class="pill" style="cursor:pointer;">ClawdPub</button>
           <button id="tabBuild" type="button" class="pill" style="cursor:pointer;">ClawdBuild</button>
         </div>
@@ -2211,6 +2213,25 @@ app.get('/', (req, res) => {
           </div>
           <div class="muted">Local repo: <code>${__dirname}</code></div>
           <div id="repoList" style="margin-top:6px; background: rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px; max-height: 360px; overflow:auto;"></div>
+        </div>
+
+        <div id="panelSec" style="display:none; flex-direction:column; gap: 10px;">
+          <div class="muted">ClawdSec (security) — WIP</div>
+          <div style="line-height:1.5;">
+            <div><b>Rule:</b> don’t paste real secrets into chat or a web UI.</div>
+            <div class="muted" style="margin-top:6px;">Instead, store secrets in server env files (e.g. <code>/etc/clawdio-console.env</code>) and rotate them when needed.</div>
+            <div class="muted" style="margin-top:10px;">Password reset (Console auth):</div>
+            <div class="md_code" style="margin-top:8px;"><pre><code>sudo nano /etc/clawdio-console.env
+sudo systemctl restart clawdio-console.service</code></pre></div>
+          </div>
+        </div>
+
+        <div id="panelOps" style="display:none; flex-direction:column; gap: 10px;">
+          <div class="muted">ClawdOps (operations) — WIP</div>
+          <div style="line-height:1.5;">
+            <div>Uptime, backups, deploy checklist, and health checks.</div>
+            <div class="muted" style="margin-top:8px;">Suggested keep-alive ping: set an UptimeRobot check to hit <code>/healthz</code> every minute.</div>
+          </div>
         </div>
 
         <div id="panelBuild" style="display:none; flex-direction:column; gap: 10px;">

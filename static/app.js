@@ -771,7 +771,16 @@
       const chunk = parts[i] || '';
       if (i % 2 === 1) {
         // code
-        const codeEsc = esc(chunk.replace(/^\n+|\n+$/g, ''));
+        // Support fenced code blocks with language tags (```bash ...```).
+        // Our naive splitter includes the language tag as the first line; strip common ones.
+        let codeRaw = chunk.replace(/^\n+|\n+$/g, '');
+        const firstLine = (codeRaw.split('\n')[0] || '').trim().toLowerCase();
+        const knownLang = new Set(['bash','sh','shell','zsh','fish','powershell','pwsh','ps','cmd','bat','text','txt']);
+        if (knownLang.has(firstLine)) {
+          codeRaw = codeRaw.split('\n').slice(1).join('\n');
+        }
+
+        const codeEsc = esc(codeRaw);
         html += '<div class="md_code">'
           + '<div class="md_codebar">'
           +   '<span class="muted">Command</span>'

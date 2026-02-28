@@ -145,16 +145,41 @@
   const abText = document.getElementById('ab_text');
   const abMsg = document.getElementById('ab_msg');
 
+  // Server-persisted quick buttons. Also mirrored in localStorage for resilience.
   const CUSTOM_BTNS_KEY = 'cc_custom_buttons_v1';
 
-  function readCustomButtons(){
+  function readCustomButtonsLocal(){
     try {
       const j = JSON.parse(localStorage.getItem(CUSTOM_BTNS_KEY) || '[]');
       return Array.isArray(j) ? j : [];
     } catch { return []; }
   }
-  function writeCustomButtons(arr){
+  function writeCustomButtonsLocal(arr){
     try { localStorage.setItem(CUSTOM_BTNS_KEY, JSON.stringify(arr || [])); } catch {}
+  }
+
+  async function loadCustomButtons(){
+    try {
+      const res = await fetch(apiUrl('/api/buttons'), { credentials: 'include', cache: 'no-store' });
+      const j = await res.json();
+      const btns = (j && j.ok && Array.isArray(j.buttons)) ? j.buttons : [];
+      if (btns.length) writeCustomButtonsLocal(btns);
+      return btns.length ? btns : readCustomButtonsLocal();
+    } catch {
+      return readCustomButtonsLocal();
+    }
+  }
+
+  async function saveCustomButtons(btns){
+    writeCustomButtonsLocal(btns);
+    try {
+      await fetch(apiUrl('/api/buttons'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ buttons: btns })
+      });
+    } catch {}
   }
 
   function openAddBtn(){
@@ -179,7 +204,7 @@
     // remove previously-rendered custom
     Array.from(host.querySelectorAll('button[data-custombtn="1"]')).forEach(el => el.remove());
 
-    const btns = readCustomButtons();
+    const btns = readCustomButtonsLocal();
     // Insert after Review Week (before Add a Button)
     const anchor = document.getElementById('btnAddBtn');
 
@@ -213,16 +238,17 @@
         if (abMsg) abMsg.textContent = 'Please fill out both fields.';
         return;
       }
-      const btns = readCustomButtons();
+      const btns = readCustomButtonsLocal();
       btns.push({ label, text, createdAt: new Date().toISOString() });
-      writeCustomButtons(btns.slice(-20));
+      const next = btns.slice(-50);
+      saveCustomButtons(next);
       renderCustomButtons();
       closeAddBtn();
     });
   }
 
-  // initial render
-  renderCustomButtons();
+  // initial load + render
+  loadCustomButtons().then(() => renderCustomButtons());
 
   // --- Worklog filters ---
   const wlFilterBtns = Array.from(document.querySelectorAll('.wlbtn[data-filter]'));

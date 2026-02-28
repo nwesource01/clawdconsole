@@ -40,6 +40,9 @@ const TELEMETRY_STATE_FILE = path.join(DATA_DIR, 'telemetry-state.json');
 // Telemetry collector logs (only used on the hosted collector)
 const TELEMETRY_FILE = path.join(DATA_DIR, 'telemetry.jsonl');
 
+// Custom quick buttons (server-side persistence)
+const BUTTONS_FILE = path.join(DATA_DIR, 'buttons.json');
+
 const AUTH_USER = process.env.AUTH_USER || 'nwesource';
 const AUTH_PASS = process.env.AUTH_PASS || '';
 
@@ -666,6 +669,49 @@ app.get('/api/repo/commits', async (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
   }
+});
+
+function readButtons(){
+  const fallback = { updatedAt: null, buttons: [] };
+  try {
+    const j = readJson(BUTTONS_FILE, fallback);
+    if (!j || !Array.isArray(j.buttons)) return fallback;
+    return {
+      updatedAt: j.updatedAt || null,
+      buttons: j.buttons.filter(b => b && b.label && b.text).slice(0, 50)
+    };
+  } catch {
+    return fallback;
+  }
+}
+function writeButtons(buttons){
+  const safe = (Array.isArray(buttons) ? buttons : [])
+    .filter(b => b && typeof b.label === 'string' && typeof b.text === 'string')
+    .map(b => ({
+      label: String(b.label).trim().slice(0, 32),
+      text: String(b.text).trim().slice(0, 4000),
+      createdAt: b.createdAt || new Date().toISOString(),
+    }))
+    .filter(b => b.label && b.text)
+    .slice(-50);
+
+  const out = { updatedAt: new Date().toISOString(), buttons: safe };
+  writeJson(BUTTONS_FILE, out);
+  return out;
+}
+
+app.get('/api/buttons', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true, ...readButtons() });
+});
+
+app.post('/api/buttons', (req, res) => {
+  const body = req.body || {};
+  const buttons = Array.isArray(body.buttons) ? body.buttons : null;
+  if (!buttons) return res.status(400).json({ ok: false, error: 'Expected {buttons: []}' });
+  const saved = writeButtons(buttons);
+  logWork('buttons.saved', { count: saved.buttons.length });
+  res.json({ ok: true, ...saved });
 });
 
 app.get('/api/build', (req, res) => {

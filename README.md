@@ -88,6 +88,17 @@ All files live under `DATA_DIR`:
 - Set `AUTH_PASS`.
 - Treat `DATA_DIR` as sensitive (it contains transcripts + attachments).
 
+## Use at your own risk (read this)
+
+Clawd Console is provided **“as is”**, without warranties or guarantees of any kind.
+
+You are responsible for your deployment and for anything you connect it to (email, messaging accounts, credentials, tools, servers, etc.).
+If you misconfigure it and lose data or money, that’s on you.
+
+**Do not give it access to anything you can’t afford to lose.**
+
+If you’re not comfortable running self-hosted software, don’t self-host this.
+
 ## Opt-in telemetry (install + daily)
 
 By default, Clawd Console **does not** send any telemetry.

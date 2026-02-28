@@ -1411,8 +1411,10 @@ app.get('/pm', (req, res) => {
   </div>
 
   <script>
-    const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-    const rand = () => (crypto && crypto.randomUUID) ? crypto.randomUUID() : ('c_' + Math.random().toString(16).slice(2) + Date.now().toString(16));
+    const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const rand = () => (window.crypto && window.crypto.randomUUID)
+      ? window.crypto.randomUUID()
+      : ('c_' + Math.random().toString(16).slice(2) + Date.now().toString(16));
 
     let PM = null;
 
@@ -2041,7 +2043,7 @@ app.get('/', (req, res) => {
     }
 
     /* layout */
-    .wrap { display: grid; grid-template-columns: 280px 1.25fr 0.75fr; gap: 14px; max-width: 1920px; }
+    .wrap { display: grid; grid-template-columns: 300px 1.25fr 0.75fr; gap: 14px; max-width: 1920px; }
     .sidebar { position: sticky; top: 18px; align-self: start; }
     .main { min-width: 0; }
     .right { min-width: 0; }

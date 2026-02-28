@@ -1358,6 +1358,69 @@ app.post('/api/pm', (req, res) => {
   res.json({ ok: true, pm: saved });
 });
 
+// Generate to-dos for a PM card using the connected Gateway model.
+const PM_SESSION_KEY = process.env.PM_SESSION_KEY || 'clawdpm';
+app.post('/api/pm/generate-todos', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!gw.connected) return res.status(409).json({ ok: false, error: 'Gateway not connected' });
+
+  const title = String(req.body?.title || '').trim();
+  const body = String(req.body?.body || '').trim();
+  if (!title) return res.status(400).json({ ok: false, error: 'Missing title' });
+
+  const prompt = [
+    'PLAN MODE',
+    'Generate a concise execution checklist for this card goal.',
+    'Rules:',
+    '- Output ONLY a bullet list (one item per line) using "- ".',
+    '- 6 to 14 items.',
+    '- Each item should be an actionable verb phrase.',
+    '',
+    'Card title: ' + title,
+    body ? ('Card details: ' + body) : ''
+  ].filter(Boolean).join('\n');
+
+  try {
+    const runId = 'pm_' + Date.now().toString(16);
+    await gwSendReq('chat.send', {
+      sessionKey: PM_SESSION_KEY,
+      idempotencyKey: runId,
+      message: prompt,
+      deliver: false,
+    });
+
+    const startedAt = Date.now();
+    let lastTxt = '';
+    while (Date.now() - startedAt < 45_000) {
+      await new Promise(r => setTimeout(r, 900));
+      const payload = await gwSendReq('chat.history', { sessionKey: PM_SESSION_KEY, limit: 30 });
+      const messages = payload?.messages;
+      if (!Array.isArray(messages)) continue;
+      const assistants = messages
+        .map(m => (m && m.message) ? m.message : m)
+        .filter(m => m && m.role === 'assistant');
+      const latest = assistants[assistants.length - 1];
+      const txt = extractTextFromGatewayMessage(latest);
+      if (!txt || txt === lastTxt) continue;
+      lastTxt = txt;
+
+      let items = extractChecklist(txt) || [];
+      if (!items.length) {
+        // fallback: take bullet-looking lines
+        items = String(txt).split(/\r?\n/).map(l => l.trim()).filter(l => /^-\s+/.test(l)).map(l => l.replace(/^[-*]\s+/, '').trim());
+      }
+      items = items.filter(Boolean).slice(0, 20);
+
+      const todos = items.map(t => ({ id: 't_' + crypto.randomBytes(8).toString('hex'), text: t, done: false }));
+      return res.json({ ok: true, todos });
+    }
+
+    return res.status(504).json({ ok: false, error: 'Timeout waiting for model' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 app.get('/pm', (req, res) => {
   res.type('text/html; charset=utf-8').send(`<!doctype html>
 <html>
@@ -1391,6 +1454,30 @@ app.get('/pm', (req, res) => {
     .card b{display:block}
     .card p{margin:6px 0 0; color: rgba(231,231,231,.78)}
     .badge{display:inline-flex; padding:3px 8px; border-radius:999px; font-size:11px; border:1px solid rgba(255,255,255,.14); color: rgba(231,231,231,.78); margin-top:8px}
+    .card{cursor:pointer}
+    .card:hover{border-color: rgba(34,198,198,.28)}
+
+    /* Card detail modal */
+    .modal{position:fixed; inset:0; z-index:50; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(0,0,0,.65); backdrop-filter: blur(6px);}
+    .modal.open{display:flex}
+    .box{width:min(920px, 96vw); border:1px solid rgba(255,255,255,.14); border-radius:16px; background:rgba(11,15,26,.96); box-shadow: 0 25px 70px rgba(0,0,0,.55); overflow:hidden}
+    .head{display:flex; justify-content:space-between; gap:10px; align-items:flex-start; padding:14px 14px; border-bottom:1px solid rgba(255,255,255,.10)}
+    .head b{font-size:16px}
+    .close{background:transparent; border:1px solid rgba(255,255,255,.18); color:var(--text); border-radius:12px; padding:8px 10px; cursor:pointer}
+    .body{padding:14px}
+    .grid{display:grid; grid-template-columns: 1fr 1fr; gap:12px}
+    .field label{display:block; font-size:12px; color: var(--muted); margin-bottom:6px}
+    .field input,.field textarea,.field select{width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text); font-size:14px; font-family: inherit}
+    .field textarea{min-height:110px; max-height:260px}
+    .rowbtn{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+    .pillbtn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 999px; padding:8px 10px; cursor:pointer; font-size:12px}
+    .pillbtn:hover{border-color: rgba(34,198,198,.65)}
+
+    .todo{display:grid; grid-template-columns: auto 1fr auto; gap:8px; align-items:center; padding:8px 10px; border:1px solid rgba(255,255,255,.10); border-radius:12px; background: rgba(255,255,255,.03); margin-top:8px}
+    .todo input[type=text]{width:100%; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.10); background:#0d1426; color:var(--text)}
+    .todoBtns{display:flex; gap:6px}
+    .mini{border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); color: rgba(231,231,231,.86); border-radius: 10px; padding:6px 8px; cursor:pointer; font-size:12px}
+    .mini:hover{background: rgba(255,255,255,.08)}
 
     .btn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 12px; padding:8px 10px; cursor:pointer}
     .btn:hover{border-color: rgba(34,198,198,.65)}
@@ -1402,12 +1489,57 @@ app.get('/pm', (req, res) => {
     <div class="top">
       <div>
         <h1>ClawdPM</h1>
-        <div class="muted small">Trello-style project board (v0). Drag/drop next.</div>
+        <div class="muted small">Cards are task-groups. Click a card to generate + manage to-dos.</div>
       </div>
       <button class="btn" id="pmRefresh" type="button">Refresh</button>
     </div>
 
     <div class="board" id="pmBoard"></div>
+  </div>
+
+  <div class="modal" id="cardModal" role="dialog" aria-modal="true" aria-label="Card details">
+    <div class="box">
+      <div class="head">
+        <div>
+          <b id="cm_title">Card</b>
+          <div class="muted small" id="cm_sub">Edit details, generate to-dos, and execute.</div>
+        </div>
+        <button class="close" id="cm_close" type="button">Close</button>
+      </div>
+      <div class="body">
+        <div class="grid">
+          <div class="field">
+            <label>Title</label>
+            <input id="cm_in_title" />
+          </div>
+          <div class="field">
+            <label>Priority</label>
+            <select id="cm_in_pri">
+              <option value="ultra">ultra (teal)</option>
+              <option value="high">high (green)</option>
+              <option value="normal">normal (blue)</option>
+              <option value="planning">planning (gray)</option>
+            </select>
+          </div>
+          <div class="field" style="grid-column: 1 / span 2;">
+            <label>Description</label>
+            <textarea id="cm_in_body"></textarea>
+          </div>
+        </div>
+
+        <div class="rowbtn" style="margin-top:12px; justify-content:space-between;">
+          <div class="rowbtn">
+            <button class="pillbtn" id="cm_generate" type="button">Generate To‑Dos</button>
+            <button class="pillbtn" id="cm_addtodo" type="button">+ To‑Do</button>
+          </div>
+          <button class="pillbtn" id="cm_save" type="button">Save</button>
+        </div>
+
+        <div style="margin-top:12px;" class="muted small">To‑Dos</div>
+        <div id="cm_todos"></div>
+        <div class="muted small" id="cm_msg" style="margin-top:10px;"></div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -1417,6 +1549,214 @@ app.get('/pm', (req, res) => {
       : ('c_' + Math.random().toString(16).slice(2) + Date.now().toString(16));
 
     let PM = null;
+    let ACTIVE = null; // { colId, cardId }
+
+    function priClass(p){
+      const v = String(p||'planning').toLowerCase();
+      if (v === 'ultra') return 'pri-ultra';
+      if (v === 'high') return 'pri-high';
+      if (v === 'normal') return 'pri-normal';
+      return 'pri-planning';
+    }
+
+    function findCard(){
+      if (!ACTIVE || !PM) return null;
+      const col = (PM.columns || []).find(c => c && c.id === ACTIVE.colId);
+      if (!col) return null;
+      const card = (col.cards || []).find(c => c && c.id === ACTIVE.cardId);
+      if (!card) return null;
+      return { col, card };
+    }
+
+    const $ = (id) => document.getElementById(id);
+    const modal = $('cardModal');
+    const cmClose = $('cm_close');
+    const cmSave = $('cm_save');
+    const cmGen = $('cm_generate');
+    const cmAdd = $('cm_addtodo');
+    const cmTodos = $('cm_todos');
+    const cmMsg = $('cm_msg');
+
+    function openModal(colId, cardId){
+      ACTIVE = { colId, cardId };
+      const fc = findCard();
+      if (!fc) return;
+      const card = fc.card;
+
+      $('cm_title').textContent = card.title || 'Card';
+      $('cm_in_title').value = card.title || '';
+      $('cm_in_body').value = card.body || '';
+      $('cm_in_pri').value = String(card.priority || 'normal');
+
+      renderTodos();
+      if (cmMsg) cmMsg.textContent = '';
+      if (modal) modal.classList.add('open');
+    }
+
+    function closeModal(){
+      if (modal) modal.classList.remove('open');
+      ACTIVE = null;
+    }
+
+    function ensureTodos(card){
+      if (!Array.isArray(card.todos)) card.todos = [];
+      // migrate old shape if any
+      card.todos = card.todos.map(t => ({
+        id: t.id || rand(),
+        text: String(t.text || '').trim(),
+        done: !!t.done
+      })).filter(t => t.text);
+    }
+
+    function renderTodos(){
+      if (!cmTodos) return;
+      const fc = findCard();
+      if (!fc) { cmTodos.innerHTML = ''; return; }
+      const card = fc.card;
+      ensureTodos(card);
+
+      cmTodos.innerHTML = '';
+      card.todos.forEach((t, i) => {
+        const row = document.createElement('div');
+        row.className = 'todo';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!t.done;
+        cb.addEventListener('change', () => { t.done = cb.checked; });
+
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.value = t.text;
+        inp.addEventListener('input', () => { t.text = inp.value; });
+
+        const btns = document.createElement('div');
+        btns.className = 'todoBtns';
+
+        const up = document.createElement('button');
+        up.className = 'mini';
+        up.type = 'button';
+        up.textContent = '↑';
+        up.title = 'Move up';
+        up.addEventListener('click', () => {
+          if (i <= 0) return;
+          const tmp = card.todos[i-1];
+          card.todos[i-1] = card.todos[i];
+          card.todos[i] = tmp;
+          renderTodos();
+        });
+
+        const dn = document.createElement('button');
+        dn.className = 'mini';
+        dn.type = 'button';
+        dn.textContent = '↓';
+        dn.title = 'Move down';
+        dn.addEventListener('click', () => {
+          if (i >= card.todos.length - 1) return;
+          const tmp = card.todos[i+1];
+          card.todos[i+1] = card.todos[i];
+          card.todos[i] = tmp;
+          renderTodos();
+        });
+
+        const del = document.createElement('button');
+        del.className = 'mini';
+        del.type = 'button';
+        del.textContent = '✕';
+        del.title = 'Delete';
+        del.addEventListener('click', () => {
+          card.todos.splice(i, 1);
+          renderTodos();
+        });
+
+        btns.appendChild(up);
+        btns.appendChild(dn);
+        btns.appendChild(del);
+
+        row.appendChild(cb);
+        row.appendChild(inp);
+        row.appendChild(btns);
+        cmTodos.appendChild(row);
+      });
+
+      if (!card.todos.length) {
+        cmTodos.innerHTML = '<div class="muted small" style="margin-top:8px;">No to-dos yet. Click Generate To‑Dos or + To‑Do.</div>';
+      }
+    }
+
+    async function persist(){
+      await save();
+      await load();
+    }
+
+    async function saveCardEdits(){
+      const fc = findCard();
+      if (!fc) return;
+      const card = fc.card;
+      card.title = $('cm_in_title').value.trim();
+      card.body = $('cm_in_body').value.trim();
+      card.priority = $('cm_in_pri').value;
+      ensureTodos(card);
+      // prune blank todos
+      card.todos = card.todos.filter(t => String(t.text||'').trim());
+      if (cmMsg) cmMsg.textContent = 'Saving…';
+      await persist();
+      if (cmMsg) cmMsg.textContent = 'Saved.';
+      setTimeout(() => { if (cmMsg) cmMsg.textContent = ''; }, 900);
+    }
+
+    async function addTodo(){
+      const fc = findCard();
+      if (!fc) return;
+      const card = fc.card;
+      ensureTodos(card);
+      card.todos.push({ id: rand(), text: 'New todo', done: false });
+      renderTodos();
+    }
+
+    async function generateTodos(){
+      const fc = findCard();
+      if (!fc) return;
+      const card = fc.card;
+      if (cmMsg) cmMsg.textContent = 'Generating…';
+      try {
+        const res = await fetch('/api/pm/generate-todos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ title: $('cm_in_title').value.trim() || card.title, body: $('cm_in_body').value.trim() || card.body })
+        });
+        const j = await res.json();
+        if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+        const todos = Array.isArray(j.todos) ? j.todos : [];
+        ensureTodos(card);
+        // append generated items as new todos
+        for (const t of todos){
+          if (!t || !t.text) continue;
+          card.todos.push({ id: rand(), text: String(t.text).trim(), done: false });
+        }
+        // de-dupe by text
+        const seen = new Set();
+        card.todos = card.todos.filter(t => {
+          const k = String(t.text||'').trim().toLowerCase();
+          if (!k) return false;
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+        renderTodos();
+        if (cmMsg) cmMsg.textContent = 'Generated.';
+      } catch (e) {
+        if (cmMsg) cmMsg.textContent = 'Generate failed: ' + String(e);
+      }
+    }
+
+    if (cmClose) cmClose.addEventListener('click', closeModal);
+    if (modal) modal.addEventListener('click', (e) => { if (e.target && e.target.id === 'cardModal') closeModal(); });
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+    if (cmSave) cmSave.addEventListener('click', saveCardEdits);
+    if (cmAdd) cmAdd.addEventListener('click', addTodo);
+    if (cmGen) cmGen.addEventListener('click', generateTodos);
 
     function priClass(p){
       const v = String(p||'planning').toLowerCase();
@@ -1461,7 +1801,7 @@ app.get('/pm', (req, res) => {
         const cardsHtml = (col.cards || []).map(c => {
           const pc = priClass(c.priority);
           const badge = '<span class="badge">' + esc(String(c.priority || 'planning')) + '</span>';
-          return '<div class="card ' + pc + '">'
+          return '<div class="card ' + pc + '" data-card-id="' + esc(c.id) + '" data-col-id="' + esc(col.id) + '">'
             + '<b>' + esc(c.title) + '</b>'
             + (c.body ? ('<p>' + esc(c.body) + '</p>') : '')
             + badge
@@ -1483,6 +1823,12 @@ app.get('/pm', (req, res) => {
 
       Array.from(document.querySelectorAll('button[data-add]')).forEach(b => {
         b.addEventListener('click', () => addCard(b.getAttribute('data-add')));
+      });
+
+      Array.from(document.querySelectorAll('.card[data-card-id]')).forEach(c => {
+        c.addEventListener('click', () => {
+          openModal(c.getAttribute('data-col-id'), c.getAttribute('data-card-id'));
+        });
       });
     }
 

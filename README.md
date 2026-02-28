@@ -23,7 +23,9 @@ Clawd Console makes your work **cumulative** by treating the transcript as the t
 
 ## Screenshots
 
-If you want a quick feel for the UI, see the marketing page screenshots:
+![Clawd Console UI](docs/images/console.png)
+
+More screenshots (marketing site):
 - https://clawdconsole.com/
 
 ## Quick start (local)

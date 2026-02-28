@@ -64,6 +64,77 @@
     thinkingEl.classList.toggle('is-thinking', isThinking);
   }
 
+  // --- ClawdApps tabs (sidebar) ---
+  const tabPM = document.getElementById('tabPM');
+  const tabRepo = document.getElementById('tabRepo');
+  const tabPub = document.getElementById('tabPub');
+  const tabBuild = document.getElementById('tabBuild');
+
+  const panelPM = document.getElementById('panelPM');
+  const panelRepo = document.getElementById('panelRepo');
+  const panelPub = document.getElementById('panelPub');
+  const panelBuild = document.getElementById('panelBuild');
+
+  const repoList = document.getElementById('repoList');
+  const repoRefresh = document.getElementById('repoRefresh');
+
+  function setAppTab(which){
+    const map = [
+      { k: 'pm', tab: tabPM, panel: panelPM },
+      { k: 'repo', tab: tabRepo, panel: panelRepo },
+      { k: 'pub', tab: tabPub, panel: panelPub },
+      { k: 'build', tab: tabBuild, panel: panelBuild },
+    ];
+
+    for (const t of map){
+      const on = t.k === which;
+      if (t.panel) t.panel.style.display = on ? 'flex' : 'none';
+      if (t.tab) {
+        t.tab.style.borderColor = on ? 'rgba(34,198,198,.55)' : 'rgba(231,231,231,0.12)';
+        t.tab.style.color = on ? 'rgba(231,231,231,0.92)' : 'rgba(231,231,231,0.72)';
+      }
+    }
+  }
+
+  async function loadRepoCommits(){
+    if (!repoList) return;
+    repoList.innerHTML = '<div class="muted">Loading…</div>';
+    try {
+      const res = await fetch(apiUrl('/api/repo/commits?limit=60'), { credentials: 'include', cache: 'no-store' });
+      const j = await res.json();
+      const commits = (j && j.ok && Array.isArray(j.commits)) ? j.commits : [];
+      if (!commits.length) {
+        repoList.innerHTML = '<div class="muted">No commits found.</div>';
+        return;
+      }
+
+      repoList.innerHTML = commits.map(c => {
+        const short = esc((c.hash || '').slice(0, 7));
+        const msg = esc(c.subject || '');
+        const when = esc(c.date || '');
+        const ref = c.refs ? ('<span class="muted">(' + esc(c.refs) + ')</span>') : '';
+        return '<div style="padding:8px 6px; border-bottom:1px solid rgba(255,255,255,0.08)">' +
+          '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">' +
+            '<div><code>' + short + '</code> ' + ref + '</div>' +
+            '<div class="muted">' + when + '</div>' +
+          '</div>' +
+          '<div style="margin-top:6px;">' + msg + '</div>' +
+        '</div>';
+      }).join('');
+    } catch (e) {
+      repoList.innerHTML = '<div class="muted">Failed to load commits.</div>';
+    }
+  }
+
+  if (tabPM) tabPM.addEventListener('click', () => setAppTab('pm'));
+  if (tabRepo) tabRepo.addEventListener('click', () => { setAppTab('repo'); loadRepoCommits(); });
+  if (tabPub) tabPub.addEventListener('click', () => setAppTab('pub'));
+  if (tabBuild) tabBuild.addEventListener('click', () => setAppTab('build'));
+  if (repoRefresh) repoRefresh.addEventListener('click', loadRepoCommits);
+
+  // default
+  setAppTab('pm');
+
   // --- Worklog filters ---
   const wlFilterBtns = Array.from(document.querySelectorAll('.wlbtn[data-filter]'));
   const wlRecentBtn = document.getElementById('wlRecent');

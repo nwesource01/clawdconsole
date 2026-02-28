@@ -111,6 +111,29 @@ Optional:
 
 Payload is intentionally boring: random install id, timestamps, version/build, and platform (no transcript, no messages).
 
+## FAQ
+
+### How much will Clawd Console cost?
+
+**Free+**.
+
+- **Free (self-host):** the open-source Console (this repo).
+- **Hosted (paid, coming soon):** we run it for you + deliver the full module stack.
+
+Why Free+? Because the *default* agent dashboards are fine for quick chat, but they’re not an operator cockpit:
+- no durable **ClawdScript** retention/search trail
+- no **image paste / attachment trail** that becomes part of the work record
+- no persistent **ClawdList** execution state
+
+### What modules will the paid Hosted Clawd Console come with?
+
+- **ClawdScript** — persistent transcript + artifacts
+- **ClawdList** — execution checklists that persist until complete
+- **ClawdPM** — project/workspace layer (visibility: blocked vs done)
+- **ClawdPub** — versioned websites/sales pages with release workflow
+- **ClawdJobs** — scheduled runs, digests, reminders
+- **ClawdBuild** — iterative app build pipeline (spec → tasks → code → release)
+
 ## Roadmap (near-term)
 
 - Better ClawdList extraction (punctuation-aware, trained on completed lists)

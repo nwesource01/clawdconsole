@@ -1830,6 +1830,20 @@ app.get('/', (req, res) => {
     .row { display:flex; gap: 10px; align-items:center; flex-wrap: wrap; }
     button { padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: #1a2744; color: var(--text); cursor: pointer; }
     button:hover { background: #22335a; }
+    .qbtn{padding:7px 10px; border-radius: 999px; border:1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.04); color: rgba(231,231,231,0.86); font-size:12px; cursor:pointer}
+    .qbtn:hover{background: rgba(255,255,255,0.08)}
+
+    /* lightweight modal (reuses .cc_modal markup) */
+    .cc_modal{position:fixed; inset:0; z-index:80; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(0,0,0,.65); backdrop-filter: blur(6px);}
+    .cc_modal.open{display:flex}
+    .cc_box{border:1px solid rgba(255,255,255,.14); border-radius:16px; background:rgba(11,15,26,.94); box-shadow: 0 25px 70px rgba(0,0,0,.55); overflow:hidden}
+    .cc_right{padding:16px}
+    .cc_head{display:flex; align-items:flex-start; justify-content:space-between; gap:10px}
+    .cc_close{background:transparent; border:1px solid rgba(255,255,255,.18); color:var(--text); border-radius:12px; padding:8px 10px; cursor:pointer}
+    .cc_form{margin-top:12px; display:grid; gap:10px}
+    .cc_form input{width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text)}
+    .cc_row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+    .cc_msg{font-size:12px; color:rgba(231,231,231,0.72)}
 
     .wlbtn { padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.04); font-size: 12px; }
     .wlbtn:hover { background: rgba(255,255,255,0.08); }
@@ -2047,9 +2061,12 @@ app.get('/', (req, res) => {
         </div>
 
         <div id="quickbar" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; justify-content:flex-start; align-items:center;">
-          <button id="btnReviewRecent" type="button" class="qbtn">Review Recent</button>
-          <button id="btnReviewWeek" type="button" class="qbtn">Review Week</button>
-          <a id="btnAdmin" class="qbtn" href="/adminonly" target="_blank" rel="noopener" title="Admin" style="display:inline-flex; align-items:center; justify-content:center; gap:8px; text-decoration:none;">⚙️</a>
+          <div class="row" id="quickButtons" style="gap: 10px;">
+            <button id="btnReviewRecent" type="button" class="qbtn">Review Recent</button>
+            <button id="btnReviewWeek" type="button" class="qbtn">Review Week</button>
+            <button id="btnAddBtn" type="button" class="qbtn">Add a Button</button>
+            <a id="btnAdmin" class="qbtn" href="/adminonly" target="_blank" rel="noopener" title="Admin" style="display:inline-flex; align-items:center; justify-content:center; gap:8px; text-decoration:none;">⚙️</a>
+          </div>
         </div>
 
         <div id="pasteHint">Tip: click the textarea, then paste a screenshot. It will upload automatically and attach to your message.</div>
@@ -2098,6 +2115,31 @@ app.get('/', (req, res) => {
           <button id="wlRecent" type="button" class="wlbtn">Recent</button>
         </div>
         <div id="worklog" style="margin-top:10px; background: var(--card2); border: 1px solid var(--border); border-radius: 12px; padding: 10px; height: 520px; overflow:auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Button modal -->
+  <div class="cc_modal" id="ab_modal" aria-label="Add a button" role="dialog" aria-modal="true">
+    <div class="cc_box" style="width:min(760px, 96vw);">
+      <div class="cc_right" style="padding:16px;">
+        <div class="cc_head">
+          <div>
+            <b>Add a Button</b>
+            <div class="muted">Create a quick-action that sends chat text.</div>
+          </div>
+          <button class="cc_close" id="ab_close" type="button">Close</button>
+        </div>
+
+        <form class="cc_form" id="ab_form" style="margin-top:12px;">
+          <input id="ab_label" name="label" placeholder="Button label" required />
+          <textarea id="ab_text" name="text" placeholder="Chat text this button should send" style="width:100%; min-height: 120px; max-height: 260px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text); font-size:14px; font-family: inherit;" required></textarea>
+          <div class="cc_row">
+            <button class="qbtn" type="submit">Save</button>
+            <button class="qbtn" id="ab_cancel" type="button">Cancel</button>
+          </div>
+          <div class="cc_msg" id="ab_msg"></div>
+        </form>
       </div>
     </div>
   </div>

@@ -135,6 +135,95 @@
   // default
   setAppTab('pm');
 
+  // --- Custom quick buttons (Add a Button) ---
+  const btnAddBtn = document.getElementById('btnAddBtn');
+  const abModal = document.getElementById('ab_modal');
+  const abClose = document.getElementById('ab_close');
+  const abCancel = document.getElementById('ab_cancel');
+  const abForm = document.getElementById('ab_form');
+  const abLabel = document.getElementById('ab_label');
+  const abText = document.getElementById('ab_text');
+  const abMsg = document.getElementById('ab_msg');
+
+  const CUSTOM_BTNS_KEY = 'cc_custom_buttons_v1';
+
+  function readCustomButtons(){
+    try {
+      const j = JSON.parse(localStorage.getItem(CUSTOM_BTNS_KEY) || '[]');
+      return Array.isArray(j) ? j : [];
+    } catch { return []; }
+  }
+  function writeCustomButtons(arr){
+    try { localStorage.setItem(CUSTOM_BTNS_KEY, JSON.stringify(arr || [])); } catch {}
+  }
+
+  function openAddBtn(){
+    if (!abModal) return;
+    abModal.style.display = 'flex';
+    abModal.classList.add('open');
+    if (abMsg) abMsg.textContent = '';
+    if (abLabel) abLabel.value = '';
+    if (abText) abText.value = '';
+    setTimeout(() => abLabel && abLabel.focus(), 50);
+  }
+  function closeAddBtn(){
+    if (!abModal) return;
+    abModal.classList.remove('open');
+    abModal.style.display = 'none';
+  }
+
+  function renderCustomButtons(){
+    const host = document.getElementById('quickButtons');
+    if (!host) return;
+
+    // remove previously-rendered custom
+    Array.from(host.querySelectorAll('button[data-custombtn="1"]')).forEach(el => el.remove());
+
+    const btns = readCustomButtons();
+    // Insert after Review Week (before Add a Button)
+    const anchor = document.getElementById('btnAddBtn');
+
+    for (const b of btns){
+      if (!b || !b.label || !b.text) continue;
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'qbtn';
+      el.setAttribute('data-custombtn', '1');
+      el.textContent = String(b.label).slice(0, 32);
+      el.addEventListener('click', () => {
+        sendMessageWsOrHttp(String(b.text), []).then(refresh);
+      });
+      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(el, anchor);
+      else host.appendChild(el);
+    }
+  }
+
+  if (btnAddBtn) btnAddBtn.addEventListener('click', openAddBtn);
+  if (abClose) abClose.addEventListener('click', closeAddBtn);
+  if (abCancel) abCancel.addEventListener('click', closeAddBtn);
+  if (abModal) abModal.addEventListener('click', (e) => { if (e.target && e.target.id === 'ab_modal') closeAddBtn(); });
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAddBtn(); });
+
+  if (abForm) {
+    abForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const label = (abLabel && abLabel.value || '').trim();
+      const text = (abText && abText.value || '').trim();
+      if (!label || !text) {
+        if (abMsg) abMsg.textContent = 'Please fill out both fields.';
+        return;
+      }
+      const btns = readCustomButtons();
+      btns.push({ label, text, createdAt: new Date().toISOString() });
+      writeCustomButtons(btns.slice(-20));
+      renderCustomButtons();
+      closeAddBtn();
+    });
+  }
+
+  // initial render
+  renderCustomButtons();
+
   // --- Worklog filters ---
   const wlFilterBtns = Array.from(document.querySelectorAll('.wlbtn[data-filter]'));
   const wlRecentBtn = document.getElementById('wlRecent');

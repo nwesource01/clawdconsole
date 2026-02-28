@@ -25,6 +25,8 @@ Clawd Console makes your work **cumulative** by treating the transcript as the t
 
 ![Clawd Console UI](docs/images/console.png)
 
+![ClawdScript (Transcript)](docs/images/clawdscript.png)
+
 More screenshots (marketing site):
 - https://clawdconsole.com/
 

@@ -1032,6 +1032,99 @@
   }
 
   // WebSocket for real-time updates (best)
+  // Leader election (per-browser) so multiple tabs don't open multiple WS connections.
+  // Server also enforces a max connection cap to allow (e.g.) 2 devices total.
+  const TAB_ID = 'tab_' + Math.random().toString(16).slice(2) + '_' + Date.now().toString(16);
+  const BC_KEY = 'cc_ws_leader_v1';
+  const bc = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel(BC_KEY) : null;
+  const LS_LEADER_KEY = 'cc_ws_leader_id_v1';
+  const LS_LEADER_TS_KEY = 'cc_ws_leader_ts_v1';
+  const LEADER_TTL_MS = 3500;
+  let isLeader = false;
+  let leaderTimer = null;
+
+  function now(){ return Date.now(); }
+
+  function getLeader(){
+    try {
+      const id = localStorage.getItem(LS_LEADER_KEY);
+      const ts = Number(localStorage.getItem(LS_LEADER_TS_KEY) || '0');
+      if (id && ts && (now() - ts) < LEADER_TTL_MS) return { id, ts };
+    } catch {}
+    return null;
+  }
+
+  function becomeLeader(){
+    isLeader = true;
+    try {
+      localStorage.setItem(LS_LEADER_KEY, TAB_ID);
+      localStorage.setItem(LS_LEADER_TS_KEY, String(now()));
+    } catch {}
+    if (bc) bc.postMessage({ type: 'leader', id: TAB_ID, ts: now() });
+
+    if (leaderTimer) clearInterval(leaderTimer);
+    leaderTimer = setInterval(() => {
+      try {
+        localStorage.setItem(LS_LEADER_KEY, TAB_ID);
+        localStorage.setItem(LS_LEADER_TS_KEY, String(now()));
+      } catch {}
+      if (bc) bc.postMessage({ type: 'heartbeat', id: TAB_ID, ts: now() });
+    }, 1200);
+  }
+
+  function resignLeader(){
+    isLeader = false;
+    if (leaderTimer) { clearInterval(leaderTimer); leaderTimer = null; }
+    // best-effort clear if we own it
+    try {
+      const cur = localStorage.getItem(LS_LEADER_KEY);
+      if (cur === TAB_ID) {
+        localStorage.removeItem(LS_LEADER_KEY);
+        localStorage.removeItem(LS_LEADER_TS_KEY);
+      }
+    } catch {}
+    if (bc) bc.postMessage({ type: 'resign', id: TAB_ID, ts: now() });
+  }
+
+  function tryElectLeader(){
+    const cur = getLeader();
+    if (!cur || cur.id === TAB_ID) {
+      becomeLeader();
+      return;
+    }
+    isLeader = false;
+  }
+
+  if (bc) {
+    bc.onmessage = (ev) => {
+      const m = ev && ev.data;
+      if (!m || !m.type) return;
+      // Followers: when leader gets WS events, it broadcasts a nudge.
+      if (!isLeader && (m.type === 'nudge')) {
+        refresh();
+        refreshWorklog();
+        return;
+      }
+      // If the current leader resigns or expires, try to take over.
+      if (m.type === 'resign') setTimeout(tryElectLeader, 30);
+    };
+  }
+
+  window.addEventListener('storage', (e) => {
+    if (e && (e.key === LS_LEADER_KEY || e.key === LS_LEADER_TS_KEY)) {
+      // leader changed/expired
+      setTimeout(tryElectLeader, 20);
+    }
+  });
+
+  // elect on load
+  tryElectLeader();
+
+  window.addEventListener('beforeunload', () => {
+    if (isLeader) resignLeader();
+    try { bc && bc.close && bc.close(); } catch {}
+  });
+
   let ws;
   function wsUrl() {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1039,6 +1132,8 @@
   }
 
   function connectWs() {
+    if (!isLeader) return; // only leader tab opens the WS
+
     try {
       ws = new WebSocket(wsUrl());
     } catch (e) {
@@ -1057,6 +1152,7 @@
       if (j.type === 'message' && j.message) {
         refresh();
         refreshWorklog();
+        if (bc) bc.postMessage({ type: 'nudge', from: TAB_ID, t: now() });
         // If a bot message arrives, clear thinking
         if (typeof j.message.id === 'string' && j.message.id.startsWith('bot_')) {
           setThinking('Idle');
@@ -1065,14 +1161,17 @@
       }
       if (j.type === 'worklog') {
         refreshWorklog();
+        if (bc) bc.postMessage({ type: 'nudge', from: TAB_ID, t: now() });
       }
       if (j.type === 'de_state') {
         deState = j.state || deState;
         deActive = j.active || deActive;
         renderDE();
+        if (bc) bc.postMessage({ type: 'nudge', from: TAB_ID, t: now() });
       }
       if (j.type === 'scheduled') {
         refreshScheduled();
+        if (bc) bc.postMessage({ type: 'nudge', from: TAB_ID, t: now() });
       }
       if (j.type === 'run' && j.state) {
         if (j.state.inFlight) setThinking('Thinking…');
@@ -1081,7 +1180,14 @@
 
     ws.addEventListener('close', (ev) => {
       dbg('ws closed: ' + ev.code);
-      setTimeout(connectWs, 1500);
+      // 4429 = server cap hit. Don't spin reconnect loops.
+      if (ev && ev.code === 4429) {
+        dbg('ws closed: too many consoles open (cap). This tab is in follower mode.');
+        resignLeader();
+        return;
+      }
+      // If we are still leader, try to reconnect. If not, just idle.
+      if (isLeader) setTimeout(connectWs, 1500);
     });
 
     ws.addEventListener('error', () => {

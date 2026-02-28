@@ -2802,6 +2802,13 @@ wss.on('connection', (ws, req) => {
     return;
   }
 
+  // Hard cap concurrent WS connections. Keeps multiple open consoles from fighting the same session.
+  const MAX_WS_CLIENTS = Number(process.env.CONSOLE_MAX_WS_CLIENTS || 2);
+  if (wsClients.size >= MAX_WS_CLIENTS) {
+    try { ws.close(4429, 'too many connections'); } catch {}
+    return;
+  }
+
   wsClients.add(ws);
   logWork('ws.connected', { clients: wsClients.size });
   ws.send(JSON.stringify({ type: 'hello', ok: true }));

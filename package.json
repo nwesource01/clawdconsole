@@ -1,0 +1,28 @@
+{
+  "name": "clawdconsole",
+  "version": "0.1.0",
+  "description": "Operator cockpit for Clawdbot/Moltbot: ClawdScript transcript + ClawdList execution checklists.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "clawd",
+    "clawdbot",
+    "moltbot",
+    "agent",
+    "console",
+    "transcript",
+    "workflow"
+  ],
+  "author": "NWESource",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "basic-auth": "^2.0.1",
+    "express": "^5.2.1",
+    "helmet": "^8.1.0",
+    "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "ws": "^8.19.0"
+  }
+}

@@ -9,9 +9,17 @@ const basicAuth = require('basic-auth');
 const http = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
 const crypto = require('crypto');
+const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-02-28.17';
+const BUILD = '2026-02-28.18';
+
+// Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
+const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
+const TELEMETRY_BASE_URL = (process.env.TELEMETRY_BASE_URL || 'https://app.clawdconsole.com').replace(/\/$/, '');
+const TELEMETRY_INSTALL_URL = process.env.TELEMETRY_INSTALL_URL || (TELEMETRY_BASE_URL + '/api/telemetry/v1/install');
+const TELEMETRY_DAILY_URL = process.env.TELEMETRY_DAILY_URL || (TELEMETRY_BASE_URL + '/api/telemetry/v1/daily');
+const TELEMETRY_INTERVAL_HOURS = Math.max(1, Number(process.env.TELEMETRY_INTERVAL_HOURS || 24));
 
 // Clawdbot Gateway (for agent bridge)
 const GATEWAY_WS_URL = process.env.GATEWAY_WS_URL || 'ws://127.0.0.1:18789';
@@ -24,6 +32,13 @@ const WORK_FILE = path.join(DATA_DIR, 'worklog.jsonl');
 const TRANSCRIPT_FILE = path.join(DATA_DIR, 'transcript.jsonl');
 // Scheduled reports log
 const SCHED_FILE = path.join(DATA_DIR, 'scheduled.jsonl');
+
+// Telemetry local state
+const INSTALL_FILE = path.join(DATA_DIR, 'install.json');
+const TELEMETRY_STATE_FILE = path.join(DATA_DIR, 'telemetry-state.json');
+
+// Telemetry collector logs (only used on the hosted collector)
+const TELEMETRY_FILE = path.join(DATA_DIR, 'telemetry.jsonl');
 
 const AUTH_USER = process.env.AUTH_USER || 'nwesource';
 const AUTH_PASS = process.env.AUTH_PASS || '';
@@ -53,6 +68,42 @@ function ensureDir(p) {
 }
 ensureDir(DATA_DIR);
 ensureDir(UPLOAD_DIR);
+
+function readJson(filePath, fallback = null) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+function writeJson(filePath, obj) {
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(obj, null, 2), 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ensureInstallId() {
+  const cur = readJson(INSTALL_FILE, null);
+  if (cur && cur.installId) return cur;
+  const installId = (crypto.randomUUID ? crypto.randomUUID() : ('iid_' + crypto.randomBytes(16).toString('hex')));
+  const out = { installId, createdAt: new Date().toISOString() };
+  writeJson(INSTALL_FILE, out);
+  return out;
+}
+
+function readTelemetryState() {
+  return readJson(TELEMETRY_STATE_FILE, { lastInstallAt: null, lastDailyAt: null, lastErr: null });
+}
+function writeTelemetryState(patch) {
+  const cur = readTelemetryState();
+  const next = { ...cur, ...patch };
+  writeJson(TELEMETRY_STATE_FILE, next);
+  return next;
+}
 
 function loadGatewayToken() {
   // Best-effort: read from Clawdbot config file on this box.
@@ -185,6 +236,9 @@ app.use((req, res, next) => {
   if (req.path === '/healthz') return next();
   if (req.path === '/demo' || req.path.startsWith('/demo/')) return next();
   if (req.path === '/favicon.ico' || req.path.startsWith('/static/')) return next();
+
+  // allow telemetry collector endpoints without auth (hosted collector)
+  if (req.path.startsWith('/api/telemetry/v1/')) return next();
 
   // 1) session cookie
   const cookies = parseCookies(req);
@@ -531,6 +585,87 @@ app.post('/api/adoption', (req, res) => {
   if (!saved) return res.status(500).json({ ok: false, error: 'write_failed' });
   logWork('adoption.updated', saved);
   res.json({ ok: true, adoption: saved });
+});
+
+// --- Telemetry collector (hosted) ---
+function appendTelemetry(kind, payload, req){
+  try {
+    const rec = {
+      ts: new Date().toISOString(),
+      kind,
+      installId: payload && typeof payload.installId === 'string' ? payload.installId : null,
+      createdAt: payload && payload.createdAt ? payload.createdAt : null,
+      appVersion: payload && payload.appVersion ? payload.appVersion : null,
+      build: payload && payload.build ? payload.build : null,
+      platform: payload && payload.platform ? payload.platform : null,
+      // do not persist IP/user-agent beyond what your reverse-proxy logs already have
+    };
+    fs.appendFileSync(TELEMETRY_FILE, JSON.stringify(rec) + '\n', 'utf8');
+    logWork('telemetry.received', { kind, installId: rec.installId });
+  } catch {}
+}
+
+const telemetrySeen = new Map(); // key -> lastTsMs (tiny in-memory rate limit)
+function telemetryRateLimit(req){
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString().split(',')[0].trim();
+  const key = ip + '|' + String(req.path || '');
+  const now = Date.now();
+  const last = telemetrySeen.get(key) || 0;
+  if (now - last < 2000) return false;
+  telemetrySeen.set(key, now);
+  return true;
+}
+
+app.post('/api/telemetry/v1/install', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!telemetryRateLimit(req)) return res.status(429).json({ ok: false, error: 'rate_limited' });
+  appendTelemetry('install', req.body || {}, req);
+  res.json({ ok: true });
+});
+
+app.post('/api/telemetry/v1/daily', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!telemetryRateLimit(req)) return res.status(429).json({ ok: false, error: 'rate_limited' });
+  appendTelemetry('daily', req.body || {}, req);
+  res.json({ ok: true });
+});
+
+app.get('/api/telemetry/v1/stats', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  // keep this behind auth by not adding it to the auth bypass list
+  // (it will require auth because it doesn't start with /api/telemetry/v1/ in the bypass? It does.
+  // To keep it protected, we won't ship this route unauthenticated; admin can read file locally.)
+  res.status(404).json({ ok: false, error: 'not_enabled' });
+});
+
+app.get('/api/repo/commits', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit || 60)));
+  const repoDir = __dirname; // this console repo
+
+  try {
+    const args = ['-C', repoDir, 'log', '--date=iso', `-n`, String(limit), '--pretty=format:%H|%ad|%D|%s'];
+    const out = await new Promise((resolve, reject) => {
+      execFile('git', args, { timeout: 5000 }, (err, stdout, stderr) => {
+        if (err) return reject(new Error(String(stderr || err.message || err)));
+        resolve(String(stdout || ''));
+      });
+    });
+
+    const commits = out.split('\n').map(l => l.trim()).filter(Boolean).map(line => {
+      const [hash, date, refs, subject] = line.split('|');
+      return {
+        hash: hash || '',
+        date: (date || '').replace(' +0000', 'Z'),
+        refs: (refs || '').trim(),
+        subject: subject || ''
+      };
+    });
+
+    res.json({ ok: true, repoDir, commits });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 app.get('/api/build', (req, res) => {
@@ -1057,7 +1192,7 @@ app.get('/transcript', (req, res) => {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Claw Transcript</title>
+  <title>ClawdScript</title>
   <style>
     body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: #0b1020; color: #e8eefc; margin: 0; }
     a { color: #9ad0ff; }
@@ -1086,9 +1221,21 @@ app.get('/transcript', (req, res) => {
 <body>
   <div class="wrap">
     <div class="top">
-      <div>
-        <div style="font-weight:800; font-size: 18px;">Claw Transcript</div>
-        <div class="muted">Build: <span id="t_build">(loading)</span> • Raw: <a href="/api/transcript/raw" target="_blank" rel="noopener">download jsonl</a></div>
+      <div class="row" style="justify-content: space-between; width: 100%;">
+        <div class="row" style="gap:10px; align-items:center;">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(34,198,198,.10);border:1px solid rgba(34,198,198,.35);display:flex;align-items:center;justify-content:center;">
+            <svg width="24" height="24" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Clawd Console">
+              <path d="M46 18H26c-4.4 0-8 3.6-8 8v12c0 4.4 3.6 8 8 8H46" stroke="rgba(34,198,198,.95)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+              <rect x="26" y="23" width="16" height="8" rx="4" fill="rgba(34,198,198,.22)" stroke="rgba(34,198,198,.55)" stroke-width="2"/>
+              <rect x="26" y="35" width="16" height="8" rx="4" fill="rgba(34,198,198,.12)" stroke="rgba(34,198,198,.40)" stroke-width="2"/>
+              <path d="M46 28l8 4-8 4" stroke="rgba(34,198,198,.95)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div>
+            <div style="font-weight:900; font-size: 18px;">ClawdScript</div>
+            <div class="muted">Build: <span id="t_build">(loading)</span> • Raw: <a href="/api/transcript/raw" target="_blank" rel="noopener">download jsonl</a></div>
+          </div>
+        </div>
       </div>
       <div class="row" style="gap:8px; justify-content: space-between; width: 100%;">
         <div class="row" style="gap:8px;">
@@ -1767,10 +1914,10 @@ app.get('/', (req, res) => {
 
       <div class="card" style="margin-top: 14px;">
         <div style="font-weight:700; margin-bottom: 8px;">ClawdApps</div>
-        <div class="muted" style="margin-bottom: 10px;">Clawd modules</div>
 
         <div class="row" style="gap: 8px; margin-bottom: 10px;">
           <button id="tabPM" type="button" class="pill" style="cursor:pointer;">ClawdPM</button>
+          <button id="tabRepo" type="button" class="pill" style="cursor:pointer;">ClawdRepo</button>
           <button id="tabPub" type="button" class="pill" style="cursor:pointer;">ClawdPub</button>
           <button id="tabBuild" type="button" class="pill" style="cursor:pointer;">ClawdBuild</button>
         </div>
@@ -1778,11 +1925,7 @@ app.get('/', (req, res) => {
         <div id="panelPM" style="display:flex; flex-direction:column; gap: 10px;">
           <div style="display:flex; flex-direction:column; gap: 8px;">
             <div class="muted">Quick links</div>
-            <a href="https://docs.google.com/document/d/e/2PACX-1vTEPFFW3_wz8p5gm3Y4iRereWY9Zy_8vLyIWFDFECQdFJh20C7MbzgjWQcrjLW8EvjLqgVhcjf1sPtT/pub" target="_blank" rel="noopener">Clawdio Planning (published doc)</a>
-            <a href="https://mail.google.com/" target="_blank" rel="noopener">Gmail</a>
-            <a href="https://drive.google.com/drive/my-drive" target="_blank" rel="noopener">Drive</a>
-            <a href="/transcript" target="_blank" rel="noopener">Claw Transcript</a>
-            <a href="https://clawdio.nwesource.com/new/" target="_blank" rel="noopener">Box HTML test (/new)</a>
+            <a href="https://clawdconsole.com/" target="_blank" rel="noopener">Clawd Console</a>
           </div>
 
           <div class="muted" style="margin-top:2px;">(ClawdPM panel will evolve into projects/workspaces/roles. For now: quick links.)</div>
@@ -1795,6 +1938,18 @@ app.get('/', (req, res) => {
             <a href="/clawdpub/sop" target="_blank" rel="noopener">Open full SOP →</a>
             <span class="muted">(editable file-backed)</span>
           </div>
+        </div>
+
+        <div id="panelRepo" style="display:none; flex-direction:column; gap: 10px;">
+          <div class="row" style="justify-content:space-between; align-items:center;">
+            <div class="muted">ClawdRepo — commits (this project)</div>
+            <div class="row" style="gap:8px;">
+              <a class="pill" id="repoOpen" href="https://github.com/nwesource01/clawdconsole" target="_blank" rel="noopener" style="cursor:pointer; text-decoration:none;">GitHub</a>
+              <button class="pill" id="repoRefresh" type="button" style="cursor:pointer;">Refresh</button>
+            </div>
+          </div>
+          <div class="muted">Local repo: <code>${__dirname}</code></div>
+          <div id="repoList" style="margin-top:6px; background: rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px; max-height: 360px; overflow:auto;"></div>
         </div>
 
         <div id="panelBuild" style="display:none; flex-direction:column; gap: 10px;">
@@ -2008,8 +2163,85 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+async function telemetryPost(url, body){
+  // Node 18+ has global fetch.
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const ok = res && res.ok;
+    return { ok, status: res ? res.status : 0 };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  } finally {
+    clearTimeout(to);
+  }
+}
+
+async function runTelemetry(kind){
+  if (!TELEMETRY_OPT_IN) return;
+
+  const install = ensureInstallId();
+  const payload = {
+    installId: install.installId,
+    createdAt: install.createdAt,
+    appVersion: (function(){ try { return require('./package.json').version; } catch { return null; } })(),
+    build: BUILD,
+    platform: {
+      node: process.version,
+      os: process.platform,
+      arch: process.arch,
+    }
+  };
+
+  if (kind === 'install') {
+    const r = await telemetryPost(TELEMETRY_INSTALL_URL, payload);
+    if (r.ok) writeTelemetryState({ lastInstallAt: new Date().toISOString(), lastErr: null });
+    else writeTelemetryState({ lastErr: 'install:' + (r.error || r.status || 'failed') });
+    return;
+  }
+
+  if (kind === 'daily') {
+    const r = await telemetryPost(TELEMETRY_DAILY_URL, payload);
+    if (r.ok) writeTelemetryState({ lastDailyAt: new Date().toISOString(), lastErr: null });
+    else writeTelemetryState({ lastErr: 'daily:' + (r.error || r.status || 'failed') });
+  }
+}
+
+function startTelemetry(){
+  if (!TELEMETRY_OPT_IN) return;
+  // fire install once per process start if never succeeded
+  const st = readTelemetryState();
+  if (!st.lastInstallAt) {
+    runTelemetry('install');
+  }
+
+  // Daily heartbeat
+  const intervalMs = TELEMETRY_INTERVAL_HOURS * 60 * 60 * 1000;
+  setInterval(() => {
+    runTelemetry('daily');
+  }, intervalMs).unref?.();
+
+  // also send one daily quickly on boot if last daily is old
+  try {
+    const last = st.lastDailyAt ? Date.parse(st.lastDailyAt) : 0;
+    if (!last || (Date.now() - last) > (intervalMs * 0.9)) {
+      setTimeout(() => runTelemetry('daily'), 15_000).unref?.();
+    }
+  } catch {}
+
+  logWork('telemetry.opt_in', { base: TELEMETRY_BASE_URL, installUrl: TELEMETRY_INSTALL_URL, dailyUrl: TELEMETRY_DAILY_URL });
+}
+
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Clawd Console listening on http://127.0.0.1:${PORT}`);
   // Start gateway bridge
   connectGateway();
+  // Start opt-in telemetry pinger
+  startTelemetry();
 });

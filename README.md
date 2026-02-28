@@ -88,6 +88,29 @@ All files live under `DATA_DIR`:
 - Set `AUTH_PASS`.
 - Treat `DATA_DIR` as sensitive (it contains transcripts + attachments).
 
+## Opt-in telemetry (install + daily)
+
+By default, Clawd Console **does not** send any telemetry.
+
+If you want to help track ecosystem adoption, you can opt in to a minimal ping:
+
+- One ping on install / first successful run
+- One ping daily (configurable)
+
+Enable with env vars:
+
+```bash
+TELEMETRY_OPT_IN=1 \
+TELEMETRY_BASE_URL=https://app.clawdconsole.com \
+node index.js
+```
+
+Optional:
+- `TELEMETRY_INSTALL_URL` / `TELEMETRY_DAILY_URL`
+- `TELEMETRY_INTERVAL_HOURS` (default `24`)
+
+Payload is intentionally boring: random install id, timestamps, version/build, and platform (no transcript, no messages).
+
 ## Roadmap (near-term)
 
 - Better ClawdList extraction (punctuation-aware, trained on completed lists)

@@ -720,6 +720,83 @@
     return (el.scrollHeight - (el.scrollTop + el.clientHeight)) < thresholdPx;
   }
 
+  function renderRichText(raw){
+    const s = String(raw || '').replace(/\r\n/g, '\n');
+
+    // Split on fenced code blocks ```...```
+    const parts = s.split(/```/);
+    let html = '';
+
+    function inlineFormat(escaped){
+      // bold **x** and underline __x__
+      return escaped
+        .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+        .replace(/__([^_]+)__/g, '<u>$1</u>');
+    }
+
+    function textBlockToHtml(txt){
+      const lines = String(txt || '').split('\n');
+      let out = '';
+      let inList = false;
+
+      for (const line0 of lines){
+        const line = line0;
+        const m = line.match(/^\s*(?:-|\*)\s+(.*)$/);
+        if (m){
+          if (!inList){ out += '<ul class="md_ul">'; inList = true; }
+          out += '<li>' + inlineFormat(linkify(esc(m[1] || ''))) + '</li>';
+          continue;
+        }
+        if (inList){ out += '</ul>'; inList = false; }
+
+        if (!line.trim()) {
+          out += '<div class="md_sp"></div>';
+        } else {
+          out += '<div class="md_ln">' + inlineFormat(linkify(esc(line))) + '</div>';
+        }
+      }
+      if (inList) out += '</ul>';
+      return out;
+    }
+
+    for (let i = 0; i < parts.length; i++){
+      const chunk = parts[i] || '';
+      if (i % 2 === 1) {
+        // code
+        const codeEsc = esc(chunk.replace(/^\n+|\n+$/g, ''));
+        html += '<div class="md_code">'
+          + '<div class="md_codebar">'
+          +   '<span class="muted">Command</span>'
+          +   '<button type="button" class="md_copy" data-copy="' + codeEsc.replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '">Copy</button>'
+          + '</div>'
+          + '<pre><code>' + codeEsc + '</code></pre>'
+          + '</div>';
+      } else {
+        html += '<div class="md_txt">' + textBlockToHtml(chunk) + '</div>';
+      }
+    }
+
+    return html;
+  }
+
+  function wireCopyButtons(root){
+    Array.from((root || document).querySelectorAll('button.md_copy')).forEach(btn => {
+      if (btn.dataset.wired === '1') return;
+      btn.dataset.wired = '1';
+      btn.addEventListener('click', async () => {
+        const txt = btn.getAttribute('data-copy') || '';
+        try {
+          await navigator.clipboard.writeText(txt.replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>'));
+          btn.textContent = 'Copied';
+          setTimeout(() => (btn.textContent = 'Copy'), 900);
+        } catch {
+          btn.textContent = 'Copy failed';
+          setTimeout(() => (btn.textContent = 'Copy'), 900);
+        }
+      });
+    });
+  }
+
   function renderMessages(msgs) {
     if (!chatlog) return;
 
@@ -738,14 +815,19 @@
         const label = a.filename || a.url;
         return '<span class="chip">📎 <a href="' + a.url + '" target="_blank" rel="noopener">' + esc(label) + '</a></span>';
       }).join('');
+
+      const bodyHtml = isBot ? renderRichText(m.text || '') : ('<div class="md_txt">' + linkify(esc(m.text || '')).replace(/\n/g,'<br>') + '</div>');
+
       el.innerHTML =
         '<div class="meta">' +
           '<div><span class="' + nameClass + '">' + esc(name) + '</span></div>' +
           '<div class="muted">' + esc(fmtTs(m.ts)) + '</div>' +
         '</div>' +
-        '<div class="txt">' + linkify(esc(m.text || '')) + '</div>' +
+        '<div class="txt">' + bodyHtml + '</div>' +
         '<div class="att">' + atts + '</div>';
       chatlog.appendChild(el);
+
+      if (isBot) wireCopyButtons(el);
     }
 
     // Only autoscroll if the user was already near the bottom.

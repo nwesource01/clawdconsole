@@ -1485,10 +1485,19 @@ app.get('/pm', (req, res) => {
     }
 
     async function load(){
-      const res = await fetch('/api/pm', { credentials:'include', cache:'no-store' });
-      const j = await res.json();
-      PM = (j && j.ok && j.pm) ? j.pm : { columns: [] };
-      render();
+      const host = document.getElementById('pmBoard');
+      try {
+        const res = await fetch('/api/pm', { credentials:'include', cache:'no-store' });
+        if (!res.ok) {
+          host.innerHTML = '<div class="muted">Could not load board (' + res.status + '). If you just logged in, hard refresh.</div>';
+          return;
+        }
+        const j = await res.json();
+        PM = (j && j.ok && j.pm) ? j.pm : { columns: [] };
+        render();
+      } catch (e) {
+        host.innerHTML = '<div class="muted">Failed to load board. Hard refresh.</div>';
+      }
     }
 
     document.getElementById('pmRefresh').addEventListener('click', load);
@@ -2093,6 +2102,18 @@ app.get('/', (req, res) => {
     .chip { display:inline-flex; gap: 8px; align-items:center; border:1px solid rgba(255,255,255,0.18); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
     .chip a { color: var(--accent); text-decoration: none; }
 
+    /* Markdown-lite formatting (assistant messages) */
+    .md_ln{margin:0; line-height:1.55}
+    .md_sp{height:10px}
+    .md_ul{margin:10px 0 0 18px; padding:0; color: rgba(231,231,231,0.86)}
+    .md_ul li{margin:6px 0}
+    .md_code{margin-top:10px; border:1px solid rgba(34,198,198,.22); border-radius:12px; background: rgba(0,0,0,.14); overflow:hidden}
+    .md_codebar{display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 10px; border-bottom:1px solid rgba(255,255,255,0.08)}
+    .md_code pre{margin:0; padding:10px; overflow:auto}
+    .md_code code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; color: rgba(231,231,231,.92)}
+    .md_copy{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 999px; padding:6px 10px; cursor:pointer; font-size:12px}
+    .md_copy:hover{border-color: rgba(34,198,198,.65)}
+
     #composer { display:flex; gap: 10px; align-items: flex-end; }
     #msg { width: 100%; min-height: 54px; max-height: 180px; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
     #send { height: 44px; white-space: nowrap; }
@@ -2206,6 +2227,14 @@ app.get('/', (req, res) => {
         <div class="muted" style="margin-bottom: 10px;">Operator heaven: small rules that prevent repeat questions.</div>
 
         <div style="display:flex; flex-direction:column; gap: 10px;">
+          <div class="ruleItem">
+            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
+              <div class="ruleTitle">Formatting: use code blocks for commands</div>
+              <div class="ruleChevron">▸</div>
+            </div>
+            <div class="ruleBody">When I give shell commands, I will put them in fenced code blocks (triple backticks) so the Console renders a copyable command block. This prevents accidental “paste a URL into bash” mistakes and makes commands one-click copy.</div>
+          </div>
+
           <div class="ruleItem">
             <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
               <div class="ruleTitle">URLs: don’t bold links</div>

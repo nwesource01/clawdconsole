@@ -399,6 +399,8 @@ app.get('/name', (req, res) => {
     textarea::placeholder,input::placeholder{color: rgba(231,231,231,.35)}
     textarea{min-height:110px; max-height:300px}
     .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+    .nameGrid{display:grid; grid-template-columns: 1fr 260px; gap:10px; align-items:start}
+    @media (max-width: 820px){ .nameGrid{grid-template-columns: 1fr;} }
     .btn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 12px; padding:10px 12px; cursor:pointer}
     .btn:hover{border-color: rgba(34,198,198,.65)}
     table{width:100%; border-collapse: collapse; margin-top:12px; font-size:13px}
@@ -424,7 +426,7 @@ app.get('/name', (req, res) => {
     </div>
 
     <div class="card">
-      <div class="row" style="align-items:flex-start;">
+      <div class="nameGrid">
         <div style="flex:1; min-width: 260px;">
           <div class="muted" style="margin-bottom:6px;">Business names (one per line)</div>
           <textarea id="names" placeholder=""></textarea>

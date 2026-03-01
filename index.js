@@ -503,15 +503,27 @@ app.get('/name', (req, res) => {
     $('status').textContent = 'Checking ' + domains.length + ' domains…';
     $('out').innerHTML = '';
 
-    const res = await fetch('/api/name/check', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      credentials:'include',
-      body: JSON.stringify({ domains })
-    });
-    const j = await res.json();
+    let res, txt, j;
+    try {
+      res = await fetch('/api/name/check', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'include',
+        body: JSON.stringify({ domains })
+      });
+      txt = await res.text();
+      try { j = JSON.parse(txt); } catch { j = null; }
+    } catch (e) {
+      $('status').textContent = 'Request failed: ' + String(e);
+      return;
+    }
+
     if (!res.ok || !j || !j.ok) {
-      $('status').textContent = 'Failed.';
+      if (res.status === 401) {
+        $('status').innerHTML = 'Auth required. Open <a href="/" style="color:var(--teal)">/</a> and log in, then come back and retry.';
+      } else {
+        $('status').textContent = 'Failed (' + res.status + '): ' + String((txt||'').slice(0,160));
+      }
       return;
     }
 

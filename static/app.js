@@ -1271,6 +1271,39 @@
     });
   }
 
+  // Iterate button = send with an explicit iterative authorization + ruleset.
+  const iterateBtn = document.getElementById('iterate');
+  if (iterateBtn) {
+    iterateBtn.addEventListener('click', async () => {
+      const text = ta ? ta.value : '';
+      const atts = pendingAttachments;
+      pendingAttachments = [];
+      renderPreview();
+      if (ta) ta.value = '';
+
+      const rules = [
+        'ITERATIVE MODE (AUTHORIZED)',
+        '',
+        'Goal:',
+        String(text || '').trim(),
+        '',
+        'Rules:',
+        '1) You are authorized to loop: plan → implement → test → revise until the goal is accomplished.',
+        '2) Keep each iteration small. After each change, run the most relevant test/check and report the result.',
+        '3) If a test fails, fix it before moving on. Don\'t paper over failures.',
+        '4) If there\'s ambiguity, pick the safest reasonable default and state the assumption.',
+        '5) Stop when success criteria is met (with a passing test / clear verification), or when blocked and you need my input.',
+        '6) If I say "stop" or hit Stop, stop iterating and summarize current state + next actions.',
+        '',
+        'Deliverable:',
+        '- Post the final result and how it was verified.',
+      ].join('\n');
+
+      await sendMessageWsOrHttp(rules, atts);
+      await refresh();
+    });
+  }
+
   // override send button to use ws when available
   if (sendBtn) {
     sendBtn.removeEventListener('click', sendMessage);

@@ -2752,9 +2752,14 @@ app.get('/', (req, res) => {
     .wlbtn.in { border-color: rgba(154,208,255,0.55); background: rgba(154,208,255,0.10); }
     .wlbtn.out { border-color: rgba(255,160,80,0.55); background: rgba(255,160,80,0.10); }
 
-    #plan { height: 44px; white-space: nowrap; background: #1a2744; }
-    #send { height: 44px; white-space: nowrap; background: #19783d; border-color: rgba(255,255,255,0.18); }
-    #send:hover { background: #1e8a46; }
+    #plan { height: 44px; white-space: nowrap; background: #1f4b8f; border-color: rgba(154,208,255,0.30); }
+    #plan:hover { background: #2456a3; }
+
+    #iterate { height: 44px; white-space: nowrap; background: #118a8a; border-color: rgba(255,255,255,0.18); }
+    #iterate:hover { background: #13a0a0; }
+
+    #send { height: 44px; white-space: nowrap; background: #118a8a; border-color: rgba(255,255,255,0.18); }
+    #send:hover { background: #13a0a0; }
 
     /* Thinking + DEL status colors */
     .pill.is-thinking { background: #c26a1a; color: #fff; border-color: rgba(255,255,255,0.22); }
@@ -2958,6 +2963,14 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
             <div class="ruleBody">If I make a change that requires you to refresh the UI and/or re-test a flow, I will explicitly say so and mention the new build/version to look for.</div>
           </div>
 
+          <div class="ruleItem">
+            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
+              <div class="ruleTitle">Iterative Mode: permission to loop until done (or stopped)</div>
+              <div class="ruleChevron">▸</div>
+            </div>
+            <div class="ruleBody"><b>Iterative Mode</b> means you authorize me to do everything I can inside this environment to accomplish the goal: plan → implement → test → revise in a loop. I will keep changes small and test after each change. I stop when (a) the success criteria is met and a test passes/high score is achieved, (b) I hit a hard blocker and need your input, or (c) you say <code>stop</code> / hit Stop.</div>
+          </div>
+
         </div>
 
         <div class="muted" style="margin-top:10px;">We’ll keep adding to this list.</div>
@@ -3002,6 +3015,7 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
           <textarea id="msg" placeholder="Type a message. Paste images/screenshots here (Ctrl+V) ..."></textarea>
           <div style="display:flex; flex-direction:column; gap:8px; align-items: stretch;">
             <button id="plan" type="button">Plan</button>
+            <button id="iterate" type="button">Iterate</button>
             <button id="send" type="button">Send</button>
           </div>
         </div>

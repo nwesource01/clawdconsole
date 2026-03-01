@@ -818,6 +818,15 @@
     });
   }
 
+  function pasteMsgId(msgid){
+    if (!ta) return;
+    const tag = '[message_id: ' + String(msgid || '').trim() + ']';
+    // Append on a new line if there's existing content
+    const cur = ta.value || '';
+    ta.value = cur ? (cur.replace(/\s*$/,'') + '\n' + tag + '\n') : (tag + '\n');
+    ta.focus();
+  }
+
   function renderMessages(msgs) {
     if (!chatlog) return;
 
@@ -852,10 +861,16 @@
 
       const bodyHtml = isBot ? renderRichText(m.text || '') : ('<div class="md_txt">' + linkify(esc(m.text || '')).replace(/\n/g,'<br>') + '</div>');
 
+      const msgId = (m && m.id) ? String(m.id) : '';
+      const msgRef = msgId ? ('<span class="msgref" title="Click to paste message id" data-msgid="' + esc(msgId) + '">' + esc(msgId) + '</span>') : '';
+
       el.innerHTML =
         '<div class="meta">' +
           '<div><span class="' + nameClass + '">' + esc(name) + '</span></div>' +
-          '<div class="muted">' + esc(fmtTs(m.ts)) + '</div>' +
+          '<div class="muted" style="display:flex; gap:10px; align-items:baseline;">' +
+            '<span>' + esc(fmtTs(m.ts)) + '</span>' +
+            msgRef +
+          '</div>' +
         '</div>' +
         '<div class="txt">' + bodyHtml + '</div>' +
         '<div class="att">' + atts + '</div>';
@@ -867,6 +882,19 @@
     // Only autoscroll if the user was already near the bottom.
     if (stick) chatlog.scrollTop = chatlog.scrollHeight;
     else chatlog.scrollTop = prevTop;
+  }
+
+  // Click-to-paste message id
+  if (chatlog) {
+    chatlog.addEventListener('click', (e) => {
+      const t = e && e.target;
+      if (!t) return;
+      const el = (t.closest && t.closest('.msgref')) ? t.closest('.msgref') : null;
+      if (!el) return;
+      const id = el.getAttribute('data-msgid') || '';
+      if (!id) return;
+      pasteMsgId(id);
+    });
   }
 
   async function refresh() {

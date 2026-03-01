@@ -2774,6 +2774,8 @@ app.get('/', (req, res) => {
     #chatlog { background: var(--card2); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 12px; height: 520px; overflow:auto; }
     .msg { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.08); }
     .meta { font-size: 12px; color: rgba(255,255,255,0.65); display:flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+    .msgref{font-size:11px; color: rgba(231,231,231,0.38); cursor:pointer; user-select:none}
+    .msgref:hover{color: rgba(231,231,231,0.60); text-decoration: underline}
     .name-user { color: #22c6c6; font-weight: 700; }
     .name-agent { color: #b46cff; font-weight: 700; }
     .txt { margin-top: 6px; white-space: pre-wrap; }

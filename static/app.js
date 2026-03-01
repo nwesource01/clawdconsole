@@ -863,13 +863,15 @@
 
       const msgId = (m && m.id) ? String(m.id) : '';
       const msgRef = msgId ? ('<span class="msgref" title="Click to paste message id" data-msgid="' + esc(msgId) + '">' + esc(msgId) + '</span>') : '';
+      const pmRef = msgId ? ('<span class="msgpm" title="Send this message to ClawdPM" data-pm-msgid="' + esc(msgId) + '">Send to ClawdPM</span>') : '';
 
       el.innerHTML =
         '<div class="meta">' +
           '<div><span class="' + nameClass + '">' + esc(name) + '</span></div>' +
-          '<div class="muted" style="display:flex; gap:10px; align-items:baseline;">' +
+          '<div class="muted" style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; justify-content:flex-end;">' +
             '<span>' + esc(fmtTs(m.ts)) + '</span>' +
             msgRef +
+            pmRef +
           '</div>' +
         '</div>' +
         '<div class="txt">' + bodyHtml + '</div>' +
@@ -884,18 +886,141 @@
     else chatlog.scrollTop = prevTop;
   }
 
-  // Click-to-paste message id
+  function openPmModalFromMessage(m){
+    const modal = document.getElementById('pm_modal');
+    if (!modal) return;
+
+    const pmTitle = document.getElementById('pm_title');
+    const pmBody = document.getElementById('pm_body');
+    const pmMsg = document.getElementById('pm_msg');
+    const pmPri = document.getElementById('pm_pri');
+
+    const txt = String(m && m.text ? m.text : '').trim();
+    const titleGuess = (txt.split(/\r?\n/)[0] || '').trim().slice(0, 120) || 'New card';
+    const ts = m && m.ts ? String(m.ts) : '';
+    const id = m && m.id ? String(m.id) : '';
+
+    if (pmTitle) pmTitle.value = titleGuess;
+    if (pmPri) pmPri.value = 'normal';
+    if (pmBody) {
+      const meta = [
+        'Source message:',
+        id ? ('- id: ' + id) : null,
+        ts ? ('- ts: ' + ts) : null,
+        '',
+      ].filter(Boolean).join('\n');
+      pmBody.value = meta + txt;
+    }
+    if (pmMsg) pmMsg.textContent = '';
+
+    modal.style.display = 'flex';
+    modal.classList.add('open');
+    setTimeout(() => { try { pmTitle && pmTitle.focus(); } catch {} }, 50);
+
+    // Load columns fresh each time
+    (async () => {
+      try {
+        const res = await fetch(apiUrl('/api/pm'), { credentials: 'include', cache: 'no-store' });
+        const j = await res.json();
+        const cols = (j && j.ok && j.pm && Array.isArray(j.pm.columns)) ? j.pm.columns : [];
+        const sel = document.getElementById('pm_col');
+        if (sel) {
+          sel.innerHTML = '';
+          for (const c of cols) {
+            if (!c || !c.id) continue;
+            const opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.title || c.id;
+            sel.appendChild(opt);
+          }
+          // default to Backlog if present
+          const prefer = cols.find(c => String(c.title||'').toLowerCase() === 'backlog') || cols[0];
+          if (prefer && prefer.id) sel.value = prefer.id;
+        }
+      } catch (e) {
+        const pmMsg2 = document.getElementById('pm_msg');
+        if (pmMsg2) pmMsg2.textContent = 'Failed to load columns.';
+      }
+    })();
+  }
+
+  function closePmModal(){
+    const modal = document.getElementById('pm_modal');
+    if (!modal) return;
+    modal.classList.remove('open');
+    modal.style.display = 'none';
+  }
+
+  async function savePmCard(){
+    const pmMsg = document.getElementById('pm_msg');
+    const title = (document.getElementById('pm_title')?.value || '').trim();
+    const body = (document.getElementById('pm_body')?.value || '').trim();
+    const colId = (document.getElementById('pm_col')?.value || '').trim();
+    const pri = (document.getElementById('pm_pri')?.value || 'normal').trim();
+
+    if (!title) { if (pmMsg) pmMsg.textContent = 'Missing title.'; return; }
+    if (!colId) { if (pmMsg) pmMsg.textContent = 'Missing column.'; return; }
+
+    if (pmMsg) pmMsg.textContent = 'Saving…';
+    try {
+      const res1 = await fetch(apiUrl('/api/pm'), { credentials: 'include', cache: 'no-store' });
+      const j1 = await res1.json();
+      if (!res1.ok || !j1 || !j1.ok) throw new Error('load pm');
+      const pm = j1.pm;
+      pm.columns = Array.isArray(pm.columns) ? pm.columns : [];
+      const col = pm.columns.find(c => c && c.id === colId);
+      if (!col) throw new Error('column not found');
+      col.cards = Array.isArray(col.cards) ? col.cards : [];
+      const newId = 'pm_' + Math.random().toString(16).slice(2) + '_' + Date.now().toString(16);
+      col.cards.push({ id: newId, title, body, priority: (['ultra','high','normal','planning'].includes(pri) ? pri : 'normal'), createdAt: new Date().toISOString(), todos: [] });
+
+      const res2 = await fetch(apiUrl('/api/pm'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ pm })
+      });
+      const j2 = await res2.json();
+      if (!res2.ok || !j2 || !j2.ok) throw new Error('save pm');
+
+      if (pmMsg) pmMsg.textContent = 'Saved.';
+      setTimeout(() => { closePmModal(); }, 250);
+    } catch (e) {
+      if (pmMsg) pmMsg.textContent = 'Save failed: ' + String(e);
+    }
+  }
+
+  // Click handlers in chat: paste msg id, or send to PM
   if (chatlog) {
     chatlog.addEventListener('click', (e) => {
       const t = e && e.target;
       if (!t) return;
-      const el = (t.closest && t.closest('.msgref')) ? t.closest('.msgref') : null;
-      if (!el) return;
-      const id = el.getAttribute('data-msgid') || '';
-      if (!id) return;
-      pasteMsgId(id);
+
+      const idEl = (t.closest && t.closest('.msgref')) ? t.closest('.msgref') : null;
+      if (idEl) {
+        const id = idEl.getAttribute('data-msgid') || '';
+        if (id) pasteMsgId(id);
+        return;
+      }
+
+      const pmEl = (t.closest && t.closest('.msgpm')) ? t.closest('.msgpm') : null;
+      if (pmEl) {
+        const id = pmEl.getAttribute('data-pm-msgid') || '';
+        const m = (messageCache || []).find(x => x && String(x.id||'') === String(id));
+        openPmModalFromMessage(m || { id, ts: '', text: '' });
+      }
     });
   }
+
+  // Wire PM modal buttons
+  const pmClose = document.getElementById('pm_close');
+  const pmCancel = document.getElementById('pm_cancel');
+  const pmSave = document.getElementById('pm_save');
+  if (pmClose) pmClose.addEventListener('click', closePmModal);
+  if (pmCancel) pmCancel.addEventListener('click', closePmModal);
+  if (pmSave) pmSave.addEventListener('click', savePmCard);
+  const pmModal = document.getElementById('pm_modal');
+  if (pmModal) pmModal.addEventListener('click', (e) => { if (e.target && e.target.id === 'pm_modal') closePmModal(); });
 
   async function refresh() {
     const res = await fetch(apiUrl('/api/messages?limit=50'), { credentials: 'include', cache: 'no-store' });

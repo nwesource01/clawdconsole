@@ -2776,6 +2776,10 @@ app.get('/', (req, res) => {
     .meta { font-size: 12px; color: rgba(255,255,255,0.65); display:flex; justify-content: space-between; gap: 12px; align-items: baseline; }
     .msgref{font-size:11px; color: rgba(231,231,231,0.38); cursor:pointer; user-select:none}
     .msgref:hover{color: rgba(231,231,231,0.60); text-decoration: underline}
+    .msgpm{font-size:11px; color: rgba(231,231,231,0.38); cursor:pointer; user-select:none}
+    .msgpm:hover{color: rgba(231,231,231,0.60); text-decoration: underline}
+    .msgpm{font-size:11px; color: rgba(231,231,231,0.38); cursor:pointer; user-select:none}
+    .msgpm:hover{color: rgba(231,231,231,0.60); text-decoration: underline}
     .name-user { color: #22c6c6; font-weight: 700; }
     .name-agent { color: #b46cff; font-weight: 700; }
     .txt { margin-top: 6px; white-space: pre-wrap; }
@@ -3094,6 +3098,56 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
           <button id="wlRecent" type="button" class="wlbtn">Recent</button>
         </div>
         <div id="worklog" style="margin-top:10px; background: var(--card2); border: 1px solid var(--border); border-radius: 12px; padding: 10px; height: 520px; overflow:auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Send to ClawdPM modal -->
+  <div class="cc_modal" id="pm_modal" aria-label="Send to ClawdPM" role="dialog" aria-modal="true">
+    <div class="cc_box" style="width:min(860px, 96vw);">
+      <div class="cc_right" style="padding:16px;">
+        <div class="cc_head">
+          <div>
+            <b>Send to ClawdPM</b>
+            <div class="muted">Create a new card from a chat message.</div>
+          </div>
+          <button class="cc_close" id="pm_close" type="button">Close</button>
+        </div>
+
+        <div class="cc_form" id="pm_form">
+          <div class="cc_row">
+            <div style="flex:1; min-width: 220px;">
+              <div class="muted" style="margin-bottom:6px;">Title</div>
+              <input id="pm_title" placeholder="Card title" />
+            </div>
+            <div style="width: 220px;">
+              <div class="muted" style="margin-bottom:6px;">Column</div>
+              <select id="pm_col"></select>
+            </div>
+            <div style="width: 160px;">
+              <div class="muted" style="margin-bottom:6px;">Priority</div>
+              <select id="pm_pri">
+                <option value="ultra">ultra</option>
+                <option value="high">high</option>
+                <option value="normal" selected>normal</option>
+                <option value="planning">planning</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <div class="muted" style="margin-bottom:6px;">Body</div>
+            <textarea id="pm_body" style="min-height: 180px;"></textarea>
+          </div>
+
+          <div class="cc_row" style="justify-content: space-between;">
+            <div class="cc_msg" id="pm_msg"></div>
+            <div class="cc_row">
+              <button class="cc_close" id="pm_cancel" type="button">Cancel</button>
+              <button class="btn" id="pm_save" type="button">Save Card</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

@@ -2756,7 +2756,7 @@ app.get('/', (req, res) => {
     #plan:hover { background: #2456a3; }
 
     /* Send = primary action (green) */
-    #send { height: 58px; white-space: nowrap; background: #19783d; border-color: rgba(255,255,255,0.18); font-weight: 800; }
+    #send { height: 58px; white-space: nowrap; background: #19783d; border-color: rgba(255,255,255,0.18); }
     #send:hover { background: #1e8a46; }
 
     /* Iterate = teal */
@@ -2792,7 +2792,7 @@ app.get('/', (req, res) => {
     .md_copy:hover{border-color: rgba(34,198,198,.65)}
 
     #composer { display:flex; gap: 10px; align-items: flex-end; }
-    #msg { width: 100%; min-height: 54px; max-height: 180px; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
+    #msg { width: 100%; min-height: 162px; max-height: 280px; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
     #send { height: 44px; white-space: nowrap; }
     #pasteHint { font-size: 12px; color: var(--muted); }
     .preview { display:flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }

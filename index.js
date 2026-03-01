@@ -2746,7 +2746,11 @@ app.get('/', (req, res) => {
     .cc_close{background:transparent; border:1px solid rgba(255,255,255,.18); color:var(--text); border-radius:12px; padding:8px 10px; cursor:pointer}
     .cc_form{margin-top:12px; display:grid; gap:10px}
     .cc_form input{width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text)}
+    .cc_form select{width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text)}
+    .cc_form textarea{width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; line-height: 1.35}
     .cc_row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+    .pm_grid{display:grid; grid-template-columns: 1fr 220px 160px; gap:10px; align-items:end}
+    @media (max-width: 840px){ .pm_grid{grid-template-columns: 1fr; } }
     .cc_msg{font-size:12px; color:rgba(231,231,231,0.72)}
 
     .wlbtn { padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.04); font-size: 12px; }
@@ -2993,6 +2997,14 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
             <div class="ruleBody"><b>Iterative Mode</b> means you authorize me to do everything I can inside this environment to accomplish the goal: plan → implement → test → revise in a loop. I will keep changes small and test after each change. I stop when (a) the success criteria is met and a test passes/high score is achieved, (b) I hit a hard blocker and need your input, or (c) you say <code>stop</code> / hit Stop.</div>
           </div>
 
+          <div class="ruleItem">
+            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
+              <div class="ruleTitle">Layout: prefer grid/flow layouts that can’t overlap</div>
+              <div class="ruleChevron">▸</div>
+            </div>
+            <div class="ruleBody">When building Console UI, prefer normal document flow + CSS <code>grid</code> (or flex with <code>align-items:flex-start</code>) so controls can’t overlap each other. Avoid absolute positioning for form layouts; add responsive breakpoints instead.</div>
+          </div>
+
         </div>
 
         <div class="muted" style="margin-top:10px;">We’ll keep adding to this list.</div>
@@ -3115,16 +3127,16 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         </div>
 
         <div class="cc_form" id="pm_form">
-          <div class="cc_row">
-            <div style="flex:1; min-width: 220px;">
+          <div class="pm_grid">
+            <div>
               <div class="muted" style="margin-bottom:6px;">Title</div>
               <input id="pm_title" placeholder="Card title" />
             </div>
-            <div style="width: 220px;">
+            <div>
               <div class="muted" style="margin-bottom:6px;">Column</div>
               <select id="pm_col"></select>
             </div>
-            <div style="width: 160px;">
+            <div>
               <div class="muted" style="margin-bottom:6px;">Priority</div>
               <select id="pm_pri">
                 <option value="ultra">ultra</option>
@@ -3136,8 +3148,8 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
           </div>
 
           <div>
-            <div class="muted" style="margin-bottom:6px;">Body</div>
-            <textarea id="pm_body" style="min-height: 180px;"></textarea>
+            <div class="muted" style="margin-bottom:6px;">Description</div>
+            <textarea id="pm_body" style="min-height: 240px;"></textarea>
           </div>
 
           <div class="cc_row" style="justify-content: space-between;">

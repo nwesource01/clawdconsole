@@ -2832,6 +2832,7 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
           <div class="row" id="quickButtons" style="gap: 10px;">
             <button id="btnReviewRecent" type="button" class="qbtn">Review Recent</button>
             <button id="btnReviewWeek" type="button" class="qbtn">Review Week</button>
+            <button id="btnRepeatLast" type="button" class="qbtn">Repeat Last</button>
             <button id="btnAddBtn" type="button" class="qbtn">Add a Button</button>
             <a id="btnAdmin" class="qbtn" href="/adminonly" target="_blank" rel="noopener" title="Admin" style="display:inline-flex; align-items:center; justify-content:center; gap:8px; text-decoration:none;">⚙️</a>
           </div>

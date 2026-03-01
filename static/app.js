@@ -1301,6 +1301,31 @@
     });
   }
 
+  // Repeat Last: copy your most recent message back into the textarea (no send).
+  const btnRepeat = document.getElementById('btnRepeatLast');
+  function getLastUserMessageText(){
+    try {
+      const msgs = Array.isArray(messageCache) ? messageCache : [];
+      for (let i = msgs.length - 1; i >= 0; i--){
+        const m = msgs[i];
+        const isBot = m && typeof m.id === 'string' && m.id.startsWith('bot_');
+        if (isBot) continue;
+        const t = (m && typeof m.text === 'string') ? m.text : '';
+        if (t && t.trim()) return t;
+      }
+    } catch {}
+    return '';
+  }
+  if (btnRepeat) {
+    btnRepeat.addEventListener('click', async () => {
+      const t = getLastUserMessageText();
+      if (ta) {
+        ta.value = t || '';
+        ta.focus();
+      }
+    });
+  }
+
   function initRulesAccordion() {
     const heads = Array.from(document.querySelectorAll('.ruleHead'));
     if (!heads.length) return;

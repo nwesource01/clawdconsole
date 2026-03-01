@@ -2792,7 +2792,7 @@ app.get('/', (req, res) => {
     .md_copy:hover{border-color: rgba(34,198,198,.65)}
 
     #composer { display:flex; gap: 10px; align-items: flex-end; }
-    #msg { width: 100%; min-height: 137px; max-height: 280px; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
+    #msg { width: 100%; min-height: 122px; max-height: 280px; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
     #send { height: 44px; white-space: nowrap; }
     #pasteHint { font-size: 12px; color: var(--muted); }
     .preview { display:flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }

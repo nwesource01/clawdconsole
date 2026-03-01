@@ -2755,11 +2755,13 @@ app.get('/', (req, res) => {
     #plan { height: 44px; white-space: nowrap; background: #1f4b8f; border-color: rgba(154,208,255,0.30); }
     #plan:hover { background: #2456a3; }
 
+    /* Send = primary action (green) */
+    #send { height: 58px; white-space: nowrap; background: #19783d; border-color: rgba(255,255,255,0.18); font-weight: 800; }
+    #send:hover { background: #1e8a46; }
+
+    /* Iterate = teal */
     #iterate { height: 44px; white-space: nowrap; background: #118a8a; border-color: rgba(255,255,255,0.18); }
     #iterate:hover { background: #13a0a0; }
-
-    #send { height: 44px; white-space: nowrap; background: #118a8a; border-color: rgba(255,255,255,0.18); }
-    #send:hover { background: #13a0a0; }
 
     /* Thinking + DEL status colors */
     .pill.is-thinking { background: #c26a1a; color: #fff; border-color: rgba(255,255,255,0.22); }
@@ -2965,6 +2967,18 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
 
           <div class="ruleItem">
             <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
+              <div class="ruleTitle">Buttons: Plan vs Send vs Iterate</div>
+              <div class="ruleChevron">▸</div>
+            </div>
+            <div class="ruleBody">
+              <div><b>Plan</b> (blue): sends your text prefixed with <code>PLAN MODE</code>. Use when you want a plan/checklist before action.</div>
+              <div style="margin-top:8px;"><b>Send</b> (green): sends your text as-is. Normal message.</div>
+              <div style="margin-top:8px;"><b>Iterate</b> (teal): sends an <code>ITERATIVE MODE (AUTHORIZED)</code> wrapper that explicitly grants permission to loop plan → implement → test → revise until done (or you stop it).</div>
+            </div>
+          </div>
+
+          <div class="ruleItem">
+            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
               <div class="ruleTitle">Iterative Mode: permission to loop until done (or stopped)</div>
               <div class="ruleChevron">▸</div>
             </div>
@@ -3015,8 +3029,8 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
           <textarea id="msg" placeholder="Type a message. Paste images/screenshots here (Ctrl+V) ..."></textarea>
           <div style="display:flex; flex-direction:column; gap:8px; align-items: stretch;">
             <button id="plan" type="button">Plan</button>
-            <button id="iterate" type="button">Iterate</button>
             <button id="send" type="button">Send</button>
+            <button id="iterate" type="button">Iterate</button>
           </div>
         </div>
 

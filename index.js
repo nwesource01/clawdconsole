@@ -2318,7 +2318,9 @@ app.post('/api/abort', async (req, res) => {
 });
 
 app.use('/uploads', express.static(UPLOAD_DIR, {
-  index: true,
+  // Must be false or an array of strings; true triggers a serve-static/send type error.
+  // Also: don't serve directory indexes for uploads.
+  index: false,
   fallthrough: false,
   setHeaders: (res) => {
     res.setHeader('Cache-Control', 'no-store');

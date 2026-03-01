@@ -424,7 +424,7 @@ app.get('/name', (req, res) => {
     </div>
 
     <div class="card">
-      <div class="row">
+      <div class="row" style="align-items:flex-start;">
         <div style="flex:1; min-width: 260px;">
           <div class="muted" style="margin-bottom:6px;">Business names (one per line)</div>
           <textarea id="names" placeholder=""></textarea>

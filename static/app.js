@@ -862,7 +862,7 @@
       const bodyHtml = isBot ? renderRichText(m.text || '') : ('<div class="md_txt">' + linkify(esc(m.text || '')).replace(/\n/g,'<br>') + '</div>');
 
       const msgId = (m && m.id) ? String(m.id) : '';
-      const msgRef = msgId ? ('<span class="msgref" title="Click to paste message id" data-msgid="' + esc(msgId) + '">' + esc(msgId) + '</span>') : '';
+      const msgRef = msgId ? ('<span class="msgref" title="Click to paste message id" data-msgid="' + esc(msgId) + '">Msg ID</span>') : '';
       const pmRef = msgId ? ('<span class="msgpm" title="Send this message to ClawdPM" data-pm-msgid="' + esc(msgId) + '">Send to ClawdPM</span>') : '';
 
       el.innerHTML =

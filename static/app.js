@@ -19,6 +19,10 @@
   const schedTabEmail = document.getElementById('schedTabEmail');
   const schedTabDocs = document.getElementById('schedTabDocs');
 
+  // Cache last loaded messages for quick actions (Repeat Last, etc.)
+  let messageCache = [];
+  let lastUserText = '';
+
   function dbg(s) {
     if (debugEl) debugEl.textContent = s || '';
   }
@@ -817,6 +821,19 @@
   function renderMessages(msgs) {
     if (!chatlog) return;
 
+    // keep a cache for quick actions
+    messageCache = Array.isArray(msgs) ? msgs : [];
+    // update last user-authored text
+    try {
+      for (let i = messageCache.length - 1; i >= 0; i--){
+        const m = messageCache[i];
+        const isBot = m && typeof m.id === 'string' && m.id.startsWith('bot_');
+        if (isBot) continue;
+        const t = (m && typeof m.text === 'string') ? m.text : '';
+        if (t && t.trim()) { lastUserText = t; break; }
+      }
+    } catch {}
+
     const stick = isNearBottom(chatlog);
     const prevTop = chatlog.scrollTop;
 
@@ -1303,24 +1320,14 @@
 
   // Repeat Last: copy your most recent message back into the textarea (no send).
   const btnRepeat = document.getElementById('btnRepeatLast');
-  function getLastUserMessageText(){
-    try {
-      const msgs = Array.isArray(messageCache) ? messageCache : [];
-      for (let i = msgs.length - 1; i >= 0; i--){
-        const m = msgs[i];
-        const isBot = m && typeof m.id === 'string' && m.id.startsWith('bot_');
-        if (isBot) continue;
-        const t = (m && typeof m.text === 'string') ? m.text : '';
-        if (t && t.trim()) return t;
-      }
-    } catch {}
-    return '';
-  }
   if (btnRepeat) {
     btnRepeat.addEventListener('click', async () => {
-      const t = getLastUserMessageText();
+      // ensure we have something cached
+      if (!lastUserText) {
+        try { await refresh(); } catch {}
+      }
       if (ta) {
-        ta.value = t || '';
+        ta.value = lastUserText || '';
         ta.focus();
       }
     });

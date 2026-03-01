@@ -9,6 +9,7 @@ const basicAuth = require('basic-auth');
 const http = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
 const crypto = require('crypto');
+const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
@@ -273,6 +274,285 @@ app.use((req, res, next) => {
 });
 
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+
+// --- ClawdName (domain availability v0: DNS heuristics) ---
+const DOMAIN_CACHE_TTL_MS = 10 * 60 * 1000;
+const domainCache = new Map(); // domain -> { at, res }
+
+function normalizeDomain(s){
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/$/, '');
+}
+
+async function checkDomainDns(domain){
+  const d = normalizeDomain(domain);
+  if (!d || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return { domain: d, status: 'invalid', reason: 'Invalid domain' };
+
+  const cached = domainCache.get(d);
+  if (cached && (Date.now() - cached.at) < DOMAIN_CACHE_TTL_MS) return { ...cached.res, cached: true };
+
+  const startedAt = Date.now();
+  const p = dns.promises;
+
+  // Heuristic:
+  // - SOA/NS existence strongly implies registered+delegated.
+  // - ENOTFOUND implies likely available.
+  // - SERVFAIL/REFUSED/etc -> unknown.
+  // - Some taken domains may have no NS (rare) → we still might mark unknown.
+  try {
+    try {
+      const soa = await p.resolveSoa(d);
+      const res = { domain: d, status: 'taken', reason: 'SOA present', ms: Date.now() - startedAt };
+      domainCache.set(d, { at: Date.now(), res });
+      return res;
+    } catch (e) {
+      // continue
+      const code = e && e.code;
+      if (code && !['ENODATA','ENOTFOUND','SERVFAIL','REFUSED','ETIMEOUT','EAI_AGAIN'].includes(code)) {
+        // unknown error type, keep going
+      }
+    }
+
+    try {
+      const ns = await p.resolveNs(d);
+      if (Array.isArray(ns) && ns.length) {
+        const res = { domain: d, status: 'taken', reason: 'NS present', ms: Date.now() - startedAt };
+        domainCache.set(d, { at: Date.now(), res });
+        return res;
+      }
+    } catch (e) {
+      const code = e && e.code;
+      if (code === 'ENOTFOUND') {
+        const res = { domain: d, status: 'likely_available', reason: 'No DNS record (ENOTFOUND)', ms: Date.now() - startedAt };
+        domainCache.set(d, { at: Date.now(), res });
+        return res;
+      }
+      if (code === 'ENODATA') {
+        // domain exists but no NS? treat as unknown
+        const res = { domain: d, status: 'unknown', reason: 'No NS data (ENODATA)', ms: Date.now() - startedAt };
+        domainCache.set(d, { at: Date.now(), res });
+        return res;
+      }
+      if (code && ['SERVFAIL','REFUSED','ETIMEOUT','EAI_AGAIN'].includes(code)) {
+        const res = { domain: d, status: 'unknown', reason: 'DNS ' + code, ms: Date.now() - startedAt };
+        domainCache.set(d, { at: Date.now(), res });
+        return res;
+      }
+      const res = { domain: d, status: 'unknown', reason: 'DNS error', code: code || null, ms: Date.now() - startedAt };
+      domainCache.set(d, { at: Date.now(), res });
+      return res;
+    }
+
+    // If SOA/NS didn't resolve but also didn't ENOTFOUND, call it unknown.
+    const res = { domain: d, status: 'unknown', reason: 'Inconclusive DNS', ms: Date.now() - startedAt };
+    domainCache.set(d, { at: Date.now(), res });
+    return res;
+  } catch (e) {
+    const res = { domain: d, status: 'unknown', reason: 'Exception: ' + String(e), ms: Date.now() - startedAt };
+    domainCache.set(d, { at: Date.now(), res });
+    return res;
+  }
+}
+
+app.post('/api/name/check', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const domains = Array.isArray(req.body?.domains) ? req.body.domains : [];
+  const uniq = Array.from(new Set(domains.map(normalizeDomain).filter(Boolean))).slice(0, 200);
+
+  // simple concurrency limit
+  const results = [];
+  const CONC = Math.max(1, Math.min(16, Number(process.env.NAMECHECK_CONCURRENCY || 8)));
+  let i = 0;
+  async function worker(){
+    while (i < uniq.length){
+      const idx = i++;
+      const d = uniq[idx];
+      const r = await checkDomainDns(d);
+      results[idx] = r;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONC, uniq.length || 1) }, worker));
+
+  res.json({ ok: true, results });
+});
+
+app.get('/name', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('text/html; charset=utf-8').send(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ClawdName</title>
+  <style>
+    :root{ --bg:#0b0f1a; --card:#11182a; --text:#e7e7e7; --muted: rgba(231,231,231,.70); --border: rgba(231,231,231,.12); --teal:#22c6c6; }
+    body{margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background: var(--bg); color: var(--text)}
+    .wrap{max-width: 1200px; margin:0 auto; padding: 16px;}
+    .top{display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:baseline}
+    h1{margin:0; font-size:18px}
+    .muted{color:var(--muted)}
+    .card{border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,.03); padding:14px; margin-top:12px}
+    textarea,input,select{width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text); font-size:14px; font-family: inherit}
+    textarea{min-height:110px; max-height:300px}
+    .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+    .btn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 12px; padding:10px 12px; cursor:pointer}
+    .btn:hover{border-color: rgba(34,198,198,.65)}
+    table{width:100%; border-collapse: collapse; margin-top:12px; font-size:13px}
+    th,td{padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.08); text-align:left; vertical-align:top}
+    .pill{display:inline-flex; padding:3px 8px; border-radius:999px; font-size:12px; border:1px solid rgba(255,255,255,.14)}
+    .p-ok{border-color: rgba(124,255,178,.40); background: rgba(124,255,178,.10)}
+    .p-bad{border-color: rgba(255,120,120,.35); background: rgba(255,120,120,.10)}
+    .p-unk{border-color: rgba(231,231,231,.18); background: rgba(231,231,231,.06)}
+    .p-inv{border-color: rgba(255,200,120,.35); background: rgba(255,200,120,.10)}
+    .mini{border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); color: rgba(231,231,231,.86); border-radius: 10px; padding:6px 8px; cursor:pointer; font-size:12px}
+    .mini:hover{background: rgba(255,255,255,.08)}
+    code{color: rgba(231,231,231,.90)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>ClawdName</h1>
+        <div class="muted">Domain availability (v0). DNS heuristic: <b>taken</b> if SOA/NS exists; <b>likely available</b> if ENOTFOUND; otherwise <b>unknown</b>.</div>
+      </div>
+      <a class="btn" href="/" style="text-decoration:none;">Back to Console</a>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div style="flex:1; min-width: 260px;">
+          <div class="muted" style="margin-bottom:6px;">Business names (one per line)</div>
+          <textarea id="names" placeholder="InfraClawd\nNameProbe\nClawdName\n..."></textarea>
+        </div>
+        <div style="width:260px;">
+          <div class="muted" style="margin-bottom:6px;">TLDs (comma-separated)</div>
+          <input id="tlds" value=".com,.io,.ai,.app" />
+          <div class="muted" style="margin:10px 0 6px;">Max variants per name</div>
+          <input id="variants" value="8" />
+          <div class="row" style="margin-top:10px; justify-content:space-between;">
+            <button class="btn" id="run" type="button">Check</button>
+            <button class="mini" id="clear" type="button">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="muted" id="status" style="margin-top:10px;"></div>
+      <div id="out"></div>
+    </div>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function slugifyName(name){
+    return String(name||'').trim().toLowerCase()
+      .replace(/&/g,' and ')
+      .replace(/[^a-z0-9\s-]/g,'')
+      .replace(/\s+/g,'-')
+      .replace(/-+/g,'-')
+      .replace(/^-/,'').replace(/-$/,'');
+  }
+
+  function variantsFor(name, maxN){
+    const base = slugifyName(name);
+    const raw = String(name||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+    const out = [];
+    const push = (s) => { if (s && !out.includes(s)) out.push(s); };
+    push(raw);
+    push(base.replace(/-/g,''));
+    push(base);
+    if (raw) {
+      push('get' + raw);
+      push(raw + 'hq');
+      push(raw + 'app');
+      push('try' + raw);
+    }
+    return out.slice(0, Math.max(1, maxN||8));
+  }
+
+  function buildDomains(){
+    const names = String($('names').value||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const tlds = String($('tlds').value||'').split(',').map(s=>s.trim()).filter(Boolean).map(t => t.startsWith('.')?t:('.'+t));
+    const maxV = Math.max(1, Math.min(30, Number($('variants').value||8)));
+
+    const domains = [];
+    for (const n of names){
+      for (const v of variantsFor(n, maxV)){
+        for (const t of tlds){
+          domains.push(v + t);
+        }
+      }
+    }
+    return Array.from(new Set(domains)).slice(0, 800);
+  }
+
+  function pill(status){
+    if (status === 'taken') return '<span class="pill p-bad">taken</span>';
+    if (status === 'likely_available') return '<span class="pill p-ok">likely available</span>';
+    if (status === 'invalid') return '<span class="pill p-inv">invalid</span>';
+    return '<span class="pill p-unk">unknown</span>';
+  }
+
+  async function run(){
+    const domains = buildDomains();
+    $('status').textContent = 'Checking ' + domains.length + ' domains…';
+    $('out').innerHTML = '';
+
+    const res = await fetch('/api/name/check', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'include',
+      body: JSON.stringify({ domains })
+    });
+    const j = await res.json();
+    if (!res.ok || !j || !j.ok) {
+      $('status').textContent = 'Failed.';
+      return;
+    }
+
+    const rows = (j.results || []);
+    const avail = rows.filter(r => r && r.status === 'likely_available');
+    const taken = rows.filter(r => r && r.status === 'taken');
+    const unk = rows.filter(r => r && (r.status === 'unknown' || r.status === 'invalid'));
+
+    $('status').innerHTML = 'Done. ' +
+      '<b>' + avail.length + '</b> likely available • ' +
+      '<b>' + taken.length + '</b> taken • ' +
+      '<b>' + unk.length + '</b> unknown/invalid.';
+
+    const html = '<table>'
+      + '<thead><tr><th>Domain</th><th>Status</th><th>Evidence</th><th></th></tr></thead>'
+      + '<tbody>'
+      + rows.map(r => {
+        const copy = '<button class="mini" data-copy="' + esc(r.domain) + '">Copy</button>';
+        return '<tr>'
+          + '<td><code>' + esc(r.domain) + '</code></td>'
+          + '<td>' + pill(r.status) + (r.cached ? ' <span class="muted">(cached)</span>' : '') + '</td>'
+          + '<td class="muted">' + esc(r.reason || '') + (r.code ? (' (' + esc(r.code) + ')') : '') + '</td>'
+          + '<td>' + copy + '</td>'
+          + '</tr>';
+      }).join('')
+      + '</tbody></table>';
+
+    $('out').innerHTML = html;
+    Array.from(document.querySelectorAll('button[data-copy]')).forEach(b => {
+      b.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(b.getAttribute('data-copy')||''); b.textContent = 'Copied'; setTimeout(()=>b.textContent='Copy', 900); } catch {}
+      });
+    });
+  }
+
+  $('run').addEventListener('click', run);
+  $('clear').addEventListener('click', () => { $('names').value=''; $('out').innerHTML=''; $('status').textContent=''; $('names').focus(); });
+</script>
+</body>
+</html>`);
+});
 
 // --- Public demo (no auth) ---
 const DEMO_MESSAGES = [

@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-02-28.18';
+const BUILD = '2026-03-01.05';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -621,6 +621,7 @@ app.get('/adminonly', (req, res) => {
       <button id="admTabSitemap" class="tabbtn" type="button">Sitemap</button>
       <button id="admTabAdoption" class="tabbtn" type="button" style="margin-top:10px;">Adoption</button>
       <button id="admTabCRM" class="tabbtn" type="button" style="margin-top:10px;">CRM</button>
+      <button id="admTabChangelog" class="tabbtn" type="button" style="margin-top:10px;">Changelog</button>
       <div class="muted" style="margin-top:10px;">Default tab: Sitemap</div>
     </aside>
 
@@ -718,6 +719,38 @@ app.get('/adminonly', (req, res) => {
         <div id="crmList" style="margin-top:10px; background: rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px; max-height: 70vh; overflow:auto;"></div>
       </div>
 
+      <div id="admPanelChangelog" class="card" style="display:none;">
+        <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline; flex-wrap:wrap;">
+          <h1 style="margin:0; font-size:18px;">Changelog</h1>
+          <div class="muted">Patch notes + commit log</div>
+        </div>
+        <div class="muted" style="margin-top:8px;">Notes source: <code>${DATA_DIR}/changelog.jsonl</code></div>
+
+        <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button id="chgRefresh" class="tabbtn" type="button" style="width:auto;">Refresh</button>
+          <span class="muted" id="chgCount"></span>
+        </div>
+
+        <div style="margin-top:12px; border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; background: rgba(0,0,0,0.12);">
+          <div class="muted" style="margin-bottom:6px;">Add a note (manual patch note)</div>
+          <div class="row" style="gap:10px; align-items:flex-end;">
+            <div style="flex:1; min-width:220px;">
+              <div class="muted">Title</div>
+              <input id="chgTitle" style="width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text)" placeholder="What changed?" />
+            </div>
+            <button id="chgSave" class="tabbtn" type="button" style="width:auto;">Save note</button>
+          </div>
+          <div style="margin-top:10px;">
+            <div class="muted">Details</div>
+            <textarea id="chgBody" style="width:100%; min-height:120px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text)"></textarea>
+          </div>
+          <div class="muted" id="chgSaved" style="margin-top:8px;"></div>
+        </div>
+
+        <div id="chgList" style="margin-top:12px;"></div>
+        <div class="muted" style="margin-top:12px;">Tip: this is for operator-facing patch notes; the commit list is still available in the Repo tab in the main Console.</div>
+      </div>
+
       <div class="muted" style="margin-top:12px;">More admin tabs coming.</div>
     </main>
   </div>
@@ -756,6 +789,46 @@ function writeAdoption(a){
     return null;
   }
 }
+
+const CHANGELOG_FILE = path.join(DATA_DIR, 'changelog.jsonl');
+function appendChangelog(entry){
+  const e = entry || {};
+  const out = {
+    id: 'chg_' + Date.now().toString(16) + '_' + Math.random().toString(16).slice(2),
+    ts: new Date().toISOString(),
+    title: String(e.title || '').trim().slice(0, 200),
+    body: String(e.body || '').trim().slice(0, 5000),
+    build: BUILD,
+  };
+  if (!out.title) out.title = '(untitled)';
+  fs.appendFileSync(CHANGELOG_FILE, JSON.stringify(out) + '\n', 'utf8');
+  return out;
+}
+function readChangelog(limit){
+  const n = Math.max(1, Math.min(500, Number(limit || 100)));
+  if (!fs.existsSync(CHANGELOG_FILE)) return [];
+  const lines = fs.readFileSync(CHANGELOG_FILE, 'utf8').split(/\r?\n/).filter(Boolean);
+  const slice = lines.slice(-n);
+  const out = [];
+  for (const ln of slice){
+    try { out.push(JSON.parse(ln)); } catch {}
+  }
+  return out.reverse();
+}
+
+app.get('/api/changelog', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true, entries: readChangelog(req.query?.limit || 200) });
+});
+
+app.post('/api/changelog', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const title = String(req.body?.title || '').trim();
+  const body = String(req.body?.body || '').trim();
+  const saved = appendChangelog({ title, body });
+  logWork('changelog.saved', { id: saved.id, build: saved.build });
+  res.json({ ok: true, entry: saved });
+});
 
 app.get('/api/adoption', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');

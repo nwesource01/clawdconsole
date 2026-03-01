@@ -395,7 +395,8 @@ app.get('/name', (req, res) => {
     h1{margin:0; font-size:18px}
     .muted{color:var(--muted)}
     .card{border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,.03); padding:14px; margin-top:12px}
-    textarea,input,select{width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text); font-size:14px; font-family: inherit}
+    textarea,input,select{width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text); font-size:14px; font-family: inherit; line-height:1.35}
+    textarea::placeholder,input::placeholder{color: rgba(231,231,231,.35)}
     textarea{min-height:110px; max-height:300px}
     .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
     .btn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 12px; padding:10px 12px; cursor:pointer}
@@ -426,7 +427,8 @@ app.get('/name', (req, res) => {
       <div class="row">
         <div style="flex:1; min-width: 260px;">
           <div class="muted" style="margin-bottom:6px;">Business names (one per line)</div>
-          <textarea id="names" placeholder="InfraClawd\nNameProbe\nClawdName\n..."></textarea>
+          <textarea id="names" placeholder=""></textarea>
+          <div class="muted" style="margin-top:6px; font-size:12px;">Example: <code>InfraClawd</code> <span class="muted">(one per line)</span></div>
         </div>
         <div style="width:260px;">
           <div class="muted" style="margin-bottom:6px;">TLDs (comma-separated)</div>

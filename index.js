@@ -498,6 +498,16 @@ app.get('/name', (req, res) => {
     return '<span class="pill p-unk">unknown</span>';
   }
 
+  window.addEventListener('error', (e) => {
+    try {
+      const msg = (e && (e.message || (e.error && e.error.message))) ? (e.message || e.error.message) : String(e);
+      $('status').textContent = 'JS error: ' + msg;
+    } catch {}
+  });
+
+  // Prove JS is running
+  $('status').textContent = 'Ready.';
+
   async function run(){
     const domains = buildDomains();
     $('status').textContent = 'Checking ' + domains.length + ' domains…';
@@ -559,8 +569,11 @@ app.get('/name', (req, res) => {
     });
   }
 
-  $('run').addEventListener('click', run);
-  $('clear').addEventListener('click', () => { $('names').value=''; $('out').innerHTML=''; $('status').textContent=''; $('names').focus(); });
+  const runBtn = $('run');
+  const clearBtn = $('clear');
+  if (runBtn) runBtn.addEventListener('click', run);
+  if (clearBtn) clearBtn.addEventListener('click', () => { $('names').value=''; $('out').innerHTML=''; $('status').textContent='Ready.'; $('names').focus(); });
+  if (!runBtn) $('status').textContent = 'JS loaded but UI missing (run button not found).';
 </script>
 </body>
 </html>`);

@@ -1435,13 +1435,20 @@ app.get('/pm', (req, res) => {
     .top{display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:baseline}
     .top h1{margin:0; font-size:18px}
     .muted{color:var(--muted)}
-    .board{display:grid; grid-template-columns: repeat(4, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; align-items:start}
+    .board{display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; align-items:start}
     .col{border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,.03); overflow:hidden}
     .colHead{padding:12px 12px; border-bottom:1px solid rgba(255,255,255,.08); display:flex; justify-content:space-between; align-items:center}
     .colHead b{font-size:14px}
     .colActions{display:flex; gap:8px; align-items:center}
+    .mini2{border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); color: rgba(231,231,231,.86); border-radius: 10px; padding:6px 8px; cursor:pointer; font-size:12px}
+    .mini2:hover{background: rgba(255,255,255,.08)}
     .addBtn{border:1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.04); color: rgba(231,231,231,.85); border-radius: 999px; padding:6px 10px; cursor:pointer; font-size:12px}
     .addBtn:hover{background: rgba(255,255,255,.07)}
+
+    .cardRow{display:flex; justify-content:space-between; gap:8px; align-items:flex-start}
+    .cardBtns{display:flex; gap:6px; align-items:center; opacity:.85}
+    .cardBtns button{border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); color: rgba(231,231,231,.86); border-radius: 10px; padding:4px 6px; cursor:pointer; font-size:12px}
+    .cardBtns button:hover{background: rgba(255,255,255,.08)}
 
     .cards{padding:12px; display:flex; flex-direction:column; gap:10px; min-height: 120px}
     .card{border:1px solid rgba(255,255,255,.12); border-radius:12px; background: rgba(17,24,42,.88); padding:10px; position:relative; overflow:hidden}
@@ -1525,12 +1532,18 @@ app.get('/pm', (req, res) => {
             <label>Description</label>
             <textarea id="cm_in_body"></textarea>
           </div>
+          <div class="field" style="grid-column: 1 / span 2;">
+            <label>Move To</label>
+            <select id="cm_move_to"></select>
+          </div>
         </div>
 
         <div class="rowbtn" style="margin-top:12px; justify-content:space-between;">
           <div class="rowbtn">
             <button class="pillbtn" id="cm_generate" type="button">Generate To‑Dos</button>
             <button class="pillbtn" id="cm_addtodo" type="button">+ To‑Do</button>
+            <button class="pillbtn" id="cm_moveup" type="button">Move ↑</button>
+            <button class="pillbtn" id="cm_movedn" type="button">Move ↓</button>
           </div>
           <button class="pillbtn" id="cm_save" type="button">Save</button>
         </div>
@@ -1576,6 +1589,23 @@ app.get('/pm', (req, res) => {
     const cmAdd = $('cm_addtodo');
     const cmTodos = $('cm_todos');
     const cmMsg = $('cm_msg');
+    const cmMoveTo = $('cm_move_to');
+    const cmMoveUp = $('cm_moveup');
+    const cmMoveDn = $('cm_movedn');
+
+    function fillMoveTo(){
+      if (!cmMoveTo) return;
+      cmMoveTo.innerHTML = '';
+      const cols = (PM && PM.columns) ? PM.columns : [];
+      for (const c of cols){
+        if (!c || !c.id) continue;
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.title || c.id;
+        cmMoveTo.appendChild(opt);
+      }
+      if (ACTIVE && ACTIVE.colId) cmMoveTo.value = ACTIVE.colId;
+    }
 
     function openModal(colId, cardId){
       ACTIVE = { colId, cardId };
@@ -1588,6 +1618,7 @@ app.get('/pm', (req, res) => {
       $('cm_in_body').value = card.body || '';
       $('cm_in_pri').value = String(card.priority || 'normal');
 
+      fillMoveTo();
       renderTodos();
       if (cmMsg) cmMsg.textContent = '';
       if (modal) modal.classList.add('open');
@@ -1693,12 +1724,33 @@ app.get('/pm', (req, res) => {
       const fc = findCard();
       if (!fc) return;
       const card = fc.card;
-      card.title = $('cm_in_title').value.trim();
-      card.body = $('cm_in_body').value.trim();
-      card.priority = $('cm_in_pri').value;
-      ensureTodos(card);
+
+      // handle move-to column before editing fields
+      const destColId = cmMoveTo ? cmMoveTo.value : (ACTIVE && ACTIVE.colId);
+      if (destColId && ACTIVE && destColId !== ACTIVE.colId) {
+        const fromCol = (PM.columns || []).find(c => c && c.id === ACTIVE.colId);
+        const toCol = (PM.columns || []).find(c => c && c.id === destColId);
+        if (fromCol && toCol) {
+          fromCol.cards = Array.isArray(fromCol.cards) ? fromCol.cards : [];
+          toCol.cards = Array.isArray(toCol.cards) ? toCol.cards : [];
+          const idx = fromCol.cards.findIndex(x => x && x.id === ACTIVE.cardId);
+          if (idx >= 0) {
+            const moved = fromCol.cards.splice(idx, 1)[0];
+            toCol.cards.push(moved);
+            ACTIVE.colId = destColId;
+          }
+        }
+      }
+
+      const fc2 = findCard();
+      if (!fc2) return;
+      const card2 = fc2.card;
+      card2.title = $('cm_in_title').value.trim();
+      card2.body = $('cm_in_body').value.trim();
+      card2.priority = $('cm_in_pri').value;
+      ensureTodos(card2);
       // prune blank todos
-      card.todos = card.todos.filter(t => String(t.text||'').trim());
+      card2.todos = card2.todos.filter(t => String(t.text||'').trim());
       if (cmMsg) cmMsg.textContent = 'Saving…';
       await persist();
       if (cmMsg) cmMsg.textContent = 'Saved.';
@@ -1754,9 +1806,29 @@ app.get('/pm', (req, res) => {
     if (cmClose) cmClose.addEventListener('click', closeModal);
     if (modal) modal.addEventListener('click', (e) => { if (e.target && e.target.id === 'cardModal') closeModal(); });
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+    async function moveCard(dir){
+      const fc = findCard();
+      if (!fc) return;
+      const col = fc.col;
+      col.cards = Array.isArray(col.cards) ? col.cards : [];
+      const i = col.cards.findIndex(x => x && x.id === ACTIVE.cardId);
+      if (i < 0) return;
+      const j = i + dir;
+      if (j < 0 || j >= col.cards.length) return;
+      const tmp = col.cards[j];
+      col.cards[j] = col.cards[i];
+      col.cards[i] = tmp;
+      await persist();
+      // keep modal open + todo render
+      fillMoveTo();
+      renderTodos();
+    }
+
     if (cmSave) cmSave.addEventListener('click', saveCardEdits);
     if (cmAdd) cmAdd.addEventListener('click', addTodo);
     if (cmGen) cmGen.addEventListener('click', generateTodos);
+    if (cmMoveUp) cmMoveUp.addEventListener('click', () => moveCard(-1));
+    if (cmMoveDn) cmMoveDn.addEventListener('click', () => moveCard(+1));
 
     function priClass(p){
       const v = String(p||'planning').toLowerCase();
@@ -1798,11 +1870,18 @@ app.get('/pm', (req, res) => {
         const el = document.createElement('div');
         el.className = 'col';
 
-        const cardsHtml = (col.cards || []).map(c => {
+        const cardsHtml = (col.cards || []).map((c, idx) => {
           const pc = priClass(c.priority);
           const badge = '<span class="badge">' + esc(String(c.priority || 'planning')) + '</span>';
+          const btns = '<div class="cardBtns">'
+            + '<button type="button" data-cup="' + esc(col.id) + '" data-cid="' + esc(c.id) + '" title="Move up">↑</button>'
+            + '<button type="button" data-cdn="' + esc(col.id) + '" data-cid="' + esc(c.id) + '" title="Move down">↓</button>'
+            + '</div>';
           return '<div class="card ' + pc + '" data-card-id="' + esc(c.id) + '" data-col-id="' + esc(col.id) + '">'
-            + '<b>' + esc(c.title) + '</b>'
+            + '<div class="cardRow">'
+            +   '<b>' + esc(c.title) + '</b>'
+            +   btns
+            + '</div>'
             + (c.body ? ('<p>' + esc(c.body) + '</p>') : '')
             + badge
             + '</div>';
@@ -1812,6 +1891,9 @@ app.get('/pm', (req, res) => {
           + '<div class="colHead">'
           +   '<b>' + esc(col.title) + '</b>'
           +   '<div class="colActions">'
+          +     '<button class="mini2" type="button" data-col-left="' + esc(col.id) + '" title="Move column left">◀</button>'
+          +     '<button class="mini2" type="button" data-col-right="' + esc(col.id) + '" title="Move column right">▶</button>'
+          +     '<button class="mini2" type="button" data-col-rename="' + esc(col.id) + '" title="Rename column">✎</button>'
           +     '<span class="muted small">' + (col.cards || []).length + '</span>'
           +     '<button class="addBtn" type="button" data-add="' + esc(col.id) + '">+ Card</button>'
           +   '</div>'
@@ -1821,8 +1903,68 @@ app.get('/pm', (req, res) => {
         host.appendChild(el);
       }
 
+      function moveColumn(colId, dir){
+        const cols = (PM && PM.columns) ? PM.columns : [];
+        const i = cols.findIndex(c => c && c.id === colId);
+        if (i < 0) return;
+        const j = i + dir;
+        if (j < 0 || j >= cols.length) return;
+        const tmp = cols[j];
+        cols[j] = cols[i];
+        cols[i] = tmp;
+        save().then(render);
+      }
+
+      function renameColumn(colId){
+        const cols = (PM && PM.columns) ? PM.columns : [];
+        const col = cols.find(c => c && c.id === colId);
+        if (!col) return;
+        const t = (prompt('Rename column', col.title || '') || '').trim();
+        if (!t) return;
+        col.title = t;
+        save().then(render);
+      }
+
+      async function moveCardInline(colId, cardId, dir){
+        const col = (PM && PM.columns || []).find(c => c && c.id === colId);
+        if (!col) return;
+        col.cards = Array.isArray(col.cards) ? col.cards : [];
+        const i = col.cards.findIndex(c => c && c.id === cardId);
+        if (i < 0) return;
+        const j = i + dir;
+        if (j < 0 || j >= col.cards.length) return;
+        const tmp = col.cards[j];
+        col.cards[j] = col.cards[i];
+        col.cards[i] = tmp;
+        await save();
+        render();
+      }
+
       Array.from(document.querySelectorAll('button[data-add]')).forEach(b => {
         b.addEventListener('click', () => addCard(b.getAttribute('data-add')));
+      });
+
+      Array.from(document.querySelectorAll('button[data-col-left]')).forEach(b => {
+        b.addEventListener('click', () => moveColumn(b.getAttribute('data-col-left'), -1));
+      });
+      Array.from(document.querySelectorAll('button[data-col-right]')).forEach(b => {
+        b.addEventListener('click', () => moveColumn(b.getAttribute('data-col-right'), +1));
+      });
+      Array.from(document.querySelectorAll('button[data-col-rename]')).forEach(b => {
+        b.addEventListener('click', () => renameColumn(b.getAttribute('data-col-rename')));
+      });
+
+      Array.from(document.querySelectorAll('button[data-cup]')).forEach(b => {
+        b.addEventListener('click', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          moveCardInline(b.getAttribute('data-cup'), b.getAttribute('data-cid'), -1);
+        });
+      });
+      Array.from(document.querySelectorAll('button[data-cdn]')).forEach(b => {
+        b.addEventListener('click', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          moveCardInline(b.getAttribute('data-cdn'), b.getAttribute('data-cid'), +1);
+        });
       });
 
       Array.from(document.querySelectorAll('.card[data-card-id]')).forEach(c => {

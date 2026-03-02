@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.51';
+const BUILD = '2026-03-02.52';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -397,6 +397,10 @@ app.get('/name', (req, res) => {
     .top{display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:baseline}
     h1{margin:0; font-size:18px}
     .muted{color:var(--muted)}
+    .pill{ display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid rgba(34,198,198,.40); background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08)); color: rgba(231,231,231,.92); text-decoration:none; white-space:nowrap; font-weight:750; font-size:12px; }
+    .pill:hover{ border-color: rgba(34,198,198,.70); background: linear-gradient(180deg, rgba(34,198,198,.26), rgba(34,198,198,.10)); }
+    .appsMenu a[aria-current="page"]{ border-color: rgba(154,208,255,0.70); }
+
     .card{border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,.03); padding:14px; margin-top:12px}
     textarea,input,select{width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text); font-size:14px; font-family: inherit; line-height:1.35}
     textarea::placeholder,input::placeholder{color: rgba(231,231,231,.35)}
@@ -426,7 +430,7 @@ app.get('/name', (req, res) => {
           <h1>ClawdName</h1>
           <div class="muted">Domain availability (v0). DNS heuristic: <b>taken</b> if SOA/NS exists; <b>likely available</b> if ENOTFOUND; otherwise <b>unknown</b>.</div>
         </div>
-        <div style="display:flex; justify-content:center; flex:1;">${appsMenuHtml('/name')}</div>
+        <div style="display:flex; justify-content:flex-end; flex:1;">${appsMenuHtml('/name')}</div>
       </div>
     </div>
 
@@ -1794,7 +1798,7 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
     .top{ display:grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items:baseline; }
     @media (max-width: 980px){ .top{ grid-template-columns: 1fr; } }
     .topL{ min-width: 240px; }
-    .topC{ display:flex; justify-content:center; }
+    .topC{ display:flex; justify-content:flex-end; }
     .topR{ display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
     @media (max-width: 980px){ .topC{ justify-content:flex-start; } .topR{ justify-content:flex-start; } }
 
@@ -1870,7 +1874,7 @@ function appsMenuHtml(activePath){
     { label: 'ClawdQueue', href: '/apps/queue' },
   ];
 
-  return '<div class="appsMenu" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center; align-items:center;">' +
+  return '<div class="appsMenu" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">' +
     items.map(it => {
       const isActive = (path === it.href);
       return '<a class="pill" href="' + it.href + '" ' + (isActive ? 'aria-current="page"' : '') + '>' + it.label + '</a>';
@@ -3036,6 +3040,9 @@ app.get('/pm', (req, res) => {
     .top{display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:baseline}
     .top h1{margin:0; font-size:18px}
     .muted{color:var(--muted)}
+    .pill{ display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid rgba(34,198,198,.40); background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08)); color: rgba(231,231,231,.92); text-decoration:none; white-space:nowrap; font-weight:750; font-size:12px; }
+    .pill:hover{ border-color: rgba(34,198,198,.70); background: linear-gradient(180deg, rgba(34,198,198,.26), rgba(34,198,198,.10)); }
+    .appsMenu a[aria-current="page"]{ border-color: rgba(154,208,255,0.70); }
 
     .boardWrap{flex:1; min-height:0; overflow-x:auto; overflow-y:auto; margin-top:12px; padding-bottom:10px;}
     .board{display:flex; gap:12px; align-items:flex-start; width:max-content; min-width:100%;}
@@ -3097,16 +3104,16 @@ app.get('/pm', (req, res) => {
 </head>
 <body>
   <div class="wrap">
-    <div class="top" style="display:grid; grid-template-columns: 1fr auto; gap:12px; align-items:baseline;">
-      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:baseline; justify-content:space-between;">
-        <div>
-          <h1>ClawdPM</h1>
-          <div class="muted small">Cards are task-groups. Click a card to generate + manage to-dos.</div>
-          <div class="muted small" id="pm_js_status" style="margin-top:6px;">JS: (loading…)</div>
-        </div>
-        <div style="display:flex; justify-content:center; flex:1;">${appsMenuHtml('/pm')}</div>
+    <div class="top" style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:baseline;">
+      <div>
+        <h1>ClawdPM</h1>
+        <div class="muted small">Cards are task-groups. Click a card to generate + manage to-dos.</div>
+        <div class="muted small" id="pm_js_status" style="margin-top:6px;">JS: (loading…)</div>
       </div>
-      <button class="btn" id="pmRefresh" type="button">Refresh</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end;">
+        ${appsMenuHtml('/pm')}
+        <button class="btn" id="pmRefresh" type="button">Refresh</button>
+      </div>
     </div>
 
     <div class="boardWrap" id="pmBoardWrap">

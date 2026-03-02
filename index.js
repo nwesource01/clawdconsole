@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.39';
+const BUILD = '2026-03-02.40';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1735,7 +1735,124 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
       })();
       </script>
     ` },
-    build: { title:'ClawdBuild', subtitle:'Build pipeline surface (placeholder).', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder for layered delivery: spec → tasks → code → tests → commits → release.</div>` },
+    build: { title:'ClawdBuild', subtitle:'Versioning + release surface (console build, commits, changelog).', body:`
+      <div class="subcard" style="line-height:1.55;">
+        <div class="muted">A lightweight build/release surface: what’s running, what changed, and what to test next.</div>
+
+        <div class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button class="pill" id="bRefresh" type="button">Refresh</button>
+          <span class="muted" id="bMsg"></span>
+        </div>
+
+        <div class="grid" style="margin-top:12px; grid-template-columns: 1fr 1fr; align-items:start;">
+          <div class="card" style="background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Current Build</div>
+            <div id="bBuild" class="muted">Loading…</div>
+            <div style="margin-top:10px; font-weight:900;">Queue</div>
+            <div id="bQueue" class="muted" style="margin-top:6px;">Loading…</div>
+          </div>
+
+          <div class="card" style="background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Health</div>
+            <div id="bHealth" class="muted">Loading…</div>
+            <div class="muted" style="margin-top:10px;">Tip: use Changelog → Update to keep patch notes aligned with transcript history.</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="font-weight:900; margin-bottom:8px;">Recent commits</div>
+          <div id="bCommits" class="muted">Loading…</div>
+        </div>
+
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="font-weight:900; margin-bottom:8px;">Changelog</div>
+          <div id="bChangelog" class="muted">Loading…</div>
+        </div>
+      </div>
+
+      <script>
+      (() => {
+        const $ = (id) => document.getElementById(id);
+        const msg = $('bMsg');
+        const setMsg = (t) => { if (msg) msg.textContent = t || ''; };
+        const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+        async function load(){
+          setMsg('');
+          try {
+            const [bRes, hRes, qRes, cRes, chRes] = await Promise.all([
+              fetch('/api/build', { credentials:'include', cache:'no-store' }),
+              fetch('/healthz', { credentials:'include', cache:'no-store' }),
+              fetch('/api/queue/state', { credentials:'include', cache:'no-store' }),
+              fetch('/api/repo/commits?limit=25', { credentials:'include', cache:'no-store' }),
+              fetch('/api/changelog?limit=30', { credentials:'include', cache:'no-store' }),
+            ]);
+
+            const bJ = await bRes.json().catch(() => null);
+            const build = (bJ && bJ.ok) ? String(bJ.build||'') : '';
+            if ($('bBuild')) $('bBuild').innerHTML = build ? ('Build: <code>' + esc(build) + '</code>') : 'Unknown';
+
+            const hTxt = await hRes.text();
+            if ($('bHealth')) $('bHealth').textContent = hRes.ok ? ('OK (' + String(hTxt||'').slice(0,120) + ')') : ('FAIL ' + hRes.status);
+
+            const qJ = await qRes.json().catch(() => null);
+            if ($('bQueue')) {
+              const st = (qJ && qJ.ok && qJ.state) ? qJ.state : {};
+              const parts = [
+                st.selectedColumnId ? ('column=' + st.selectedColumnId) : null,
+                (st.autorunEnabled ? 'autorun=ON' : 'autorun=OFF'),
+                st.currentCardId ? ('current=' + st.currentCardId) : null,
+                st.pendingRunAt ? ('pending=' + String(st.pendingRunAt).slice(0,19).replace('T',' ')) : null,
+              ].filter(Boolean);
+              $('bQueue').textContent = parts.join(' • ') || 'No queue state.';
+            }
+
+            const cJ = await cRes.json().catch(() => null);
+            const commits = (cJ && cJ.ok && Array.isArray(cJ.commits)) ? cJ.commits : [];
+            if ($('bCommits')) {
+              if (!commits.length) $('bCommits').textContent = 'No commits found.';
+              else $('bCommits').innerHTML = commits.map(c => {
+                const short = String(c.hash||'').slice(0,7);
+                const subj = esc(c.subject||'');
+                const when = esc(c.date||'');
+                return '<div style="padding:10px 8px; border-top:1px solid rgba(255,255,255,0.08);">'
+                  + '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">'
+                  + '<div><code>' + esc(short) + '</code></div>'
+                  + '<div class="muted">' + when + '</div>'
+                  + '</div>'
+                  + '<div style="margin-top:6px;">' + subj + '</div>'
+                  + '</div>';
+              }).join('');
+            }
+
+            const chJ = await chRes.json().catch(() => null);
+            const entries = (chJ && chJ.ok && Array.isArray(chJ.entries)) ? chJ.entries : [];
+            if ($('bChangelog')) {
+              if (!entries.length) $('bChangelog').textContent = 'No changelog entries yet.';
+              else $('bChangelog').innerHTML = entries.map(e => {
+                const t = esc(e.title||'');
+                const ts = esc(String(e.ts||'').slice(0,19).replace('T',' '));
+                const b = esc(e.build||'');
+                return '<div style="padding:10px 8px; border-top:1px solid rgba(255,255,255,0.08);">'
+                  + '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">'
+                  + '<div style="font-weight:900;">' + t + (b?(' <span class="muted">(' + b + ')</span>'):'') + '</div>'
+                  + '<div class="muted">' + ts + '</div>'
+                  + '</div>'
+                  + '</div>';
+              }).join('');
+            }
+
+          } catch (e) {
+            setMsg('Load failed: ' + String(e));
+          }
+        }
+
+        const btn = $('bRefresh');
+        if (btn) btn.addEventListener('click', load);
+        load();
+      })();
+      </script>
+    ` },
     queue: { title:'ClawdQueue', subtitle:'Serial execution rail (PM-backed).', body:`
       <div class="subcard" style="line-height:1.55;">
         <div class="muted">Source: a selected PM column in <code>${PM_FILE}</code>. Queue + PM share the same cards (status is synced).</div>

@@ -1488,32 +1488,29 @@
     });
   }
 
-  // Plan button (two-stage)
+  // Plan button (two-stage): FIRST click inserts prefix; SECOND click confirms by focusing Send.
   const planBtn = document.getElementById('plan');
   twoStage(planBtn, async () => {
-    const text = ta ? ta.value : '';
-    const atts = pendingAttachments;
-    pendingAttachments = [];
-    renderPreview();
-    if (ta) ta.value = '';
-    await sendMessageWsOrHttp('PLAN MODE\n' + (text || ''), atts);
-    await refresh();
-  }, { armedLabel: 'Confirm Plan' });
+    if (!ta) return;
+    const cur = ta.value || '';
+    if (!/^PLAN MODE\n/.test(cur)) {
+      ta.value = 'PLAN MODE\n' + cur;
+    }
+    ta.focus();
+  }, { armedLabel: 'Insert Plan' });
 
-  // Iterate button (two-stage): send with an explicit iterative authorization + ruleset.
+  // Iterate button (two-stage): inserts the iterative wrapper (does not send).
   const iterateBtn = document.getElementById('iterate');
   twoStage(iterateBtn, async () => {
-    const text = ta ? ta.value : '';
-    const atts = pendingAttachments;
-    pendingAttachments = [];
-    renderPreview();
-    if (ta) ta.value = '';
+    if (!ta) return;
+    const cur = String(ta.value || '');
+    const goal = cur.trim();
 
     const rules = [
       'ITERATIVE MODE (AUTHORIZED)',
       '',
       'Goal:',
-      String(text || '').trim(),
+      goal,
       '',
       'Rules:',
       '1) You are authorized to loop: plan → implement → test → revise until the goal is accomplished.',
@@ -1527,9 +1524,10 @@
       '- Post the final result and how it was verified.',
     ].join('\n');
 
-    await sendMessageWsOrHttp(rules, atts);
-    await refresh();
-  }, { armedLabel: 'Confirm Iterate' });
+    // Keep user's goal at top; append wrapper after a separator.
+    ta.value = goal + '\n\n' + rules;
+    ta.focus();
+  }, { armedLabel: 'Insert Iterate' });
 
   // Send button (two-stage)
   if (sendBtn) {
@@ -1545,42 +1543,38 @@
     }, { armedLabel: 'Confirm Send' });
   }
 
-  if (ta) {
-    ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        const text = ta.value;
-        const atts = pendingAttachments;
-        pendingAttachments = [];
-        renderPreview();
-        ta.value = '';
-        sendMessageWsOrHttp(text, atts).then(refresh);
-      }
-    });
-  }
+  // Disable Enter-to-send (per two-stage safety). Use Send button confirmation.
+  // Shift+Enter still inserts a newline normally.
+  // (If you want Enter-to-send back later, we can add a setting.)
 
   // Quick action buttons
   const btnCatchUp = document.getElementById('btnCatchUp');
-  if (btnCatchUp) {
-    btnCatchUp.addEventListener('click', async () => {
-      try { await refresh(); } catch {}
-      try { if (chatlog) chatlog.scrollTop = chatlog.scrollHeight; } catch {}
-    });
-  }
+  twoStage(btnCatchUp, async () => {
+    if (!ta) return;
+    // Per transcript: Catch up inserts a prompt so user can decide before sending.
+    const insert = 'Catch up: Please give me a concise recap of what happened most recently, what is currently in-progress, and what you think the next 3 actions should be.';
+    const cur = ta.value || '';
+    ta.value = insert + (cur ? ('\n\n' + cur) : '');
+    ta.focus();
+  }, { armedLabel: 'Insert Catch Up' });
 
   const btnRecent = document.getElementById('btnReviewRecent');
   twoStage(btnRecent, async () => {
-    quickSend(
-      'Review Recent: Please review the last 100 messages from *me* in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.'
-    );
-  }, { armedLabel: 'Confirm Review Recent' });
+    if (!ta) return;
+    const insert = 'Review Recent: Please review the last 100 messages from *me* in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.';
+    const cur = ta.value || '';
+    ta.value = insert + (cur ? ('\n\n' + cur) : '');
+    ta.focus();
+  }, { armedLabel: 'Insert Review Recent' });
 
   const btnWeek = document.getElementById('btnReviewWeek');
   twoStage(btnWeek, async () => {
-    quickSend(
-      'Review Week: Please review all messages from the last 7 days in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.'
-    );
-  }, { armedLabel: 'Confirm Review Week' });
+    if (!ta) return;
+    const insert = 'Review Week: Please review all messages from the last 7 days in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.';
+    const cur = ta.value || '';
+    ta.value = insert + (cur ? ('\n\n' + cur) : '');
+    ta.focus();
+  }, { armedLabel: 'Insert Review Week' });
 
   // Repeat Last: copy your most recent message back into the textarea (no send).
   const btnRepeat = document.getElementById('btnRepeatLast');
@@ -1597,15 +1591,19 @@
     });
   }
 
-  // GitCommit: ask the agent to commit current repo changes (two-stage)
+  // GitCommit (two-stage): inserts an instruction into composer; user still hits Send to execute.
   const btnGitCommit = document.getElementById('btnGitCommit');
   twoStage(btnGitCommit, async () => {
-    quickSend(
-      'GitCommit: Please commit the current changes in /home/master/clawd/apps/console.\n' +
-      '- Use: git status → review diff → git add -A → git commit -m "<message>"\n' +
-      '- If you are unsure of message, propose 2-3 options and wait for confirmation.\n'
-    );
-  }, { armedLabel: 'Confirm GitCommit' });
+    if (!ta) return;
+    const insert = [
+      'GitCommit: Please commit the current changes in /home/master/clawd/apps/console.',
+      '- Use: git status → review diff → git add -A → git commit -m "<message>"',
+      '- If you are unsure of message, propose 2-3 options and wait for confirmation.'
+    ].join('\n');
+    const cur = ta.value || '';
+    ta.value = insert + (cur ? ('\n\n' + cur) : '');
+    ta.focus();
+  }, { armedLabel: 'Insert GitCommit' });
 
   function initRulesAccordion() {
     const heads = Array.from(document.querySelectorAll('.ruleHead'));

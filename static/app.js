@@ -1,5 +1,11 @@
 // Clawd Console frontend
 (() => {
+  // Avoid small browser "remembered scroll" bumps on reload.
+  try {
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+    window.scrollTo(0, 0);
+  } catch {}
+
   // BUILD is served by the backend so we have a single source of truth.
   let BUILD = 'unknown';
 
@@ -22,6 +28,7 @@
   // Cache last loaded messages for quick actions (Repeat Last, etc.)
   let messageCache = [];
   let lastUserText = '';
+  let didInitialChatScroll = false;
 
   function dbg(s) {
     if (debugEl) debugEl.textContent = s || '';
@@ -917,9 +924,14 @@
       if (isBot) wireCopyButtons(el);
     }
 
-    // Scroll is 100% operator-controlled. Preserve exact position across refreshes.
+    // Default to bottom on first load (recent messages), then preserve operator scroll exactly.
     const maxTop = Math.max(0, chatlog.scrollHeight - chatlog.clientHeight);
-    chatlog.scrollTop = Math.min(prevTop, maxTop);
+    if (!didInitialChatScroll) {
+      chatlog.scrollTop = maxTop;
+      didInitialChatScroll = true;
+    } else {
+      chatlog.scrollTop = Math.min(prevTop, maxTop);
+    }
   }
 
   function openPmModalFromMessage(m){

@@ -507,8 +507,10 @@
       const onScreen = lastRect.left < viewportRight && lastRect.right <= viewportRight;
       const targetRight = onScreen ? lastRect.right : wrapRect.right;
 
-      const maxW = Math.max(240, Math.floor(targetRight - menuRect.left));
-      menuWrap.style.maxWidth = maxW + 'px';
+      // Pull the menu left so its right edge aligns to the last visible column's right edge.
+      const delta = Math.max(0, Math.floor(wrapRect.right - targetRight));
+      menuWrap.style.marginRight = delta ? (delta + 'px') : '0px';
+      menuWrap.style.maxWidth = '';
     } catch {}
   }
 

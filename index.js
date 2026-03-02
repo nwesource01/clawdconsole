@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.17';
+const BUILD = '2026-03-02.18';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1421,6 +1421,177 @@ app.post('/api/scheduled/add', (req, res) => {
   appendJsonl(SCHED_FILE, entry);
   broadcast({ type: 'scheduled', entry });
   res.json({ ok: true, entry });
+});
+
+// --- ClawdApps (ecosystem map + module pages) ---
+function appsPageShell({ title, subtitle, bodyHtml }) {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title}</title>
+  <style>
+    :root{ --bg:#0b1020; --text:#e8eefc; --muted: rgba(232,238,252,.68); --border: rgba(255,255,255,0.10); --card: rgba(255,255,255,0.04); --card2: rgba(0,0,0,0.14); --accent:#22c6c6; }
+    body{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--bg); color: var(--text); margin:0; }
+    a{ color:#9ad0ff; }
+    .wrap{ max-width: 1400px; margin:0 auto; padding: 18px; }
+    .top{ display:flex; justify-content:space-between; gap: 12px; flex-wrap:wrap; align-items:baseline; }
+    h1{ margin:0; font-size: 22px; }
+    .muted{ color: var(--muted); font-size: 12px; }
+    .pill{ display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid rgba(34,198,198,.40); background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08)); color: rgba(231,231,231,.92); text-decoration:none; white-space:nowrap; font-weight:750; font-size:12px; }
+    .pill:hover{ border-color: rgba(34,198,198,.70); background: linear-gradient(180deg, rgba(34,198,198,.26), rgba(34,198,198,.10)); }
+    .card{ background: var(--card); border:1px solid var(--border); border-radius: 14px; padding: 14px; }
+    .grid{ display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+    @media (max-width: 1180px){ .grid{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
+    @media (max-width: 700px){ .grid{ grid-template-columns: 1fr; } }
+    .app{ display:flex; gap:12px; align-items:flex-start; text-decoration:none; color: inherit; }
+    .ico{ width: 38px; height:38px; border-radius: 12px; background: rgba(34,198,198,.10); border:1px solid rgba(34,198,198,.35); display:flex; align-items:center; justify-content:center; flex: 0 0 auto; }
+    .ico svg{ width:22px; height:22px; stroke: rgba(34,198,198,.95); fill:none; stroke-width: 2.4; }
+    .appTitle{ font-weight: 900; font-size: 14px; }
+    .appDesc{ margin-top:4px; color: rgba(232,238,252,.72); font-size: 12px; line-height:1.35; }
+    .footer{ margin-top: 14px; color: rgba(232,238,252,.55); font-size: 12px; }
+    .subcard{ margin-top: 14px; background: var(--card2); border:1px solid rgba(255,255,255,0.10); border-radius: 14px; padding: 14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>${title}</h1>
+        <div class="muted" style="margin-top:6px;">${subtitle || ''}</div>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <a class="pill" href="/apps" target="_blank" rel="noopener">Apps</a>
+        <a class="pill" href="/" target="_blank" rel="noopener">Console</a>
+        <a class="pill" href="/transcript" target="_blank" rel="noopener">Script</a>
+        <a class="pill" href="/pm" target="_blank" rel="noopener">PM</a>
+      </div>
+    </div>
+
+    ${bodyHtml || ''}
+
+    <div class="footer">Build: <code>${BUILD}</code></div>
+  </div>
+</body>
+</html>`;
+}
+
+function appsIcon(kind){
+  // lightweight icon set (inline SVG) — keeps the suite feeling like one product.
+  const common = {
+    script: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10M7 12h10M7 17h7"/></svg>',
+    pm: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7z"/><path d="M9 10h6M9 13h6"/></svg>',
+    name: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-4.4 7-10a7 7 0 0 0-14 0c0 5.6 7 10 7 10z"/><path d="M10 11h4"/></svg>',
+    repo: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10M7 12h10M7 17h10"/></svg>',
+    sec: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8 4v6c0 5-3.5 9.4-8 10-4.5-.6-8-5-8-10V6l8-4z"/><path d="M9.5 12l1.8 1.8L14.8 10"/></svg>',
+    ops: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg>',
+    pub: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v12H4z"/><path d="M7 10h10M7 13h10M7 16h6"/></svg>',
+    build: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l7-7 3 3 6-6"/><path d="M20 7v6h-6"/></svg>',
+    queue: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10M7 12h10M7 17h10"/><path d="M4 7h0M4 12h0M4 17h0"/></svg>',
+  };
+  return common[kind] || common.repo;
+}
+
+app.get('/apps', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+
+  const apps = [
+    { k:'script', title:'ClawdScript', href:'/transcript', desc:'The full conversation record with search + filters.' },
+    { k:'pm', title:'ClawdPM', href:'/pm', desc:'Trello-style projects, lists, and cards.' },
+    { k:'name', title:'ClawdName', href:'/name', desc:'Domain availability helper (v0 heuristic).' },
+    { k:'repo', title:'ClawdRepo', href:'/apps/repo', desc:'Repo status, commits, and links.' },
+    { k:'sec', title:'ClawdSec', href:'/apps/sec', desc:'Security SOP + copy/paste-safe ops.' },
+    { k:'ops', title:'ClawdOps', href:'/apps/ops', desc:'Operational runbooks, health, uptime, backups.' },
+    { k:'pub', title:'ClawdPub', href:'/apps/pub', desc:'Publishing + SOP guidelines.' },
+    { k:'build', title:'ClawdBuild', href:'/apps/build', desc:'Builder pipeline surface (placeholder).' },
+    { k:'queue', title:'ClawdQueue', href:'/apps/queue', desc:'Agent execution queue (placeholder).' },
+  ];
+
+  const bodyHtml = `
+    <div class="subcard">
+      <div style="font-weight:900;">Ecosystem map</div>
+      <div class="muted" style="margin-top:6px;">Per transcript: <b>/apps is map-only</b>. Every module opens on its own route so you never land mid-page.</div>
+    </div>
+    <div class="grid">${apps.map(a => {
+      return `<a class="card app" href="${a.href}" target="_blank" rel="noopener">
+        <div class="ico">${appsIcon(a.k)}</div>
+        <div style="min-width:0;">
+          <div class="appTitle">${a.title}</div>
+          <div class="appDesc">${a.desc}</div>
+        </div>
+      </a>`;
+    }).join('')}</div>
+  `;
+
+  res.type('text/html; charset=utf-8').send(appsPageShell({
+    title: 'ClawdApps',
+    subtitle: 'Directory / lobby (map-only). Open modules in new tabs.',
+    bodyHtml,
+  }));
+});
+
+function renderModulePage(key){
+  const map = {
+    repo: { title:'ClawdRepo', subtitle:'Repo info for this workspace (commits, status, links).', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">This page is a dedicated surface for repo-level operations.
+
+For now, use the Repo panel inside Console (ClawdApps → Repo tab) until we wire more here.</div>` },
+    sec: { title:'ClawdSec', subtitle:'Security SOP + safe operator patterns.', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder.
+
+Rule of thumb: do not paste real secrets into chat/web UI. Use server env files and rotate when needed.</div>` },
+    ops: { title:'ClawdOps', subtitle:'Operations: uptime, deploy checklist, health checks.', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder.
+
+Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
+    pub: { title:'ClawdPub', subtitle:'Publishing + SOP / design guidelines.', body:`<div class="subcard" style="line-height:1.55;">Open SOP: <a href="/clawdpub/sop" target="_blank" rel="noopener">/clawdpub/sop</a></div>` },
+    build: { title:'ClawdBuild', subtitle:'Build pipeline surface (placeholder).', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder for layered delivery: spec → tasks → code → tests → commits → release.</div>` },
+    queue: { title:'ClawdQueue', subtitle:'Agent execution queue (placeholder).', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder.
+
+Intent (from transcript): Queue is for the agent runtime: serial execution, pause on uncertainty, throttle-aware.</div>` },
+  };
+
+  const spec = map[key];
+  if (!spec) return null;
+
+  const bodyHtml = `
+    <div class="subcard">
+      <div style="font-weight:900;">${spec.title}</div>
+      <div class="muted" style="margin-top:6px;">${spec.subtitle}</div>
+      <div style="margin-top:12px;">${spec.body}</div>
+    </div>
+  `;
+
+  return appsPageShell({ title: spec.title, subtitle: spec.subtitle, bodyHtml });
+}
+
+app.get('/apps/repo', (req,res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const html = renderModulePage('repo');
+  res.type('text/html; charset=utf-8').send(html);
+});
+app.get('/apps/sec', (req,res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const html = renderModulePage('sec');
+  res.type('text/html; charset=utf-8').send(html);
+});
+app.get('/apps/ops', (req,res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const html = renderModulePage('ops');
+  res.type('text/html; charset=utf-8').send(html);
+});
+app.get('/apps/pub', (req,res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const html = renderModulePage('pub');
+  res.type('text/html; charset=utf-8').send(html);
+});
+app.get('/apps/build', (req,res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const html = renderModulePage('build');
+  res.type('text/html; charset=utf-8').send(html);
+});
+app.get('/apps/queue', (req,res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const html = renderModulePage('queue');
+  res.type('text/html; charset=utf-8').send(html);
 });
 
 app.get('/api/transcript/raw', (req, res) => {

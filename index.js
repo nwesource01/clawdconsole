@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.43';
+const BUILD = '2026-03-02.44';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -226,6 +226,9 @@ function readLastJsonl(filePath, limit = 50) {
 }
 
 const app = express();
+
+// --- ClawdCode root (restrict file browsing to this repo subtree) ---
+const CODE_ROOT = path.resolve(__dirname);
 app.disable('x-powered-by');
 app.use(helmet({
   contentSecurityPolicy: false, // keep it simple for now
@@ -1033,6 +1036,86 @@ app.get('/api/build', (req, res) => {
   res.json({ ok: true, build: BUILD });
 });
 
+// --- ClawdCode (browse + edit files under CODE_ROOT) ---
+function safeCodePath(rel){
+  const r = String(rel || '').replace(/\\/g, '/');
+  const clean = r.replace(/^\/+/, '');
+  const abs = path.resolve(CODE_ROOT, clean);
+  if (!abs.startsWith(CODE_ROOT + path.sep) && abs !== CODE_ROOT) return null;
+  return abs;
+}
+
+app.get('/api/code/tree', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const rel = String(req.query.path || '').trim();
+  const abs = safeCodePath(rel);
+  if (!abs) return res.status(400).json({ ok:false, error:'bad_path' });
+
+  try {
+    const st = fs.statSync(abs);
+    if (!st.isDirectory()) return res.status(400).json({ ok:false, error:'not_dir' });
+    const names = fs.readdirSync(abs);
+    const items = names
+      .filter(n => n && !n.startsWith('.'))
+      .map(n => {
+        const p = path.join(abs, n);
+        let s; try { s = fs.statSync(p); } catch { s = null; }
+        const isDir = !!(s && s.isDirectory());
+        return {
+          name: n,
+          type: isDir ? 'dir' : 'file',
+          path: path.relative(CODE_ROOT, p).replace(/\\/g,'/'),
+          size: s && !isDir ? s.size : null,
+          mtime: s ? new Date(s.mtimeMs).toISOString() : null,
+        };
+      })
+      .sort((a,b) => (a.type === b.type) ? a.name.localeCompare(b.name) : (a.type === 'dir' ? -1 : 1));
+
+    res.json({ ok:true, root: CODE_ROOT, path: path.relative(CODE_ROOT, abs).replace(/\\/g,'/'), items });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.get('/api/code/file', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const rel = String(req.query.path || '').trim();
+  const abs = safeCodePath(rel);
+  if (!abs) return res.status(400).json({ ok:false, error:'bad_path' });
+
+  try {
+    const st = fs.statSync(abs);
+    if (!st.isFile()) return res.status(400).json({ ok:false, error:'not_file' });
+    if (st.size > 1024*1024) return res.status(413).json({ ok:false, error:'file_too_large' });
+    const buf = fs.readFileSync(abs);
+    if (buf.includes(0)) return res.status(415).json({ ok:false, error:'binary_file' });
+    const text = buf.toString('utf8');
+    res.json({ ok:true, path: path.relative(CODE_ROOT, abs).replace(/\\/g,'/'), size: st.size, mtime: new Date(st.mtimeMs).toISOString(), text });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.post('/api/code/file', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const rel = String(req.body?.path || '').trim();
+  const text = String(req.body?.text ?? '');
+  const abs = safeCodePath(rel);
+  if (!abs) return res.status(400).json({ ok:false, error:'bad_path' });
+  if (Buffer.byteLength(text, 'utf8') > 1024*1024) return res.status(413).json({ ok:false, error:'payload_too_large' });
+
+  try {
+    const st = fs.existsSync(abs) ? fs.statSync(abs) : null;
+    if (st && !st.isFile()) return res.status(400).json({ ok:false, error:'not_file' });
+    fs.writeFileSync(abs, text, 'utf8');
+    const st2 = fs.statSync(abs);
+    logWork('code.file.saved', { path: path.relative(CODE_ROOT, abs).replace(/\\/g,'/'), bytes: Buffer.byteLength(text,'utf8') });
+    res.json({ ok:true, size: st2.size, mtime: new Date(st2.mtimeMs).toISOString() });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 // --- ClawdOps (operator profile + repeated questions) ---
 const OPS_PROFILE_FILE = path.join(DATA_DIR, 'ops-profile.md');
 app.get('/api/ops/profile', (req, res) => {
@@ -1629,6 +1712,7 @@ function appsIcon(kind){
     pub: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v12H4z"/><path d="M7 10h10M7 13h10M7 16h6"/></svg>',
     build: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l7-7 3 3 6-6"/><path d="M20 7v6h-6"/></svg>',
     queue: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10M7 12h10M7 17h10"/><path d="M4 7h0M4 12h0M4 17h0"/></svg>',
+    code: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l-4-6 4-6"/><path d="M15 6l4 6-4 6"/><path d="M13 5l-2 14"/></svg>',
   };
   return common[kind] || common.repo;
 }
@@ -1665,6 +1749,7 @@ app.get('/apps', (req, res) => {
     { k:'pm', title:'ClawdPM', href:'/pm', desc:'Trello-style projects, lists, and cards.' },
     { k:'name', title:'ClawdName', href:'/name', desc:'Domain availability helper (v0 heuristic).' },
     { k:'repo', title:'ClawdRepo', href:'/apps/repo', desc:'Repo status, commits, and links.' },
+    { k:'code', title:'ClawdCode', href:'/apps/code', desc:'Browse/edit the Console project files.' },
     { k:'sec', title:'ClawdSec', href:'/apps/sec', desc:'Security SOP + copy/paste-safe ops.' },
     { k:'ops', title:'ClawdOps', href:'/apps/ops', desc:'Operational runbooks, health, uptime, backups.' },
     { k:'pub', title:'ClawdPub', href:'/apps/pub', desc:'Publishing + SOP guidelines.' },
@@ -1707,6 +1792,32 @@ function renderModulePage(key){
           <iframe src="/transcript" style="width:100%; height: 78vh; border:0; background: transparent;"></iframe>
         </div>
       </div>
+    ` },
+    code: { title:'ClawdCode', subtitle:'Browse + edit files (scoped to the Console project).', body:`
+      <div class="subcard" style="line-height:1.55;">
+        <div class="muted">Root: <code>${CODE_ROOT}</code></div>
+        <div class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button class="pill" id="codeUp" type="button">Up</button>
+          <button class="pill" id="codeSave" type="button">Save</button>
+          <button class="pill" id="codeReload" type="button">Reload</button>
+          <span class="muted" id="codeMsg"></span>
+        </div>
+
+        <div style="margin-top:12px; display:grid; grid-template-columns: 360px 1fr; gap:12px; align-items:stretch;">
+          <div class="card" style="background: rgba(0,0,0,0.10); overflow:auto; max-height: 75vh;">
+            <div style="font-weight:900; margin-bottom:8px;">Files</div>
+            <div id="codeTree"></div>
+          </div>
+          <div class="card" style="background: rgba(0,0,0,0.10); display:flex; flex-direction:column; gap:10px;">
+            <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+              <div style="font-weight:900;">Editor</div>
+              <div class="muted" id="codePath" style="max-width: 70ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
+            </div>
+            <textarea id="codeEditor" spellcheck="false" style="flex:1; min-height: 65vh; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></textarea>
+          </div>
+        </div>
+      </div>
+      <script src="/static/code.js"></script>
     ` },
     repo: { title:'ClawdRepo', subtitle:'Commits for this project + useful repo links.', body:`
       <div class="subcard" style="line-height:1.55;">
@@ -2345,6 +2456,11 @@ function renderModulePage(key){
 app.get('/apps/script', (req,res) => {
   res.setHeader('Cache-Control', 'no-store');
   const html = renderModulePage('script');
+  res.type('text/html; charset=utf-8').send(html);
+});
+app.get('/apps/code', (req,res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const html = renderModulePage('code');
   res.type('text/html; charset=utf-8').send(html);
 });
 app.get('/apps/repo', (req,res) => {

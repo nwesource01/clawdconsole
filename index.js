@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.31';
+const BUILD = '2026-03-02.32';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -2687,7 +2687,15 @@ app.get('/pm', (req, res) => {
       ? window.crypto.randomUUID()
       : ('c_' + Math.random().toString(16).slice(2) + Date.now().toString(16));
 
-    let PM = null;
+    let PM = ${(() => {
+      try {
+        const pm = readPM();
+        // prevent </script> breaks
+        return JSON.stringify(pm).replace(/</g, '\\u003c');
+      } catch {
+        return '{"columns":[]}';
+      }
+    })()};
     let ACTIVE = null; // { colId, cardId }
 
     function priClass(p){
@@ -3159,7 +3167,11 @@ app.get('/pm', (req, res) => {
       }
     }
 
+    // Boot immediately from server-provided PM so cards are clickable even if fetch/auth fails.
+    try { render(); } catch {}
+
     document.getElementById('pmRefresh').addEventListener('click', load);
+    // Refresh from API in background (authoritative), but UI works even if this fails.
     load();
   </script>
 </body>

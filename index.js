@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.27';
+const BUILD = '2026-03-02.28';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1737,9 +1737,15 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
     build: { title:'ClawdBuild', subtitle:'Build pipeline surface (placeholder).', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder for layered delivery: spec → tasks → code → tests → commits → release.</div>` },
     queue: { title:'ClawdQueue', subtitle:'Serial execution rail (PM-backed).', body:`
       <div class="subcard" style="line-height:1.55;">
-        <div class="muted">Source: PM column <code>rebuild</code> in <code>${PM_FILE}</code>. Queue + PM share the same cards (status is synced).</div>
+        <div class="muted">Source: a selected PM column in <code>${PM_FILE}</code>. Queue + PM share the same cards (status is synced).</div>
 
         <div class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap; align-items:center;">
+          <span class="muted">Column</span>
+          <select id="qCol" style="min-width:220px;"></select>
+          <button class="pill" id="qColSave" type="button">Use column</button>
+
+          <span style="flex:1;"></span>
+
           <button class="pill" id="qRefresh" type="button">Refresh</button>
           <button class="pill" id="qEnqueueAll" type="button">Enqueue all</button>
           <button class="pill" id="qClearQueue" type="button">Clear queued</button>
@@ -1795,8 +1801,27 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
           const res = await fetch('/api/pm', { credentials:'include', cache:'no-store' });
           const j = await res.json();
           const cols = (j && j.ok && j.pm && Array.isArray(j.pm.columns)) ? j.pm.columns : [];
-          const rebuild = cols.find(c => String(c.id||'') === 'rebuild' || String(c.title||'').toLowerCase() === 'rebuild');
-          const cards = (rebuild && Array.isArray(rebuild.cards)) ? rebuild.cards : [];
+
+          const stRes = await fetch('/api/queue/state', { credentials:'include', cache:'no-store' });
+          const stJ = await stRes.json();
+          const selectedId = (stJ && stJ.ok && stJ.state && stJ.state.selectedColumnId) ? String(stJ.state.selectedColumnId) : 'rebuild';
+
+          // Populate column picker
+          const sel = $('qCol');
+          if (sel) {
+            sel.innerHTML = '';
+            for (const c of cols) {
+              if (!c || !c.id) continue;
+              const opt = document.createElement('option');
+              opt.value = String(c.id);
+              opt.textContent = (c.title || c.id);
+              sel.appendChild(opt);
+            }
+            sel.value = selectedId;
+          }
+
+          const col = cols.find(c => String(c.id||'') === selectedId) || cols.find(c => String(c.id||'') === 'rebuild' || String(c.title||'').toLowerCase() === 'rebuild');
+          const cards = (col && Array.isArray(col.cards)) ? col.cards : [];
 
           const queued = cards.filter(c => (c.queueStatus === 'queued' || c.queuedAt) && !c.completedAt);
           const done = cards.filter(c => c.queueStatus === 'done' || c.completedAt);
@@ -1878,8 +1903,14 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
           const res = await fetch('/api/pm', { credentials:'include', cache:'no-store' });
           const j = await res.json();
           const cols = (j && j.ok && j.pm && Array.isArray(j.pm.columns)) ? j.pm.columns : [];
-          const rebuild = cols.find(c => String(c.id||'') === 'rebuild' || String(c.title||'').toLowerCase() === 'rebuild');
-          const cards = (rebuild && Array.isArray(rebuild.cards)) ? rebuild.cards : [];
+
+          const stRes = await fetch('/api/queue/state', { credentials:'include', cache:'no-store' });
+          const stJ = await stRes.json();
+          const selectedId = (stJ && stJ.ok && stJ.state && stJ.state.selectedColumnId) ? String(stJ.state.selectedColumnId) : 'rebuild';
+
+          const col = cols.find(c => String(c.id||'') === selectedId) || cols.find(c => String(c.id||'') === 'rebuild' || String(c.title||'').toLowerCase() === 'rebuild');
+          const cards = (col && Array.isArray(col.cards)) ? col.cards : [];
+
           for (const c of cards){
             if (c.completedAt) continue;
             if (c.queueStatus === 'queued' || c.queuedAt) continue;
@@ -1894,8 +1925,14 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
           const res = await fetch('/api/pm', { credentials:'include', cache:'no-store' });
           const j = await res.json();
           const cols = (j && j.ok && j.pm && Array.isArray(j.pm.columns)) ? j.pm.columns : [];
-          const rebuild = cols.find(c => String(c.id||'') === 'rebuild' || String(c.title||'').toLowerCase() === 'rebuild');
-          const cards = (rebuild && Array.isArray(rebuild.cards)) ? rebuild.cards : [];
+
+          const stRes = await fetch('/api/queue/state', { credentials:'include', cache:'no-store' });
+          const stJ = await stRes.json();
+          const selectedId = (stJ && stJ.ok && stJ.state && stJ.state.selectedColumnId) ? String(stJ.state.selectedColumnId) : 'rebuild';
+
+          const col = cols.find(c => String(c.id||'') === selectedId) || cols.find(c => String(c.id||'') === 'rebuild' || String(c.title||'').toLowerCase() === 'rebuild');
+          const cards = (col && Array.isArray(col.cards)) ? col.cards : [];
+
           for (const c of cards){
             if (c.completedAt) continue;
             if (!(c.queueStatus === 'queued' || c.queuedAt)) continue;
@@ -1905,12 +1942,24 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
           load();
         }
 
+        async function saveSelectedColumn(){
+          const sel = $('qCol');
+          const id = sel ? String(sel.value||'').trim() : '';
+          if (!id) return;
+          setMsg('Saving…');
+          await fetch('/api/queue/state', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ state: { selectedColumnId: id } }) });
+          setMsg('Column set.');
+          load();
+        }
+
         const btnR = $('qRefresh');
         const btnA = $('qEnqueueAll');
         const btnC = $('qClearQueue');
+        const btnS = $('qColSave');
         if (btnR) btnR.addEventListener('click', load);
         if (btnA) btnA.addEventListener('click', enqueueAll);
         if (btnC) btnC.addEventListener('click', clearQueued);
+        if (btnS) btnS.addEventListener('click', saveSelectedColumn);
 
         load();
       })();
@@ -2116,6 +2165,19 @@ app.get('/transcript', (req, res) => {
 });
 
 const PM_FILE = path.join(DATA_DIR, 'pm.json');
+const QUEUE_STATE_FILE = path.join(DATA_DIR, 'queue.json');
+
+function readQueueState(){
+  const fallback = { selectedColumnId: 'rebuild', updatedAt: null };
+  return readJson(QUEUE_STATE_FILE, fallback);
+}
+function writeQueueState(s){
+  const out = (s && typeof s === 'object') ? s : readQueueState();
+  out.updatedAt = new Date().toISOString();
+  writeJson(QUEUE_STATE_FILE, out);
+  return out;
+}
+
 function readPM(){
   const fallback = {
     updatedAt: null,
@@ -2183,6 +2245,22 @@ app.post('/api/pm/cardPatch', (req, res) => {
   const saved = writePM(pm);
   logWork('pm.cardPatch', { cardId, queueStatus: found.queueStatus || null });
   res.json({ ok:true, card: found, pm: saved });
+});
+
+// Queue state: stores which PM column Queue is syncing
+app.get('/api/queue/state', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok:true, state: readQueueState() });
+});
+app.post('/api/queue/state', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const state = req.body && req.body.state;
+  const cur = readQueueState();
+  const next = { ...cur };
+  if (state && typeof state.selectedColumnId === 'string') next.selectedColumnId = state.selectedColumnId;
+  const saved = writeQueueState(next);
+  logWork('queue.stateSaved', saved);
+  res.json({ ok:true, state: saved });
 });
 
 // Generate to-dos for a PM card using the connected Gateway model.

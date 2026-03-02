@@ -334,6 +334,7 @@
 
   function renderOneList(de, isActive, labelRight = '') {
     const box = document.createElement('div');
+    box.className = 'deList';
     box.style.border = '1px solid rgba(255,255,255,0.10)';
     box.style.borderRadius = '12px';
     box.style.padding = '10px';
@@ -424,6 +425,7 @@
       const label = document.createElement('div');
       label.style.flex = '1';
       label.style.whiteSpace = 'pre-wrap';
+      label.style.wordBreak = 'break-word';
 
       const listComplete = !!de.completed || de.items.every(x => x.done);
       if (listComplete && cb.checked) {
@@ -694,21 +696,54 @@
   schedTab = 'jobs';
   renderScheduled(scheduledCache);
 
-  function renderPreview() {
-    if (!preview) return;
-    preview.innerHTML = '';
-    for (const a of pendingAttachments) {
-      const div = document.createElement('div');
-      div.className = 'thumb';
-      if (a.mime && a.mime.startsWith('image/')) {
-        div.innerHTML = '<img src="' + a.url + '" alt="preview" />\n' +
-          '<div class="muted">' + esc(a.filename) + '</div>';
-      } else {
-        div.innerHTML = '<div class="muted">Attached: <a href="' + a.url + '" target="_blank" rel="noopener">' +
-          esc(a.filename) + '</a></div>';
-      }
-      preview.appendChild(div);
+  const snapCard = document.getElementById('snapCard');
+  const snapBody = document.getElementById('snapBody');
+  const snapCount = document.getElementById('snapCount');
+  const snapClear = document.getElementById('snapClear');
+
+  function renderSnap() {
+    if (!snapCard || !snapBody || !snapCount) return;
+    const imgs = pendingAttachments.filter(a => a && a.url && a.mime && a.mime.startsWith('image/'));
+    if (!imgs.length) {
+      snapCard.style.display = 'none';
+      snapBody.innerHTML = '';
+      snapCount.textContent = '0';
+      return;
     }
+
+    snapCard.style.display = '';
+    snapCount.textContent = String(imgs.length);
+
+    // newest first
+    const items = imgs.slice().reverse();
+    snapBody.innerHTML = items.map(a => {
+      const href = String(a.url);
+      const fn = esc(a.filename || '');
+      return (
+        '<div class="thumb" style="margin-bottom:10px;">' +
+          '<a href="' + href + '" target="_blank" rel="noopener" style="text-decoration:none;">' +
+            '<img src="' + href + '" alt="snapshot" style="max-height:160px; width:100%; object-fit:cover;" />' +
+          '</a>' +
+          '<div class="muted" style="margin-top:6px;">' + fn + '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  if (snapClear) snapClear.addEventListener('click', () => {
+    if (!snapCard || !snapBody || !snapCount) return;
+    snapCard.style.display = 'none';
+    snapBody.innerHTML = '';
+    snapCount.textContent = '0';
+  });
+
+  function renderPreview() {
+    // Preview thumbs in-chat were replaced by ClawdSnap.
+    // Keep this function because many flows call it; it now only updates ClawdSnap.
+    try {
+      if (preview) preview.innerHTML = '';
+    } catch {}
+    renderSnap();
   }
 
   const USER_NAME = 'Charles';
@@ -830,6 +865,8 @@
   function renderMessages(msgs) {
     if (!chatlog) return;
 
+    const prevLen = Array.isArray(messageCache) ? messageCache.length : 0;
+
     // keep a cache for quick actions
     messageCache = Array.isArray(msgs) ? msgs : [];
     // update last user-authored text
@@ -881,9 +918,13 @@
       if (isBot) wireCopyButtons(el);
     }
 
-    // Only autoscroll if the user was already near the bottom.
-    if (stick) chatlog.scrollTop = chatlog.scrollHeight;
-    else chatlog.scrollTop = prevTop;
+    // Only autoscroll if the user was already near the bottom AND new messages arrived.
+    if (stick && messageCache.length > prevLen) {
+      chatlog.scrollTop = chatlog.scrollHeight;
+    } else {
+      const maxTop = Math.max(0, chatlog.scrollHeight - chatlog.clientHeight);
+      chatlog.scrollTop = Math.min(prevTop, maxTop);
+    }
   }
 
   function openPmModalFromMessage(m){
@@ -1486,6 +1527,14 @@
   }
 
   // Quick action buttons
+  const btnCatchUp = document.getElementById('btnCatchUp');
+  if (btnCatchUp) {
+    btnCatchUp.addEventListener('click', async () => {
+      try { await refresh(); } catch {}
+      try { if (chatlog) chatlog.scrollTop = chatlog.scrollHeight; } catch {}
+    });
+  }
+
   const btnRecent = document.getElementById('btnReviewRecent');
   if (btnRecent) {
     btnRecent.addEventListener('click', () => {
@@ -1564,4 +1613,53 @@
   window.addEventListener('unhandledrejection', (e) => {
     dbg('promise rejection: ' + String(e && e.reason ? e.reason : e));
   });
+
+  function wireCollapse(btnId, bodyId, key){
+    const btn = document.getElementById(btnId);
+    const body = document.getElementById(bodyId);
+    if (!btn || !body) return;
+
+    const storageKey = 'cc_collapse_' + key;
+    function setCollapsed(collapsed){
+      body.style.display = collapsed ? 'none' : '';
+      btn.textContent = collapsed ? '▸' : '▾';
+      try { localStorage.setItem(storageKey, collapsed ? '1' : '0'); } catch {}
+    }
+
+    let collapsed = false;
+    try { collapsed = localStorage.getItem(storageKey) === '1'; } catch {}
+    setCollapsed(collapsed);
+
+    btn.addEventListener('click', () => {
+      collapsed = body.style.display !== 'none';
+      setCollapsed(collapsed);
+    });
+  }
+
+  wireCollapse('appsToggle', 'appsBody', 'apps');
+  wireCollapse('rulesToggle', 'rulesBody', 'rules');
+  wireCollapse('toolsToggle', 'toolsBody', 'tools');
+  wireCollapse('readmeToggle', 'readmeBody', 'readme');
+  wireCollapse('deToggle', 'deBody', 'de');
+
+  // ClawdWork collapse (keep header visible; let ClawdList expand when collapsed)
+  const wlToggle = document.getElementById('wlToggle');
+  const wlBody = document.getElementById('wlBody');
+  function setWorkCollapsed(collapsed){
+    if (!wlBody) return;
+    wlBody.style.display = collapsed ? 'none' : '';
+    if (wlToggle) wlToggle.textContent = collapsed ? '▸' : '▾';
+    document.body.classList.toggle('workCollapsed', !!collapsed);
+    try { localStorage.setItem('cc_work_collapsed', collapsed ? '1' : '0'); } catch {}
+  }
+  let workCollapsed = false;
+  try { workCollapsed = localStorage.getItem('cc_work_collapsed') === '1'; } catch {}
+  setWorkCollapsed(workCollapsed);
+  if (wlToggle) {
+    wlToggle.addEventListener('click', () => {
+      workCollapsed = wlBody && wlBody.style.display !== 'none';
+      setWorkCollapsed(workCollapsed);
+    });
+  }
+
 })();

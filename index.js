@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-01.05';
+const BUILD = '2026-03-02.14';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -2712,6 +2712,43 @@ app.post('/api/abort', async (req, res) => {
   }
 });
 
+// Friendly upload browser (directory listing) for operator convenience.
+// NOTE: still behind auth (because it is not in the bypass allowlist).
+app.get('/uploads', (req, res) => res.redirect(302, '/uploads/'));
+app.get('/uploads/', (req, res) => {
+  try {
+    if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    const files = fs.readdirSync(UPLOAD_DIR)
+      .filter(n => !n.startsWith('.'))
+      .sort((a,b) => b.localeCompare(a));
+    const rows = files.slice(0, 500).map(f => {
+      const href = '/uploads/' + encodeURIComponent(f);
+      return '<li style="margin:6px 0;"><a href="' + href + '" target="_blank" rel="noopener">' + escHtml(f) + '</a></li>';
+    }).join('');
+    res.type('text/html; charset=utf-8').send(
+      '<!doctype html><html><head><meta charset="utf-8" />' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1" />' +
+      '<title>Uploads</title>' +
+      '<style>' +
+      'body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:#0b1020;color:#e8eefc;margin:0}' +
+      'a{color:#9ad0ff}' +
+      '.wrap{max-width:980px;margin:0 auto;padding:18px}' +
+      '.card{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.10);border-radius:14px;padding:14px}' +
+      '.muted{color:rgba(255,255,255,0.65);font-size:12px}' +
+      'code{background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:6px}' +
+      '</style></head><body><div class="wrap"><div class="card">' +
+      '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline;">' +
+      '<div style="font-weight:900;font-size:18px;">Uploads</div>' +
+      '<div class="muted">Dir: <code>' + escHtml(UPLOAD_DIR) + '</code></div>' +
+      '</div>' +
+      '<div class="muted" style="margin-top:8px;">Showing up to 500 newest filenames. Click to open in a new tab.</div>' +
+      '<ul style="margin-top:12px;">' + (rows || '<li class="muted">No uploads yet.</li>') + '</ul>' +
+      '</div></div></body></html>'
+    );
+  } catch {
+    res.status(500).type('text/plain').send('Failed to list uploads');
+  }
+});
 app.use('/uploads', express.static(UPLOAD_DIR, {
   // Must be false or an array of strings; true triggers a serve-static/send type error.
   // Also: don't serve directory indexes for uploads.
@@ -2754,7 +2791,8 @@ app.get('/', (req, res) => {
       --border: rgba(231,231,231,0.12);
       --accent: #9ad0ff;
     }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 18px; line-height: 1.35; background: var(--bg); color: var(--text); }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 18px; line-height: 1.35; background: var(--bg); color: var(--text); }
 
     /* darker scrollbars */
     * { scrollbar-color: rgba(154,208,255,0.35) rgba(255,255,255,0.06); }
@@ -2786,10 +2824,22 @@ app.get('/', (req, res) => {
     }
 
     /* layout */
-    .wrap { display: grid; grid-template-columns: 300px 1.25fr 0.75fr; gap: 14px; max-width: 1920px; }
-    .sidebar { position: sticky; top: 18px; align-self: start; }
-    .main { min-width: 0; }
-    .right { min-width: 0; }
+    .wrap { display: grid; grid-template-columns: 300px 1.25fr 0.75fr; gap: 14px; max-width: 1920px; height: calc(100vh - 36px); overflow: hidden; }
+    .sidebar { position: sticky; top: 0; align-self: start; max-height: 100%; overflow: hidden; }
+    .main { min-width: 0; max-height: 100%; overflow: hidden; display:flex; flex-direction:column; gap:14px; }
+    .right { min-width: 0; display:flex; flex-direction:column; gap:14px; height: 100%; overflow: hidden; }
+
+    /* Right column sizing: ClawdList flexes to fill remaining height under ClawdWork */
+    #decard{ flex: 1 1 auto; min-height: 0; display:flex; flex-direction:column; overflow:hidden; }
+    #deBody{ display:flex; flex-direction:column; min-height: 0; overflow:hidden; }
+    #deLists{ flex: 1 1 auto; min-height: 0; overflow:auto; padding-right: 4px; max-height: none; }
+
+    #workcard{ flex: 0 0 420px; min-height: 0; }
+    #wlBody{ display:flex; flex-direction:column; min-height:0; }
+    #worklog{ flex: 1 1 auto; min-height: 0; overflow:auto; max-height: none; }
+
+    body.workCollapsed #workcard{ flex-basis: auto; }
+    body.workCollapsed #decard{ flex: 1 1 auto; }
 
     /* responsive: drop right column under main on smaller screens */
     @media (max-width: 1180px) {
@@ -2803,6 +2853,11 @@ app.get('/', (req, res) => {
     }
 
     .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: 0 10px 25px rgba(0,0,0,0.25); }
+
+    /* Sidebar widgets */
+    /* Keep Readme compact (scroll inside) so sidebar bottom aligns with main column */
+    #readmeBody{ max-height: 220px; overflow:auto; padding-right: 6px; }
+    #snapBody{ max-height: 280px; overflow:auto; padding-right: 6px; }
     .muted { color: var(--muted); font-size: 13px; }
     .row { display:flex; gap: 10px; align-items:center; flex-wrap: wrap; }
     button { padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: #1a2744; color: var(--text); cursor: pointer; }
@@ -2835,7 +2890,7 @@ app.get('/', (req, res) => {
     #plan:hover { background: #2456a3; }
 
     /* Send = primary action (green) */
-    #send { height: 58px; white-space: nowrap; background: #19783d; border-color: rgba(255,255,255,0.18); }
+    #send { height: 44px; white-space: nowrap; background: #19783d; border-color: rgba(255,255,255,0.18); }
     #send:hover { background: #1e8a46; }
 
     /* Iterate = teal */
@@ -2847,8 +2902,12 @@ app.get('/', (req, res) => {
     .pill.de-active { background: #118a8a; color: #fff; border-color: rgba(255,255,255,0.22); }
     input[type=file] { display:block; margin: 10px 0; }
 
+    /* main column sizing */
+    #scheduled{ flex: 0 0 auto; }
+    .main > .card:not(#scheduled){ flex: 1 1 auto; min-height: 0; display:flex; flex-direction:column; }
+
     /* chat */
-    #chatlog { background: var(--card2); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 12px; height: 520px; overflow:auto; }
+    #chatlog { background: var(--card2); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 12px; overflow:auto; flex: 1 1 auto; min-height: 0; }
     .msg { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.08); }
     .meta { font-size: 12px; color: rgba(255,255,255,0.65); display:flex; justify-content: space-between; gap: 12px; align-items: baseline; }
     .msgref{font-size:11px; color: rgba(231,231,231,0.38); cursor:pointer; user-select:none}
@@ -2877,9 +2936,13 @@ app.get('/', (req, res) => {
     .md_copy:hover{border-color: rgba(34,198,198,.65)}
 
     #composer { display:flex; gap: 10px; align-items: flex-end; }
-    #msg { width: 100%; min-height: 122px; max-height: 280px; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
+    #quickbar{ margin-top: 6px !important; margin-bottom: 0 !important; padding-bottom: 0 !important; }
+    #quickButtons{ margin: 0 !important; padding: 0 !important; }
+    #debug{ margin-top: 4px !important; }
+    /* Composer textarea matches button stack height (tuned to pixel-perfect match) */
+    #msg { width: 100%; height: 133px; min-height: 133px; max-height: 133px; overflow:auto; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
     #send { height: 44px; white-space: nowrap; }
-    #pasteHint { font-size: 12px; color: var(--muted); }
+    /* #pasteHint removed (replaced by ClawdSnap) */
     .preview { display:flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
     .thumb { border: 1px solid var(--border); border-radius: 10px; padding: 6px; background: #0d1426; }
     .thumb img { max-height: 96px; display:block; border-radius: 8px; }
@@ -2898,7 +2961,7 @@ app.get('/', (req, res) => {
     .ruleBody.open { display:block; }
 
     /* Prevent forced scroll-to-bottom: user controls reading position */
-    #chatlog { height: 520px; overflow: auto; scroll-behavior: smooth; }
+    #chatlog { overflow: auto; scroll-behavior: smooth; }
     .ok { color: #7CFFB2; }
     .err { color: #ff8c8c; }
   </style>
@@ -2928,12 +2991,22 @@ app.get('/', (req, res) => {
         <div class="muted" style="margin-top: 6px;">(If UI looks stale, hard refresh. Build is server-tracked.)</div>
         <div class="muted" style="margin-top: 10px; display:flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
           <span>Storage: <code>${DATA_DIR}</code></span>
-          <a class="scriptBtn" href="/transcript" target="_blank" rel="noopener">ClawdScript — View Entire Chat</a>
+          <div class="row" style="gap:8px; justify-content:flex-end;"><a class="scriptBtn" href="/transcript" target="_blank" rel="noopener">ClawdScript — View Entire Chat</a></div>
         </div>
       </div>
 
-      <div class="card" style="margin-top: 14px;">
-        <div style="font-weight:700; margin-bottom: 8px;">ClawdApps</div>
+      <div class="card" style="margin-top: 14px;" id="appsCard">
+        <div class="statusline" style="justify-content: space-between; align-items:center;">
+          <div class="row" style="gap:10px; align-items:center;">
+            <h2 style="margin:0">ClawdApps</h2>
+          </div>
+          <div class="row" style="gap:8px; align-items:center;">
+            <a class="scriptBtn" href="/apps" target="_blank" rel="noopener" style="text-decoration:none;">Open →</a>
+            <button id="appsToggle" type="button" class="wlbtn" title="Collapse">▾</button>
+          </div>
+        </div>
+
+        <div id="appsBody">
 
         <div class="row" style="gap: 8px; margin-bottom: 10px;">
           <button id="tabPM" type="button" class="pill" style="cursor:pointer;">ClawdPM</button>
@@ -3003,11 +3076,21 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
             <div class="muted" style="margin-top:6px;">We’ll wire this into the Console as an operator-guided build pipeline.</div>
           </div>
         </div>
+        </div> <!-- /appsBody -->
       </div>
 
       <div class="card" style="margin-top: 14px;" id="rulesCard">
-        <h2 style="margin:0 0 10px 0">ClawdRules!</h2>
-        <div class="muted" style="margin-bottom: 10px;">Operator heaven: small rules that prevent repeat questions.</div>
+        <div class="statusline" style="justify-content: space-between; align-items:center;">
+          <div class="row" style="gap:10px; align-items:center;">
+            <h2 style="margin:0">ClawdRules!</h2>
+          </div>
+          <div class="row" style="gap:8px; align-items:center;">
+            <button id="rulesToggle" type="button" class="wlbtn" title="Collapse">▾</button>
+          </div>
+        </div>
+
+        <div id="rulesBody" style="margin-top:10px;">
+          <div class="muted" style="margin-bottom: 10px;">Operator heaven: small rules that prevent repeat questions.</div>
 
         <div style="display:flex; flex-direction:column; gap: 10px;">
           <div class="ruleItem">
@@ -3081,23 +3164,66 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         </div>
 
         <div class="muted" style="margin-top:10px;">We’ll keep adding to this list.</div>
+        </div> <!-- /rulesBody -->
       </div>
 
-      <div class="card" style="margin-top: 14px;">
-        <h2 style="margin:0 0 10px 0">Manual upload</h2>
-        <form id="upform" style="margin-top: 10px;">
-          <input type="file" name="file" required />
-          <div class="row" style="margin-top: 8px;">
-            <button type="submit">Upload</button>
-            <a href="/uploads/" target="_blank" rel="noopener">Browse uploads</a>
+      <div class="card" style="margin-top: 14px;" id="toolsCard">
+        <div class="statusline" style="justify-content: space-between; align-items:center;">
+          <div class="row" style="gap:10px; align-items:center;">
+            <h2 style="margin:0">ClawdTools</h2>
           </div>
-        </form>
-        <div class="muted" id="out" style="margin-top: 8px;"></div>
+          <div class="row" style="gap:8px; align-items:center;">
+            <button id="toolsToggle" type="button" class="wlbtn" title="Collapse">▾</button>
+          </div>
+        </div>
+
+        <div id="toolsBody" style="margin-top:10px;">
+          <div class="muted" style="margin-bottom: 10px; font-weight:700;">Manual Upload</div>
+          <form id="upform" style="margin-top: 10px;">
+            <input type="file" name="file" required />
+            <div class="row" style="margin-top: 8px;">
+              <button type="submit">Upload</button>
+              <a href="/uploads/" target="_blank" rel="noopener">Browse uploads</a>
+            </div>
+          </form>
+          <div class="muted" id="out" style="margin-top: 8px;"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px;" id="readmeCard">
+        <div class="statusline" style="justify-content: space-between; align-items:center;">
+          <div class="row" style="gap:10px; align-items:center;">
+            <h2 style="margin:0">ClawdReadMe</h2>
+          </div>
+          <div class="row" style="gap:8px; align-items:center;">
+            <button id="readmeToggle" type="button" class="wlbtn" title="Collapse">▾</button>
+          </div>
+        </div>
+        <div id="readmeBody" style="margin-top: 10px; line-height:1.55;">
+          <div class="muted">Short operational notes + hard-won lessons (so we don't repeat mistakes).</div>
+          <div style="margin-top:12px; font-weight:800;">Browser Relay (Chrome extension)</div>
+          <div class="muted" style="margin-top:6px;">If using it: confirm extension installed, tab attached (badge ON), and use profile="chrome" in automations.</div>
+          <div style="margin-top:14px; font-weight:800;">API Keys & Secrets</div>
+          <div class="muted" style="margin-top:6px;">Never paste real secrets into chat or web UI. Store in server env files and rotate when needed.</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px; display:none;" id="snapCard">
+        <div class="statusline" style="justify-content: space-between; align-items:center;">
+          <div class="row" style="gap:10px; align-items:center;">
+            <h2 style="margin:0">ClawdSnap</h2>
+            <div class="pill" id="snapCount">0</div>
+          </div>
+          <div class="row" style="gap:8px; align-items:center;">
+            <button id="snapClear" type="button" class="wlbtn" title="Hide">✕</button>
+          </div>
+        </div>
+        <div id="snapBody" style="margin-top:10px;"></div>
       </div>
     </div>
 
     <div class="main">
-      <div class="card" id="scheduled" style="margin-bottom: 14px;">
+      <div class="card" id="scheduled">
         <div id="schedHeader" class="row" style="justify-content: space-between; align-items:center; cursor:pointer;">
           <div class="row" style="gap:10px; align-items: baseline;">
             <h2 style="margin:0">ClawdJobs</h2>
@@ -3129,6 +3255,7 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
 
         <div id="quickbar" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; justify-content:flex-start; align-items:center;">
           <div class="row" id="quickButtons" style="gap: 10px;">
+            <button id="btnCatchUp" type="button" class="qbtn">Catch Up</button>
             <button id="btnReviewRecent" type="button" class="qbtn">Review Recent</button>
             <button id="btnReviewWeek" type="button" class="qbtn">Review Week</button>
             <button id="btnRepeatLast" type="button" class="qbtn">Repeat Last</button>
@@ -3137,8 +3264,7 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
           </div>
         </div>
 
-        <div id="pasteHint">Tip: click the textarea, then paste a screenshot. It will upload automatically and attach to your message.</div>
-        <div class="preview" id="preview"></div>
+        <!-- preview moved to ClawdSnap -->
         <div class="muted" id="debug" style="margin-top: 10px;"></div>
       </div>
     </div>
@@ -3153,13 +3279,16 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
           <div class="row" style="gap: 8px; align-items:center;">
             <button id="dePrev" type="button" class="wlbtn" title="Previous completed list">Prev</button>
             <button id="deNext" type="button" class="wlbtn" title="Next completed list">Next</button>
+            <button id="deToggle" type="button" class="wlbtn" title="Collapse">▾</button>
           </div>
         </div>
-        <div class="muted" style="margin-top: 8px;">Checklists (newest first). Use Prev/Next to browse completed lists; persists until complete.</div>
-        <div id="deLists" style="margin-top:10px; display:flex; flex-direction:column; gap: 12px;"></div>
+        <div id="deBody">
+          <div class="muted" style="margin-top: 8px;">Checklists (newest first). Use Prev/Next to browse completed lists; persists until complete.</div>
+          <div id="deLists" style="margin-top:10px; display:flex; flex-direction:column; gap: 12px;"></div>
+        </div>
       </div>
 
-      <div class="card" style="margin-top: 14px;">
+      <div class="card" id="workcard">
         <div class="statusline" style="justify-content: space-between; align-items:center;">
           <div class="row" style="gap:12px; align-items:center;">
             <h2 style="margin:0">ClawdWork</h2>
@@ -3176,13 +3305,16 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
             <button id="btnStop" type="button" style="background:transparent; border:1px solid rgba(255,80,80,0.8);">Stop</button>
             <button id="btnAdd" type="button" style="background:transparent; border:1px solid rgba(80,255,160,0.8);">Add</button>
             <div class="pill" id="thinking">Idle</div>
+            <button id="wlToggle" type="button" class="wlbtn" title="Collapse">▾</button>
           </div>
         </div>
+        <div id="wlBody">
         <div class="row" style="justify-content: space-between; margin-top: 8px;">
           <div class="muted">High-level activity + timestamps (no private chain-of-thought).</div>
           <button id="wlRecent" type="button" class="wlbtn">Recent</button>
         </div>
         <div id="worklog" style="margin-top:10px; background: var(--card2); border: 1px solid var(--border); border-radius: 12px; padding: 10px; height: 520px; overflow:auto;"></div>
+        </div>
       </div>
     </div>
   </div>

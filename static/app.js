@@ -1651,8 +1651,15 @@
   refreshScheduled();
   connectWs();
   setInterval(updateStatus, 5000);
-  // keep a slow poll as fallback
-  setInterval(refresh, 10000);
+
+  // Polling fallback only when WS is not connected (prevents periodic re-render scroll "burps").
+  setInterval(() => {
+    try {
+      if (ws && ws.readyState === 1) return;
+    } catch {}
+    refresh();
+  }, 10000);
+
   setInterval(refreshWorklog, 15000);
   setInterval(refreshDE, 15000);
 

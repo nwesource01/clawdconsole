@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.50';
+const BUILD = '2026-03-02.51';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1806,11 +1806,12 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
     .grid{ display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
     @media (max-width: 1180px){ .grid{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
     @media (max-width: 700px){ .grid{ grid-template-columns: 1fr; } }
-    .app{ display:flex; gap:12px; align-items:flex-start; text-decoration:none; color: inherit; }
+    .app{ display:flex; gap:12px; align-items:flex-start; text-decoration:none; color: inherit; min-height: 150px; }
     .ico{ width: 38px; height:38px; border-radius: 12px; background: rgba(34,198,198,.10); border:1px solid rgba(34,198,198,.35); display:flex; align-items:center; justify-content:center; flex: 0 0 auto; }
     .ico svg{ width:22px; height:22px; stroke: rgba(34,198,198,.95); fill:none; stroke-width: 2.4; }
     .appTitle{ font-weight: 900; font-size: 14px; }
-    .appDesc{ margin-top:4px; color: rgba(232,238,252,.72); font-size: 12px; line-height:1.35; }
+    .appDesc{ margin-top:4px; color: rgba(232,238,252,.72); font-size: 12px; line-height:1.35; min-height: 3.9em; }
+    .appRoute{ margin-top:8px; color: rgba(232,238,252,.58); font-size: 12px; }
     .footer{ margin-top: 14px; color: rgba(232,238,252,.55); font-size: 12px; }
     .subcard{ margin-top: 14px; background: var(--card2); border:1px solid rgba(255,255,255,0.10); border-radius: 14px; padding: 14px; }
     input, textarea, select{ background:#0d1426; border:1px solid rgba(255,255,255,0.14); color: var(--text); border-radius: 12px; padding: 10px 12px; font-size: 14px; font-family: inherit; }
@@ -1897,7 +1898,6 @@ app.get('/apps', (req, res) => {
     <div class="subcard">
       <div style="font-weight:900;">Ecosystem map</div>
       <div class="muted" style="margin-top:6px;">Per transcript: <b>/apps is map-only</b>. Every module opens on its own route so you never land mid-page.</div>
-      <div style="margin-top:12px;">${appsMenuHtml('/apps')}</div>
     </div>
     <div class="grid">${apps.map(a => {
       return `<a class="card app" href="${a.href}" target="_blank" rel="noopener">
@@ -1905,6 +1905,7 @@ app.get('/apps', (req, res) => {
         <div style="min-width:0;">
           <div class="appTitle">${a.title}</div>
           <div class="appDesc">${a.desc}</div>
+          <div class="appRoute"><code>${a.href}</code></div>
         </div>
       </a>`;
     }).join('')}</div>

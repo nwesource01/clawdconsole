@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.44';
+const BUILD = '2026-03-02.45';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1745,22 +1745,23 @@ app.get('/apps', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
 
   const apps = [
-    { k:'script', title:'ClawdScript', href:'/apps/script', desc:'The full conversation record with search + filters.' },
-    { k:'pm', title:'ClawdPM', href:'/pm', desc:'Trello-style projects, lists, and cards.' },
+    { k:'script', title:'ClawdScript', href:'/apps/script', desc:'Transcript browser (embedded) + full Script route.' },
+    { k:'pm', title:'ClawdPM', href:'/pm', desc:'Board + cards + to-dos (queue-aware).' },
     { k:'name', title:'ClawdName', href:'/name', desc:'Domain availability helper (v0 heuristic).' },
-    { k:'repo', title:'ClawdRepo', href:'/apps/repo', desc:'Repo status, commits, and links.' },
-    { k:'code', title:'ClawdCode', href:'/apps/code', desc:'Browse/edit the Console project files.' },
-    { k:'sec', title:'ClawdSec', href:'/apps/sec', desc:'Security SOP + copy/paste-safe ops.' },
-    { k:'ops', title:'ClawdOps', href:'/apps/ops', desc:'Operational runbooks, health, uptime, backups.' },
-    { k:'pub', title:'ClawdPub', href:'/apps/pub', desc:'Publishing + SOP guidelines.' },
-    { k:'build', title:'ClawdBuild', href:'/apps/build', desc:'Builder pipeline surface (placeholder).' },
-    { k:'queue', title:'ClawdQueue', href:'/apps/queue', desc:'Agent execution queue (placeholder).' },
+    { k:'repo', title:'ClawdRepo', href:'/apps/repo', desc:'Commits + useful repo links.' },
+    { k:'code', title:'ClawdCode', href:'/apps/code', desc:'Browse/edit Console project files (scoped).' },
+    { k:'sec', title:'ClawdSec', href:'/apps/sec', desc:'Security posture + copy/paste-safe hardening.' },
+    { k:'ops', title:'ClawdOps', href:'/apps/ops', desc:'Ops profile + repeated questions detector.' },
+    { k:'pub', title:'ClawdPub', href:'/apps/pub', desc:'Published artifacts + SOP.' },
+    { k:'build', title:'ClawdBuild', href:'/apps/build', desc:'Build/health/queue/commits/changelog surface.' },
+    { k:'queue', title:'ClawdQueue', href:'/apps/queue', desc:'Serial execution rail (PM-backed) + autorun.' },
   ];
 
   const bodyHtml = `
     <div class="subcard">
       <div style="font-weight:900;">Ecosystem map</div>
       <div class="muted" style="margin-top:6px;">Per transcript: <b>/apps is map-only</b>. Every module opens on its own route so you never land mid-page.</div>
+      <div style="margin-top:12px;">${appsMenuHtml('/apps')}</div>
     </div>
     <div class="grid">${apps.map(a => {
       return `<a class="card app" href="${a.href}" target="_blank" rel="noopener">

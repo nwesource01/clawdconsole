@@ -933,6 +933,7 @@
 
     const pmTitle = document.getElementById('pm_title');
     const pmBody = document.getElementById('pm_body');
+    const pmNotes = document.getElementById('pm_notes');
     const pmMsg = document.getElementById('pm_msg');
     const pmPri = document.getElementById('pm_pri');
 
@@ -943,14 +944,15 @@
 
     if (pmTitle) pmTitle.value = titleGuess;
     if (pmPri) pmPri.value = 'normal';
-    if (pmBody) {
+    if (pmBody) pmBody.value = titleGuess;
+    if (pmNotes) {
       const meta = [
         'Source message:',
         id ? ('- id: ' + id) : null,
         ts ? ('- ts: ' + ts) : null,
         '',
       ].filter(Boolean).join('\n');
-      pmBody.value = meta + txt;
+      pmNotes.value = meta + txt;
     }
     if (pmMsg) pmMsg.textContent = '';
 
@@ -995,7 +997,8 @@
   async function savePmCard(){
     const pmMsg = document.getElementById('pm_msg');
     const title = (document.getElementById('pm_title')?.value || '').trim();
-    const body = (document.getElementById('pm_body')?.value || '').trim();
+    const desc = (document.getElementById('pm_body')?.value || '').trim();
+    const content = (document.getElementById('pm_notes')?.value || '').trim();
     const colId = (document.getElementById('pm_col')?.value || '').trim();
     const pri = (document.getElementById('pm_pri')?.value || 'normal').trim();
 
@@ -1013,7 +1016,16 @@
       if (!col) throw new Error('column not found');
       col.cards = Array.isArray(col.cards) ? col.cards : [];
       const newId = 'pm_' + Math.random().toString(16).slice(2) + '_' + Date.now().toString(16);
-      col.cards.push({ id: newId, title, body, priority: (['ultra','high','normal','planning'].includes(pri) ? pri : 'normal'), createdAt: new Date().toISOString(), todos: [] });
+      col.cards.push({
+        id: newId,
+        title,
+        desc,
+        content,
+        body: desc, // legacy compatibility
+        priority: (['ultra','high','normal','planning'].includes(pri) ? pri : 'normal'),
+        createdAt: new Date().toISOString(),
+        todos: []
+      });
 
       const res2 = await fetch(apiUrl('/api/pm'), {
         method: 'POST',

@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.19';
+const BUILD = '2026-03-02.20';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -3674,8 +3674,13 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
           </div>
 
           <div>
-            <div class="muted" style="margin-bottom:6px;">Description</div>
-            <textarea id="pm_body" style="min-height: 240px;"></textarea>
+            <div class="muted" style="margin-bottom:6px;">Description (short)</div>
+            <textarea id="pm_body" style="min-height: 120px;"></textarea>
+          </div>
+
+          <div>
+            <div class="muted" style="margin-bottom:6px;">Notes (details)</div>
+            <textarea id="pm_notes" style="min-height: 240px;"></textarea>
           </div>
 
           <div class="cc_row" style="justify-content: space-between;">

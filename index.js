@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.30';
+const BUILD = '2026-03-02.31';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -2574,7 +2574,47 @@ app.get('/pm', (req, res) => {
     </div>
 
     <div class="boardWrap" id="pmBoardWrap">
-      <div class="board" id="pmBoard"></div>
+      <div class="board" id="pmBoard">${(() => {
+        try {
+          const pm = readPM();
+          const cols = Array.isArray(pm.columns) ? pm.columns : [];
+          const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+          const priClass = (p) => {
+            const v = String(p||'planning').toLowerCase();
+            if (v === 'ultra') return 'pri-ultra';
+            if (v === 'high') return 'pri-high';
+            if (v === 'normal') return 'pri-normal';
+            return 'pri-planning';
+          };
+          const colHtml = cols.map(col => {
+            const cards = Array.isArray(col.cards) ? col.cards : [];
+            const cardsHtml = cards.map(c => {
+              const desc = (c && (c.desc || c.body) ? (c.desc || c.body) : '');
+              const short = String(desc).length > 110 ? (String(desc).slice(0,110) + '…') : String(desc);
+              const q = (c.queueStatus || (c.completedAt ? 'done' : (c.queuedAt ? 'queued' : '')));
+              const qBadge = q ? ('<span class="badge" style="margin-left:6px;">' + esc(q === 'done' ? '✓ done' : (q === 'queued' ? '⏳ queued' : q)) + '</span>') : '';
+              const badge = '<span class="badge">' + esc(String(c.priority || 'planning')) + '</span>' + qBadge;
+              return '<div class="card ' + priClass(c.priority) + '" data-card-id="' + esc(c.id) + '" data-col-id="' + esc(col.id) + '">' +
+                '<div class="cardRow">' +
+                  '<b>' + esc(c.title) + '</b>' +
+                '</div>' +
+                (short ? ('<p>' + esc(short) + '</p>') : '') +
+                badge +
+              '</div>';
+            }).join('');
+            return '<div class="col">' +
+              '<div class="colHead">' +
+                '<b>' + esc(col.title) + '</b>' +
+                '<div class="colActions"><span class="muted small">' + cards.length + '</span></div>' +
+              '</div>' +
+              '<div class="cards">' + cardsHtml + '</div>' +
+            '</div>';
+          }).join('');
+          return colHtml || '<div class="muted">No columns.</div>';
+        } catch {
+          return '<div class="muted">Failed to render board.</div>';
+        }
+      })()}</div>
     </div>
   </div>
 

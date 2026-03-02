@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.35';
+const BUILD = '2026-03-02.36';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -2665,11 +2665,14 @@ app.get('/pm', (req, res) => {
             <button class="pillbtn" id="cm_moveup" type="button">Move ↑</button>
             <button class="pillbtn" id="cm_movedn" type="button">Move ↓</button>
           </div>
-          <button class="pillbtn" id="cm_save" type="button">Save</button>
+          <div class="rowbtn" style="gap:10px;">
+            <button class="pillbtn" id="cm_done" type="button">Mark Done (Archive)</button>
+            <button class="pillbtn" id="cm_save" type="button">Save</button>
+          </div>
         </div>
 
         <div style="margin-top:12px;" class="muted small">To-Dos</div>
-        <div id="cm_todos"></div>
+        <div id="cm_todos" style="max-height: 260px; overflow:auto; padding-right:6px;"></div>
         <div class="muted small" id="cm_msg" style="margin-top:10px;"></div>
 
         <div style="margin-top:14px;">

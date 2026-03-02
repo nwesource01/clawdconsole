@@ -35,6 +35,7 @@
   const modal = $('cardModal');
   const cmClose = $('cm_close');
   const cmSave = $('cm_save');
+  const cmDone = $('cm_done');
   const cmGen = $('cm_generate');
   const cmAdd = $('cm_addtodo');
   const cmTodos = $('cm_todos');
@@ -186,6 +187,42 @@
       credentials: 'include',
       body: JSON.stringify({ pm: PM }),
     });
+  }
+
+  function ensureDoneColumn(){
+    PM.columns = Array.isArray(PM.columns) ? PM.columns : [];
+    let done = PM.columns.find(c => c && String(c.id||'') === 'done')
+      || PM.columns.find(c => c && String(c.title||'').toLowerCase() === 'done');
+    if (!done) {
+      done = { id:'done', title:'Done', cards: [] };
+      PM.columns.push(done);
+    }
+    done.cards = Array.isArray(done.cards) ? done.cards : [];
+    return done;
+  }
+
+  async function markDoneArchive(){
+    const fc = findCard();
+    if (!fc) return;
+    const { col, card } = fc;
+
+    // mark status for Queue/PM badges
+    card.completedAt = new Date().toISOString();
+    card.queueStatus = 'done';
+
+    const doneCol = ensureDoneColumn();
+    col.cards = Array.isArray(col.cards) ? col.cards : [];
+    doneCol.cards = Array.isArray(doneCol.cards) ? doneCol.cards : [];
+
+    // remove from current column and append to Done
+    col.cards = col.cards.filter(x => x && x.id !== card.id);
+    doneCol.cards.push(card);
+
+    ACTIVE.colId = doneCol.id;
+    await persist();
+    render();
+    closeModal();
+    setPmStatus('archived to Done');
   }
 
   async function saveCardEdits(){
@@ -340,6 +377,7 @@
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
   if (cmSave) cmSave.addEventListener('click', saveCardEdits);
+  if (cmDone) cmDone.addEventListener('click', markDoneArchive);
   if (cmAdd) cmAdd.addEventListener('click', addTodo);
   if (cmGen) cmGen.addEventListener('click', generateTodos);
   if (cmMoveUp) cmMoveUp.addEventListener('click', () => moveCard(-1));

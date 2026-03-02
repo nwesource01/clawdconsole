@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.41';
+const BUILD = '2026-03-02.42';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1743,9 +1743,75 @@ function renderModulePage(key){
       })();
       </script>
     ` },
-    sec: { title:'ClawdSec', subtitle:'Security SOP + safe operator patterns.', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder.
+    sec: { title:'ClawdSec', subtitle:'Security posture + copy/paste-safe hardening.', body:`
+      <div class="subcard" style="line-height:1.55;">
+        <div class="muted">A practical security panel: what’s already enabled in this Console, common failure modes, and safe hardening commands.</div>
 
-Rule of thumb: do not paste real secrets into chat/web UI. Use server env files and rotate when needed.</div>` },
+        <div class="grid" style="margin-top:12px; grid-template-columns: 1fr 1fr; align-items:start;">
+          <div class="card" style="background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Enabled here</div>
+            <ul style="margin:0; padding-left: 18px;">
+              <li><b>Auth gate</b>: Basic auth + session cookie (fetch works without headers)</li>
+              <li><b>Uploads</b>: served without directory index; no-store headers</li>
+              <li><b>No secrets in UI</b>: design rule — keep keys in env files</li>
+              <li><b>Audit trail</b>: transcript + worklog capture key actions</li>
+            </ul>
+            <div class="muted" style="margin-top:10px;">Note: some browsers block inline scripts; we keep critical app JS in <code>/static</code>.</div>
+          </div>
+
+          <div class="card" style="background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Common trouble spots</div>
+            <ul style="margin:0; padding-left: 18px;">
+              <li><b>Inline JS blocked</b> → UI appears but buttons don’t work (fix: move JS to <code>/static</code>)</li>
+              <li><b>Auth cookie Secure</b> on HTTP → session may not stick (prefer HTTPS reverse proxy)</li>
+              <li><b>Open internet</b> → brute force risk (add fail2ban / allowlist / VPN)</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="font-weight:900; margin-bottom:8px;">Security Recommendations (copy-safe)</div>
+          <div class="muted" style="margin-bottom:10px;">Run only what you understand. These are suggestions, not auto-executed.</div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:start;">
+            ${(() => {
+              const blocks = [
+                {
+                  title: '1) Put Console behind HTTPS (recommended)',
+                  cmd: '# Example (Caddy):\n# reverse_proxy 127.0.0.1:21337\n# (terminate TLS, then access over https://)',
+                },
+                {
+                  title: '2) Lock SSH down + basic firewall',
+                  cmd: 'ufw allow OpenSSH\nufw allow 80\nufw allow 443\nufw --force enable\nufw status verbose',
+                },
+                {
+                  title: '3) fail2ban for sshd (quick hardening)',
+                  cmd: 'apt-get update\napt-get install -y fail2ban\nsystemctl enable --now fail2ban\nfail2ban-client status',
+                },
+                {
+                  title: '4) Rotate AUTH_PASS',
+                  cmd: 'nano /etc/clawdio-console.env\n# update AUTH_PASS=...\nsystemctl restart clawdio-console.service',
+                },
+              ];
+              const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+              return blocks.map(b => {
+                const code = esc(b.cmd);
+                const raw = String(b.cmd||'');
+                const copy = raw.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                return '<div style="border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; background: rgba(255,255,255,0.03);">'
+                  + '<div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline; flex-wrap:wrap;">'
+                  + '<div style="font-weight:900;">' + esc(b.title) + '</div>'
+                  + '<button class="pill" type="button" data-copy="' + copy + '">Copy</button>'
+                  + '</div>'
+                  + '<pre style="margin-top:8px; white-space:pre-wrap;"><code>' + code + '</code></pre>'
+                  + '</div>';
+              }).join('');
+            })()}
+          </div>
+        </div>
+      </div>
+      <script src="/static/sec.js"></script>
+    ` },
     ops: { title:'ClawdOps', subtitle:'Operator profile + repeated-questions detector.', body:`
       <div class="subcard" style="line-height:1.55;">
         <div class="muted">Markdown notes about you + your environment. File-backed in DATA_DIR, and can be committed to workspace memory for long-term use.</div>

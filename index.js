@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.40';
+const BUILD = '2026-03-02.41';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1033,6 +1033,84 @@ app.get('/api/build', (req, res) => {
   res.json({ ok: true, build: BUILD });
 });
 
+// --- ClawdOps (operator profile + repeated questions) ---
+const OPS_PROFILE_FILE = path.join(DATA_DIR, 'ops-profile.md');
+app.get('/api/ops/profile', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const text = fs.existsSync(OPS_PROFILE_FILE) ? fs.readFileSync(OPS_PROFILE_FILE, 'utf8') : '';
+    res.json({ ok:true, text });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+app.post('/api/ops/profile', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const text = String(req.body?.text || '');
+    fs.writeFileSync(OPS_PROFILE_FILE, text, 'utf8');
+    logWork('ops.profile.saved', { bytes: Buffer.byteLength(text, 'utf8') });
+    res.json({ ok:true });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+const OPS_MEMORY_PATH = '/home/master/clawd/memory/clawdops-profile.md';
+app.post('/api/ops/commit', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const text = String(req.body?.text || '');
+    fs.mkdirSync(path.dirname(OPS_MEMORY_PATH), { recursive:true });
+    fs.writeFileSync(OPS_MEMORY_PATH, text, 'utf8');
+    logWork('ops.profile.committed', { path: OPS_MEMORY_PATH, bytes: Buffer.byteLength(text, 'utf8') });
+    res.json({ ok:true, path: OPS_MEMORY_PATH });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.get('/api/ops/repeated-questions', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
+  try {
+    const txt = fs.existsSync(TRANSCRIPT_FILE) ? fs.readFileSync(TRANSCRIPT_FILE, 'utf8') : '';
+    const lines = txt.split(/\r?\n/).filter(Boolean);
+
+    const map = new Map(); // q -> {count,lastTs}
+
+    for (const ln of lines){
+      let o; try { o = JSON.parse(ln); } catch { o = null; }
+      if (!o || o.r !== 'assistant') continue;
+      const msg = String(o.x || '');
+      const ts = String(o.t || '');
+
+      // candidate question lines: either single-line ending with ? or any line containing ?
+      const parts = msg.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      for (const p of parts){
+        if (!p.includes('?')) continue;
+        const q = p.replace(/\s+/g,' ').trim();
+        if (q.length < 8 || q.length > 240) continue;
+        const key = q.toLowerCase();
+        const cur = map.get(key) || { q, count: 0, lastTs: null };
+        cur.q = q;
+        cur.count++;
+        cur.lastTs = ts || cur.lastTs;
+        map.set(key, cur);
+      }
+    }
+
+    const items = Array.from(map.values())
+      .filter(it => it.count >= 2)
+      .sort((a,b) => b.count - a.count)
+      .slice(0, limit);
+
+    res.json({ ok:true, items });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
@@ -1668,9 +1746,31 @@ function renderModulePage(key){
     sec: { title:'ClawdSec', subtitle:'Security SOP + safe operator patterns.', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder.
 
 Rule of thumb: do not paste real secrets into chat/web UI. Use server env files and rotate when needed.</div>` },
-    ops: { title:'ClawdOps', subtitle:'Operations: uptime, deploy checklist, health checks.', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder.
+    ops: { title:'ClawdOps', subtitle:'Operator profile + repeated-questions detector.', body:`
+      <div class="subcard" style="line-height:1.55;">
+        <div class="muted">Markdown notes about you + your environment. File-backed in DATA_DIR, and can be committed to workspace memory for long-term use.</div>
 
-Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
+        <div class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button class="pill" id="opsSave" type="button">Save</button>
+          <button class="pill" id="opsCommit" type="button">Commit to MD memory (workspace)</button>
+          <button class="pill" id="opsTemplate" type="button">Insert questionnaire template</button>
+          <button class="pill" id="opsRepeat" type="button">Repeated questions</button>
+          <span class="muted" id="opsMsg"></span>
+        </div>
+
+        <div style="margin-top:12px;">
+          <textarea id="opsProfile" placeholder="# Ops profile\n\nWrite anything you want remembered here…" style="width:100%; min-height:320px;"></textarea>
+          <div class="muted" style="margin-top:8px;">Saved to: <code>${DATA_DIR}/ops-profile.md</code> • Commit writes to: <code>/home/master/clawd/memory/clawdops-profile.md</code></div>
+        </div>
+
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="font-weight:900; margin-bottom:8px;">Repeated questions (best-effort)</div>
+          <div class="muted" style="margin-bottom:8px;">Scans transcript assistant messages for repeated question lines so we can turn them into rules or defaults.</div>
+          <div id="opsRepeated" style="max-height: 50vh; overflow:auto; padding-right:6px;"></div>
+        </div>
+      </div>
+      <script src="/static/ops.js"></script>
+    ` },
     pub: { title:'ClawdPub', subtitle:'Published artifacts + SOP.', body:`
       <div class="subcard" style="line-height:1.55;">
         <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">

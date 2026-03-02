@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.28';
+const BUILD = '2026-03-02.29';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1744,6 +1744,11 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
           <select id="qCol" style="min-width:220px;"></select>
           <button class="pill" id="qColSave" type="button">Use column</button>
 
+          <label class="muted" style="display:flex; gap:8px; align-items:center;">
+            <input type="checkbox" id="qAuto" /> Auto-run next after Done (15s)
+          </label>
+          <button class="pill" id="qStop" type="button">Stop</button>
+
           <span style="flex:1;"></span>
 
           <button class="pill" id="qRefresh" type="button">Refresh</button>
@@ -1805,6 +1810,7 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
           const stRes = await fetch('/api/queue/state', { credentials:'include', cache:'no-store' });
           const stJ = await stRes.json();
           const selectedId = (stJ && stJ.ok && stJ.state && stJ.state.selectedColumnId) ? String(stJ.state.selectedColumnId) : 'rebuild';
+          const autoOn = !!(stJ && stJ.ok && stJ.state && stJ.state.autorunEnabled);
 
           // Populate column picker
           const sel = $('qCol');
@@ -1819,6 +1825,9 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
             }
             sel.value = selectedId;
           }
+
+          const autoCb = $('qAuto');
+          if (autoCb) autoCb.checked = autoOn;
 
           const col = cols.find(c => String(c.id||'') === selectedId) || cols.find(c => String(c.id||'') === 'rebuild' || String(c.title||'').toLowerCase() === 'rebuild');
           const cards = (col && Array.isArray(col.cards)) ? col.cards : [];
@@ -1866,7 +1875,22 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
                 const now = new Date().toISOString();
                 await fetch('/api/pm/cardPatch', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ cardId:id, patch:{ completedAt: now, queueStatus:'done' } }) });
                 setMsg('Marked done.');
-                startCountdown(15, 'Moving to next queued card unless you stop it.');
+
+                // If autorun is enabled, schedule the next queued card kickoff.
+                try {
+                  const stRes = await fetch('/api/queue/state', { credentials:'include', cache:'no-store' });
+                  const stJ = await stRes.json();
+                  const en = !!(stJ && stJ.ok && stJ.state && stJ.state.autorunEnabled);
+                  if (en) {
+                    startCountdown(15, 'Auto-run enabled: moving to the next queued card unless you stop it.');
+                    await fetch('/api/queue/autorun/scheduleNext', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ delayMs: 15000 }) });
+                  } else {
+                    startCountdown(15, 'Auto-run is OFF. (Countdown is just visual.)');
+                  }
+                } catch {
+                  startCountdown(15, 'Auto-run schedule failed.');
+                }
+
                 return load();
               }
               if (act === 'clear') {
@@ -1952,14 +1976,34 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
           load();
         }
 
+        async function saveAutorun(){
+          const cb = $('qAuto');
+          const on = !!(cb && cb.checked);
+          setMsg('Saving…');
+          await fetch('/api/queue/state', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ state: { autorunEnabled: on } }) });
+          setMsg('Auto-run ' + (on ? 'ON' : 'OFF') + '.');
+          load();
+        }
+
+        async function stopAutorun(){
+          setMsg('Stopping…');
+          await fetch('/api/queue/autorun/stop', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: '{}' });
+          setMsg('Stopped.');
+          load();
+        }
+
         const btnR = $('qRefresh');
         const btnA = $('qEnqueueAll');
         const btnC = $('qClearQueue');
         const btnS = $('qColSave');
+        const cbA = $('qAuto');
+        const btnStop = $('qStop');
         if (btnR) btnR.addEventListener('click', load);
         if (btnA) btnA.addEventListener('click', enqueueAll);
         if (btnC) btnC.addEventListener('click', clearQueued);
         if (btnS) btnS.addEventListener('click', saveSelectedColumn);
+        if (cbA) cbA.addEventListener('change', saveAutorun);
+        if (btnStop) btnStop.addEventListener('click', stopAutorun);
 
         load();
       })();
@@ -2168,7 +2212,13 @@ const PM_FILE = path.join(DATA_DIR, 'pm.json');
 const QUEUE_STATE_FILE = path.join(DATA_DIR, 'queue.json');
 
 function readQueueState(){
-  const fallback = { selectedColumnId: 'rebuild', updatedAt: null };
+  const fallback = {
+    selectedColumnId: 'rebuild',
+    autorunEnabled: false,
+    currentCardId: null,
+    pendingRunAt: null,
+    updatedAt: null,
+  };
   return readJson(QUEUE_STATE_FILE, fallback);
 }
 function writeQueueState(s){
@@ -2258,9 +2308,119 @@ app.post('/api/queue/state', (req, res) => {
   const cur = readQueueState();
   const next = { ...cur };
   if (state && typeof state.selectedColumnId === 'string') next.selectedColumnId = state.selectedColumnId;
+  if (state && typeof state.autorunEnabled === 'boolean') next.autorunEnabled = state.autorunEnabled;
   const saved = writeQueueState(next);
   logWork('queue.stateSaved', saved);
   res.json({ ok:true, state: saved });
+});
+
+let queueAutorunTimer = null;
+function clearQueueAutorunTimer(){
+  if (queueAutorunTimer) {
+    try { clearTimeout(queueAutorunTimer); } catch {}
+    queueAutorunTimer = null;
+  }
+}
+
+function findQueueColumn(pm, state){
+  const cols = (pm && Array.isArray(pm.columns)) ? pm.columns : [];
+  const selId = state && state.selectedColumnId ? String(state.selectedColumnId) : 'rebuild';
+  return cols.find(c => c && String(c.id||'') === selId) || cols.find(c => c && (String(c.id||'') === 'rebuild' || String(c.title||'').toLowerCase() === 'rebuild')) || null;
+}
+
+function findNextQueuedCard(col){
+  const cards = (col && Array.isArray(col.cards)) ? col.cards : [];
+  return cards.find(c => c && (c.queueStatus === 'queued' || c.queuedAt) && !c.completedAt) || null;
+}
+
+function patchCardById(pm, cardId, patch){
+  pm.columns = Array.isArray(pm.columns) ? pm.columns : [];
+  for (const col of pm.columns){
+    col.cards = Array.isArray(col.cards) ? col.cards : [];
+    const c = col.cards.find(x => x && String(x.id||'') === String(cardId));
+    if (!c) continue;
+    for (const k of Object.keys(patch||{})) c[k] = patch[k];
+    return c;
+  }
+  return null;
+}
+
+function queueKickoffMessage(card){
+  const title = String(card?.title || '').trim();
+  const desc = String(card?.desc || card?.body || '').trim();
+  const content = String(card?.content || '').trim();
+  const id = String(card?.id || '').trim();
+
+  return [
+    'ITERATIVE MODE (AUTHORIZED)',
+    'QUEUE AUTORUN: start next queued rebuild card.',
+    'Card ID: ' + id,
+    'Card title: ' + title,
+    desc ? ('Card desc: ' + desc) : null,
+    content ? ('Card content:\n' + content) : null,
+    '',
+    'Success criteria:',
+    '- Implement the card goal (small commits; restart services if needed).',
+    '- Report what changed + build number.',
+    '- End your final message with: QUEUE COMPLETE: ' + id,
+  ].filter(Boolean).join('\n');
+}
+
+function scheduleQueueAutorun(ms){
+  const state = readQueueState();
+  if (!state.autorunEnabled) return { ok:false, error:'autorun_disabled' };
+
+  clearQueueAutorunTimer();
+  const when = new Date(Date.now() + Math.max(0, Number(ms||0))).toISOString();
+  state.pendingRunAt = when;
+  writeQueueState(state);
+
+  queueAutorunTimer = setTimeout(() => {
+    try {
+      const state2 = readQueueState();
+      if (!state2.autorunEnabled) return;
+      const pm = readPM();
+      const col = findQueueColumn(pm, state2);
+      const next = findNextQueuedCard(col);
+      if (!next) {
+        state2.pendingRunAt = null;
+        state2.currentCardId = null;
+        writeQueueState(state2);
+        return;
+      }
+
+      // mark as current
+      state2.pendingRunAt = null;
+      state2.currentCardId = String(next.id||null);
+      writeQueueState(state2);
+
+      // send message into Console as if user requested next task
+      acceptMessage({ text: queueKickoffMessage(next), attachments: [] });
+      logWork('queue.autorun.kickoff', { cardId: String(next.id||''), title: String(next.title||''), colId: String(col?.id||'') });
+    } catch (e) {
+      logWork('queue.autorun.error', { error: String(e) });
+    }
+  }, Math.max(0, Number(ms||0)));
+
+  return { ok:true, pendingRunAt: when };
+}
+
+app.post('/api/queue/autorun/scheduleNext', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const delayMs = Math.max(0, Number(req.body?.delayMs || 15000));
+  const out = scheduleQueueAutorun(delayMs);
+  if (!out.ok) return res.status(409).json(out);
+  res.json(out);
+});
+
+app.post('/api/queue/autorun/stop', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  clearQueueAutorunTimer();
+  const st = readQueueState();
+  st.pendingRunAt = null;
+  writeQueueState(st);
+  logWork('queue.autorun.stopped', {});
+  res.json({ ok:true });
 });
 
 // Generate to-dos for a PM card using the connected Gateway model.
@@ -2468,6 +2628,14 @@ app.get('/pm', (req, res) => {
         <div style="margin-top:12px;" class="muted small">To-Dos</div>
         <div id="cm_todos"></div>
         <div class="muted small" id="cm_msg" style="margin-top:10px;"></div>
+
+        <div style="margin-top:14px;">
+          <div class="muted small">Queued Completion Reply</div>
+          <div id="cm_qreply" style="margin-top:8px; white-space:pre-wrap; background: rgba(0,0,0,0.12); border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; max-height:240px; overflow:auto;"></div>
+          <div class="rowbtn" style="margin-top:10px; justify-content:flex-end;">
+            <button class="pillbtn" id="cm_send_console" type="button">Send to Console</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -2509,6 +2677,8 @@ app.get('/pm', (req, res) => {
     const cmMoveTo = $('cm_move_to');
     const cmMoveUp = $('cm_moveup');
     const cmMoveDn = $('cm_movedn');
+    const cmQReply = $('cm_qreply');
+    const cmSendConsole = $('cm_send_console');
 
     const cmInDesc = $('cm_in_desc');
     const cmInContent = $('cm_in_content');
@@ -2542,6 +2712,10 @@ app.get('/pm', (req, res) => {
       $('cm_in_desc').value = card.desc || '';
       $('cm_in_content').value = card.content || '';
       $('cm_in_pri').value = String(card.priority || 'normal');
+
+      // queued completion reply
+      const qtxt = String(card.queuedCompletionReply || '').trim();
+      if (cmQReply) cmQReply.textContent = qtxt || '(none yet)';
 
       fillMoveTo();
       renderTodos();
@@ -2759,6 +2933,26 @@ app.get('/pm', (req, res) => {
     if (cmGen) cmGen.addEventListener('click', generateTodos);
     if (cmMoveUp) cmMoveUp.addEventListener('click', () => moveCard(-1));
     if (cmMoveDn) cmMoveDn.addEventListener('click', () => moveCard(+1));
+
+    if (cmSendConsole) cmSendConsole.addEventListener('click', async () => {
+      const fc = findCard();
+      if (!fc) return;
+      const card = fc.card;
+      const id = String(card.id || '');
+      const title = String(card.title || '');
+      const reply = String(card.queuedCompletionReply || '').trim();
+      const msg = [
+        'FOLLOW-UP REQUEST (from PM)',
+        'Card: ' + title,
+        'Card ID: ' + id,
+        '',
+        'Queued Completion Reply:',
+        reply || '(none)',
+      ].join('\n');
+      try {
+        await fetch('/api/message', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ text: msg, attachments: [] }) });
+      } catch {}
+    });
 
     function priClass(p){
       const v = String(p||'planning').toLowerCase();
@@ -3123,6 +3317,44 @@ function extractTextFromGatewayMessage(message) {
   }
 }
 
+function handleQueueCompletionText(text, ts){
+  try {
+    const m = String(text||'').match(/\bQUEUE\s+COMPLETE\s*:\s*([a-zA-Z0-9_\-\.]+)\b/);
+    if (!m) return false;
+    const cardId = String(m[1] || '').trim();
+    if (!cardId) return false;
+
+    const pm = readPM();
+    const patched = patchCardById(pm, cardId, {
+      completedAt: ts,
+      queueStatus: 'done',
+      queuedCompletionReply: String(text||'').trim().slice(0, 20000),
+      queuedCompletionAt: ts,
+    });
+    if (patched) writePM(pm);
+
+    const st = readQueueState();
+    if (String(st.currentCardId||'') === cardId) {
+      st.currentCardId = null;
+      st.pendingRunAt = null;
+      writeQueueState(st);
+    }
+
+    logWork('queue.cardCompleted', { cardId, saved: !!patched });
+
+    // If autorun is enabled, schedule the next queued card kickoff.
+    if (st.autorunEnabled) {
+      scheduleQueueAutorun(15000);
+      logWork('queue.autorun.scheduled', { afterMs: 15000 });
+    }
+
+    return true;
+  } catch (e) {
+    logWork('queue.complete.parse.error', { error: String(e) });
+    return false;
+  }
+}
+
 function consoleBotSay(text) {
   const msg = {
     id: 'bot_' + Date.now().toString(16) + crypto.randomBytes(3).toString('hex'),
@@ -3132,6 +3364,9 @@ function consoleBotSay(text) {
   };
   appendJsonl(MSG_FILE, msg);
   appendTranscriptLine('assistant', msg);
+
+  // Queue completion harvesting (writes completion reply into the PM card)
+  handleQueueCompletionText(msg.text, msg.ts);
 
   // Best-effort auto-checkoff: if there is an active DEL and the assistant mentions an item, mark it done.
   const state = loadDEState();

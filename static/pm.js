@@ -489,9 +489,39 @@
     } catch {}
   });
 
+  function alignMenuToLastColumn(){
+    try {
+      const menuWrap = document.getElementById('pmMenuWrap');
+      const wrap = document.querySelector('.wrap');
+      const boardWrap = document.getElementById('pmBoardWrap');
+      const cols = Array.from(document.querySelectorAll('.col'));
+      if (!menuWrap || !wrap || !boardWrap || !cols.length) return;
+
+      const wrapRect = wrap.getBoundingClientRect();
+      const menuRect = menuWrap.getBoundingClientRect();
+      const lastCol = cols[cols.length - 1];
+      const lastRect = lastCol.getBoundingClientRect();
+
+      // If last column is visible in viewport, align to its right edge; otherwise align to wrap/page edge.
+      const viewportRight = window.innerWidth;
+      const onScreen = lastRect.left < viewportRight && lastRect.right <= viewportRight;
+      const targetRight = onScreen ? lastRect.right : wrapRect.right;
+
+      const maxW = Math.max(240, Math.floor(targetRight - menuRect.left));
+      menuWrap.style.maxWidth = maxW + 'px';
+    } catch {}
+  }
+
   // Initial render from boot model; then refresh in background
   try { render(); setPmStatus('rendered (boot model)'); } catch { setPmStatus('render failed'); }
+  alignMenuToLastColumn();
+
   const btn = document.getElementById('pmRefresh');
-  if (btn) btn.addEventListener('click', load);
-  load();
+  if (btn) btn.addEventListener('click', () => { load().finally(() => alignMenuToLastColumn()); });
+
+  window.addEventListener('resize', () => alignMenuToLastColumn());
+  const bw = document.getElementById('pmBoardWrap');
+  if (bw) bw.addEventListener('scroll', () => alignMenuToLastColumn());
+
+  load().finally(() => alignMenuToLastColumn());
 })();

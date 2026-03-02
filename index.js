@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.54';
+const BUILD = '2026-03-02.55';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -3101,15 +3101,17 @@ app.get('/pm', (req, res) => {
 </head>
 <body>
   <div class="wrap">
-    <div class="top" style="display:grid; grid-template-columns: auto 1fr; gap:12px; align-items:baseline;">
+    <div class="top" style="display:grid; grid-template-columns: auto auto 1fr; gap:12px; align-items:baseline;">
       <div>
         <h1>ClawdPM</h1>
         <div class="muted small">Cards are task-groups. Click a card to generate + manage to-dos.</div>
         <div class="muted small" id="pm_js_status" style="margin-top:6px;">JS: (loading…)</div>
       </div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; justify-self:end; width:100%;">
-        ${appsMenuHtml('/pm')}
+      <div style="align-self:start;">
         <button class="btn" id="pmRefresh" type="button">Refresh</button>
+      </div>
+      <div id="pmMenuWrap" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; justify-self:end; width:100%;">
+        ${appsMenuHtml('/pm')}
       </div>
     </div>
 

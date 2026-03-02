@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.42';
+const BUILD = '2026-03-02.43';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1639,7 +1639,7 @@ function appsMenuHtml(activePath){
   const items = [
     { label: 'ClawdApps', href: '/apps' },
     { label: 'ClawdPM', href: '/pm' },
-    { label: 'ClawdScript', href: '/transcript' },
+    { label: 'ClawdScript', href: '/apps/script' },
     { label: 'ClawdName', href: '/name' },
     { label: 'ClawdRepo', href: '/apps/repo' },
     { label: 'ClawdSec', href: '/apps/sec' },
@@ -1661,7 +1661,7 @@ app.get('/apps', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
 
   const apps = [
-    { k:'script', title:'ClawdScript', href:'/transcript', desc:'The full conversation record with search + filters.' },
+    { k:'script', title:'ClawdScript', href:'/apps/script', desc:'The full conversation record with search + filters.' },
     { k:'pm', title:'ClawdPM', href:'/pm', desc:'Trello-style projects, lists, and cards.' },
     { k:'name', title:'ClawdName', href:'/name', desc:'Domain availability helper (v0 heuristic).' },
     { k:'repo', title:'ClawdRepo', href:'/apps/repo', desc:'Repo status, commits, and links.' },
@@ -1697,6 +1697,17 @@ app.get('/apps', (req, res) => {
 
 function renderModulePage(key){
   const map = {
+    script: { title:'ClawdScript', subtitle:'Transcript browser (embedded).', body:`
+      <div class="subcard" style="line-height:1.55;">
+        <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+          <div class="muted">Embedded <code>/transcript</code> so you can browse without leaving the Apps suite. (Standalone route still exists.)</div>
+          <a class="pill" href="/transcript" target="_blank" rel="noopener">Open /transcript</a>
+        </div>
+        <div style="margin-top:12px; border:1px solid rgba(255,255,255,0.10); border-radius:14px; overflow:hidden;">
+          <iframe src="/transcript" style="width:100%; height: 78vh; border:0; background: transparent;"></iframe>
+        </div>
+      </div>
+    ` },
     repo: { title:'ClawdRepo', subtitle:'Commits for this project + useful repo links.', body:`
       <div class="subcard" style="line-height:1.55;">
         <div class="muted">Local repo: <code>${__dirname}</code></div>
@@ -2331,6 +2342,11 @@ function renderModulePage(key){
   return appsPageShell({ title: spec.title, subtitle: spec.subtitle, bodyHtml });
 }
 
+app.get('/apps/script', (req,res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const html = renderModulePage('script');
+  res.type('text/html; charset=utf-8').send(html);
+});
 app.get('/apps/repo', (req,res) => {
   res.setHeader('Cache-Control', 'no-store');
   const html = renderModulePage('repo');

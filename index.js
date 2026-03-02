@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.26';
+const BUILD = '2026-03-02.27';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1735,9 +1735,188 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
       </script>
     ` },
     build: { title:'ClawdBuild', subtitle:'Build pipeline surface (placeholder).', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder for layered delivery: spec → tasks → code → tests → commits → release.</div>` },
-    queue: { title:'ClawdQueue', subtitle:'Agent execution queue (placeholder).', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder.
+    queue: { title:'ClawdQueue', subtitle:'Serial execution rail (PM-backed).', body:`
+      <div class="subcard" style="line-height:1.55;">
+        <div class="muted">Source: PM column <code>rebuild</code> in <code>${PM_FILE}</code>. Queue + PM share the same cards (status is synced).</div>
 
-Intent (from transcript): Queue is for the agent runtime: serial execution, pause on uncertainty, throttle-aware.</div>` },
+        <div class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button class="pill" id="qRefresh" type="button">Refresh</button>
+          <button class="pill" id="qEnqueueAll" type="button">Enqueue all</button>
+          <button class="pill" id="qClearQueue" type="button">Clear queued</button>
+          <span class="muted" id="qMsg"></span>
+        </div>
+
+        <div class="grid" style="margin-top:12px; grid-template-columns: 1.2fr .6fr .8fr; align-items:start;">
+          <div class="card" style="background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Up next (queued)</div>
+            <div id="qQueued" class="muted">Loading…</div>
+          </div>
+
+          <div class="card" style="background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Done</div>
+            <div id="qDone" class="muted">Loading…</div>
+          </div>
+
+          <div class="card" style="background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Countdown</div>
+            <div class="muted">When you mark an item done, we can auto-continue after a pause.</div>
+            <div id="qCountdown" style="margin-top:10px; font-size:16px; font-weight:900;"></div>
+            <div class="muted" id="qCountdownSub" style="margin-top:6px;"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="font-weight:900; margin-bottom:8px;">Rebuild column cards</div>
+          <div id="qAll" class="muted">Loading…</div>
+        </div>
+      </div>
+
+      <script>
+      (() => {
+        const $ = (id) => document.getElementById(id);
+        const msg = $('qMsg');
+        let countdownTimer = null;
+
+        function esc(s){
+          return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
+        function setMsg(t){ if (msg) msg.textContent = t || ''; }
+
+        async function load(){
+          setMsg('');
+          const allEl = $('qAll');
+          const qEl = $('qQueued');
+          const dEl = $('qDone');
+          if (allEl) allEl.textContent = 'Loading…';
+          if (qEl) qEl.textContent = 'Loading…';
+          if (dEl) dEl.textContent = 'Loading…';
+
+          const res = await fetch('/api/pm', { credentials:'include', cache:'no-store' });
+          const j = await res.json();
+          const cols = (j && j.ok && j.pm && Array.isArray(j.pm.columns)) ? j.pm.columns : [];
+          const rebuild = cols.find(c => String(c.id||'') === 'rebuild' || String(c.title||'').toLowerCase() === 'rebuild');
+          const cards = (rebuild && Array.isArray(rebuild.cards)) ? rebuild.cards : [];
+
+          const queued = cards.filter(c => (c.queueStatus === 'queued' || c.queuedAt) && !c.completedAt);
+          const done = cards.filter(c => c.queueStatus === 'done' || c.completedAt);
+
+          function cardRow(c){
+            const status = c.completedAt ? 'done' : (c.queuedAt ? 'queued' : '');
+            const badge = status ? ('<span class="badge" style="margin-left:8px;">' + esc(status) + '</span>') : '';
+            const meta = [c.desc||'', c.completedAt?('✓ '+String(c.completedAt).slice(0,19).replace('T',' ')):'', c.queuedAt?('queued '+String(c.queuedAt).slice(0,19).replace('T',' ')):''].filter(Boolean).join(' • ');
+
+            const btnQueue = '<button class="pill" data-act="queue" data-id="'+esc(c.id)+'" type="button">Queue</button>';
+            const btnDone  = '<button class="pill" data-act="done" data-id="'+esc(c.id)+'" type="button">Done</button>';
+            const btnClear = '<button class="pill" data-act="clear" data-id="'+esc(c.id)+'" type="button">Clear</button>';
+
+            return '<div style="padding:10px 8px; border-top:1px solid rgba(255,255,255,0.08);">'
+              + '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">'
+              +   '<div style="min-width:240px;">'
+              +     '<div style="font-weight:900;">' + esc(c.title||'') + badge + '</div>'
+              +     (meta ? ('<div class="muted" style="margin-top:6px;">' + esc(meta) + '</div>') : '')
+              +   '</div>'
+              +   '<div class="row" style="gap:8px; justify-content:flex-end;">' + btnQueue + btnDone + btnClear + '</div>'
+              + '</div>'
+              + '</div>';
+          }
+
+          if (qEl) qEl.innerHTML = queued.length ? queued.map(cardRow).join('') : '<div class="muted">Nothing queued.</div>';
+          if (dEl) dEl.innerHTML = done.length ? done.slice().reverse().slice(0,12).map(cardRow).join('') : '<div class="muted">Nothing completed yet.</div>';
+          if (allEl) allEl.innerHTML = cards.length ? cards.map(cardRow).join('') : '<div class="muted">No cards found in Rebuild column.</div>';
+
+          // wire actions
+          for (const el of document.querySelectorAll('[data-act][data-id]')){
+            el.addEventListener('click', async (ev) => {
+              const act = el.getAttribute('data-act');
+              const id = el.getAttribute('data-id');
+              if (!id) return;
+
+              if (act === 'queue') {
+                await fetch('/api/pm/cardPatch', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ cardId:id, patch:{ queuedAt: new Date().toISOString(), completedAt: null, queueStatus:'queued' } }) });
+                setMsg('Queued.');
+                return load();
+              }
+              if (act === 'done') {
+                const now = new Date().toISOString();
+                await fetch('/api/pm/cardPatch', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ cardId:id, patch:{ completedAt: now, queueStatus:'done' } }) });
+                setMsg('Marked done.');
+                startCountdown(15, 'Moving to next queued card unless you stop it.');
+                return load();
+              }
+              if (act === 'clear') {
+                await fetch('/api/pm/cardPatch', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ cardId:id, patch:{ queuedAt: null, completedAt: null, queueStatus:'' } }) });
+                setMsg('Cleared.');
+                return load();
+              }
+            });
+          }
+        }
+
+        function startCountdown(secs, sub){
+          const box = $('qCountdown');
+          const subEl = $('qCountdownSub');
+          if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+          let left = Number(secs||0);
+          if (subEl) subEl.textContent = sub || '';
+          if (!box) return;
+          box.textContent = left ? ('Continuing in ' + left + 's…') : '';
+          countdownTimer = setInterval(() => {
+            left--;
+            if (left <= 0) {
+              clearInterval(countdownTimer);
+              countdownTimer = null;
+              box.textContent = 'Ready.';
+              return;
+            }
+            box.textContent = 'Continuing in ' + left + 's…';
+          }, 1000);
+        }
+
+        async function enqueueAll(){
+          setMsg('Enqueueing…');
+          const res = await fetch('/api/pm', { credentials:'include', cache:'no-store' });
+          const j = await res.json();
+          const cols = (j && j.ok && j.pm && Array.isArray(j.pm.columns)) ? j.pm.columns : [];
+          const rebuild = cols.find(c => String(c.id||'') === 'rebuild' || String(c.title||'').toLowerCase() === 'rebuild');
+          const cards = (rebuild && Array.isArray(rebuild.cards)) ? rebuild.cards : [];
+          for (const c of cards){
+            if (c.completedAt) continue;
+            if (c.queueStatus === 'queued' || c.queuedAt) continue;
+            await fetch('/api/pm/cardPatch', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ cardId:String(c.id), patch:{ queuedAt: new Date().toISOString(), completedAt: null, queueStatus:'queued' } }) });
+          }
+          setMsg('Enqueued all.');
+          load();
+        }
+
+        async function clearQueued(){
+          setMsg('Clearing…');
+          const res = await fetch('/api/pm', { credentials:'include', cache:'no-store' });
+          const j = await res.json();
+          const cols = (j && j.ok && j.pm && Array.isArray(j.pm.columns)) ? j.pm.columns : [];
+          const rebuild = cols.find(c => String(c.id||'') === 'rebuild' || String(c.title||'').toLowerCase() === 'rebuild');
+          const cards = (rebuild && Array.isArray(rebuild.cards)) ? rebuild.cards : [];
+          for (const c of cards){
+            if (c.completedAt) continue;
+            if (!(c.queueStatus === 'queued' || c.queuedAt)) continue;
+            await fetch('/api/pm/cardPatch', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ cardId:String(c.id), patch:{ queuedAt: null, queueStatus:'' } }) });
+          }
+          setMsg('Cleared queued.');
+          load();
+        }
+
+        const btnR = $('qRefresh');
+        const btnA = $('qEnqueueAll');
+        const btnC = $('qClearQueue');
+        if (btnR) btnR.addEventListener('click', load);
+        if (btnA) btnA.addEventListener('click', enqueueAll);
+        if (btnC) btnC.addEventListener('click', clearQueued);
+
+        load();
+      })();
+      </script>
+    ` },
+
   };
 
   const spec = map[key];
@@ -1971,6 +2150,39 @@ app.post('/api/pm', (req, res) => {
   const saved = writePM(pm);
   logWork('pm.saved', { cols: saved.columns?.length || 0 });
   res.json({ ok: true, pm: saved });
+});
+
+// Patch a single PM card (shared status between PM + Queue)
+app.post('/api/pm/cardPatch', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const cardId = String(req.body?.cardId || '').trim();
+  const patch = (req.body && typeof req.body.patch === 'object' && req.body.patch) ? req.body.patch : null;
+  if (!cardId) return res.status(400).json({ ok:false, error:'Missing cardId' });
+  if (!patch) return res.status(400).json({ ok:false, error:'Missing patch' });
+
+  const pm = readPM();
+  pm.columns = Array.isArray(pm.columns) ? pm.columns : [];
+  let found = null;
+  for (const col of pm.columns){
+    col.cards = Array.isArray(col.cards) ? col.cards : [];
+    const c = col.cards.find(x => x && String(x.id||'') === cardId);
+    if (c) { found = c; break; }
+  }
+  if (!found) return res.status(404).json({ ok:false, error:'Card not found' });
+
+  // Apply a small allowlist of patch keys
+  const allowed = ['queuedAt','completedAt','queueStatus'];
+  for (const k of allowed){
+    if (Object.prototype.hasOwnProperty.call(patch, k)) found[k] = patch[k];
+  }
+  if (!found.queueStatus) {
+    if (found.completedAt) found.queueStatus = 'done';
+    else if (found.queuedAt) found.queueStatus = 'queued';
+  }
+
+  const saved = writePM(pm);
+  logWork('pm.cardPatch', { cardId, queueStatus: found.queueStatus || null });
+  res.json({ ok:true, card: found, pm: saved });
 });
 
 // Generate to-dos for a PM card using the connected Gateway model.
@@ -2512,7 +2724,9 @@ app.get('/pm', (req, res) => {
 
         const cardsHtml = (col.cards || []).map((c, idx) => {
           const pc = priClass(c.priority);
-          const badge = '<span class="badge">' + esc(String(c.priority || 'planning')) + '</span>';
+          const q = (c.queueStatus || (c.completedAt ? 'done' : (c.queuedAt ? 'queued' : '')));
+          const qBadge = q ? ('<span class="badge" style="margin-left:6px;">' + esc(q === 'done' ? '✓ done' : (q === 'queued' ? '⏳ queued' : q)) + '</span>') : '';
+          const badge = '<span class="badge">' + esc(String(c.priority || 'planning')) + '</span>' + qBadge;
           const btns = '<div class="cardBtns">'
             + '<button type="button" data-cup="' + esc(col.id) + '" data-cid="' + esc(c.id) + '" title="Move up">↑</button>'
             + '<button type="button" data-cdn="' + esc(col.id) + '" data-cid="' + esc(c.id) + '" title="Move down">↓</button>'

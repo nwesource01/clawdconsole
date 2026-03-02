@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.58';
+const BUILD = '2026-03-02.59';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -396,12 +396,13 @@ app.get('/name', (req, res) => {
     .wrap{max-width: 1200px; margin:0 auto; padding: 16px;}
 
     /* Header like the Apps suite: left title, right menu aligned to container edge */
-    .top{display:grid; grid-template-columns: auto 1fr; gap:12px; align-items:baseline}
-    @media (max-width: 820px){ .top{grid-template-columns: 1fr;} }
+    .top{display:grid; grid-template-columns: minmax(0, 620px) 1fr; gap:12px; align-items:baseline}
+    @media (max-width: 980px){ .top{grid-template-columns: 1fr;} }
     .topR{display:flex; justify-content:flex-end; justify-self:end; width:100%; }
+    .appsMenu{flex-wrap:nowrap; overflow-x:auto; padding-bottom: 2px;}
 
     h1{margin:0; font-size:18px}
-    .muted{color:var(--muted)}
+    .muted{color:var(--muted); font-size:12px}
     .pill{ display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid rgba(34,198,198,.40); background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08)); color: rgba(231,231,231,.92); text-decoration:none; white-space:nowrap; font-weight:750; font-size:12px; }
     .pill:hover{ border-color: rgba(34,198,198,.70); background: linear-gradient(180deg, rgba(34,198,198,.26), rgba(34,198,198,.10)); }
     .appsMenu a[aria-current="page"]{ border-color: rgba(154,208,255,0.70); }

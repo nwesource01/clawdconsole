@@ -133,27 +133,22 @@
     }
   }
 
-  async function saveChangelog(){
-    const titleEl = document.getElementById('chgTitle');
-    const bodyEl = document.getElementById('chgBody');
+  async function updateChangelog(mode){
     const saved = document.getElementById('chgSaved');
     try {
-      if (saved) saved.textContent = 'Saving…';
-      const payload = { title: (titleEl?.value || '').trim(), body: (bodyEl?.value || '').trim() };
-      const res = await fetch('/api/changelog', {
+      if (saved) saved.textContent = (mode === 'rebuild') ? 'Rebuilding…' : 'Updating…';
+      const res = await fetch('/api/changelog/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ mode: (mode === 'rebuild') ? 'rebuild' : 'append' })
       });
       const j = await res.json();
       if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
-      if (saved) saved.textContent = 'Saved.';
-      if (titleEl) titleEl.value = '';
-      if (bodyEl) bodyEl.value = '';
+      if (saved) saved.textContent = 'Updated (added ' + String(j.added || 0) + ').';
       loadChangelog();
-    } catch (e) {
-      if (saved) saved.textContent = 'Save failed.';
+    } catch {
+      if (saved) saved.textContent = 'Update failed.';
     }
   }
 
@@ -203,9 +198,11 @@
   if (crmRefresh) crmRefresh.addEventListener('click', loadCRM);
 
   const chgRefresh = document.getElementById('chgRefresh');
-  const chgSave = document.getElementById('chgSave');
+  const chgUpdate = document.getElementById('chgUpdate');
+  const chgRebuild = document.getElementById('chgRebuild');
   if (chgRefresh) chgRefresh.addEventListener('click', loadChangelog);
-  if (chgSave) chgSave.addEventListener('click', saveChangelog);
+  if (chgUpdate) chgUpdate.addEventListener('click', () => updateChangelog('append'));
+  if (chgRebuild) chgRebuild.addEventListener('click', () => updateChangelog('rebuild'));
 
   if (adoptRefresh) adoptRefresh.addEventListener('click', loadAdoption);
   if (adoptSave) adoptSave.addEventListener('click', saveAdoption);

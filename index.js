@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.24';
+const BUILD = '2026-03-02.25';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -732,19 +732,12 @@ app.get('/adminonly', (req, res) => {
         </div>
 
         <div style="margin-top:12px; border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; background: rgba(0,0,0,0.12);">
-          <div class="muted" style="margin-bottom:6px;">Add a note (manual patch note)</div>
-          <div class="row" style="gap:10px; align-items:flex-end;">
-            <div style="flex:1; min-width:220px;">
-              <div class="muted">Title</div>
-              <input id="chgTitle" style="width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text)" placeholder="What changed?" />
-            </div>
-            <button id="chgSave" class="tabbtn" type="button" style="width:auto;">Save note</button>
+          <div class="muted" style="margin-bottom:10px;">This page is generated from transcript history. No manual edits.</div>
+          <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
+            <button id="chgUpdate" class="tabbtn" type="button" style="width:auto;">Update Changelog</button>
+            <button id="chgRebuild" class="tabbtn" type="button" style="width:auto;">Rebuild</button>
+            <span class="muted" id="chgSaved"></span>
           </div>
-          <div style="margin-top:10px;">
-            <div class="muted">Details</div>
-            <textarea id="chgBody" style="width:100%; min-height:120px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text)"></textarea>
-          </div>
-          <div class="muted" id="chgSaved" style="margin-top:8px;"></div>
         </div>
 
         <div id="chgList" style="margin-top:12px;"></div>
@@ -3243,8 +3236,9 @@ app.get('/', (req, res) => {
     .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: 0 10px 25px rgba(0,0,0,0.25); }
 
     /* Sidebar widgets */
-    /* Keep Readme compact (scroll inside) so sidebar bottom aligns with main column */
+    /* Keep Readme + Rules compact (scroll inside) so sidebar bottom aligns with main column */
     #readmeBody{ max-height: 220px; overflow:auto; padding-right: 6px; }
+    #rulesBody{ max-height: 260px; overflow:auto; padding-right: 6px; }
     #snapBody{ max-height: 280px; overflow:auto; padding-right: 6px; }
     .muted { color: var(--muted); font-size: 13px; }
     .row { display:flex; gap: 10px; align-items:center; flex-wrap: wrap; }

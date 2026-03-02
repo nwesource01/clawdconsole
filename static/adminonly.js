@@ -195,6 +195,7 @@
   }
 
   if (tabSitemap) tabSitemap.addEventListener('click', () => setTab('sitemap'));
+  if (tabApps) tabApps.addEventListener('click', () => setTab('apps'));
   if (tabAdoption) tabAdoption.addEventListener('click', () => setTab('adoption'));
   if (tabCRM) tabCRM.addEventListener('click', () => setTab('crm'));
   if (tabChangelog) tabChangelog.addEventListener('click', () => setTab('changelog'));

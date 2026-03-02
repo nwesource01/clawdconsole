@@ -880,7 +880,6 @@
       }
     } catch {}
 
-    const stick = isNearBottom(chatlog);
     const prevTop = chatlog.scrollTop;
 
     chatlog.innerHTML = '';
@@ -918,13 +917,9 @@
       if (isBot) wireCopyButtons(el);
     }
 
-    // Only autoscroll if the user was already near the bottom AND new messages arrived.
-    if (stick && messageCache.length > prevLen) {
-      chatlog.scrollTop = chatlog.scrollHeight;
-    } else {
-      const maxTop = Math.max(0, chatlog.scrollHeight - chatlog.clientHeight);
-      chatlog.scrollTop = Math.min(prevTop, maxTop);
-    }
+    // Scroll is 100% operator-controlled. Preserve exact position across refreshes.
+    const maxTop = Math.max(0, chatlog.scrollHeight - chatlog.clientHeight);
+    chatlog.scrollTop = Math.min(prevTop, maxTop);
   }
 
   function openPmModalFromMessage(m){

@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.18';
+const BUILD = '2026-03-02.19';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -830,6 +830,25 @@ app.post('/api/changelog', (req, res) => {
   res.json({ ok: true, entry: saved });
 });
 
+// --- ClawdPub: published artifacts index ---
+const PUB_FILE = path.join(__dirname, '..', 'clawdpub', 'published.json');
+app.get('/api/pub/items', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const raw = fs.existsSync(PUB_FILE) ? fs.readFileSync(PUB_FILE, 'utf8') : '[]';
+    let items; try { items = JSON.parse(raw); } catch { items = []; }
+    if (!Array.isArray(items)) items = [];
+    const counts = {};
+    for (const it of items) {
+      const c = (it && it.category) ? String(it.category) : 'other';
+      counts[c] = (counts[c] || 0) + 1;
+    }
+    res.json({ ok: true, counts, items });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 app.get('/api/adoption', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true, adoption: readAdoption() });
@@ -1493,6 +1512,30 @@ function appsIcon(kind){
   return common[kind] || common.repo;
 }
 
+
+function appsMenuHtml(activePath){
+  const path = String(activePath || '');
+  const items = [
+    { label: 'ClawdApps', href: '/apps' },
+    { label: 'ClawdPM', href: '/pm' },
+    { label: 'ClawdScript', href: '/transcript' },
+    { label: 'ClawdName', href: '/name' },
+    { label: 'ClawdRepo', href: '/apps/repo' },
+    { label: 'ClawdSec', href: '/apps/sec' },
+    { label: 'ClawdOps', href: '/apps/ops' },
+    { label: 'ClawdPub', href: '/apps/pub' },
+    { label: 'ClawdBuild', href: '/apps/build' },
+    { label: 'ClawdQueue', href: '/apps/queue' },
+  ];
+
+  return '<div class="appsMenu" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center; align-items:center;">' +
+    items.map(it => {
+      const isActive = (path === it.href);
+      return '<a class="pill" href="' + it.href + '" target="_blank" rel="noopener" ' + (isActive ? 'aria-current="page"' : '') + '>' + it.label + '</a>';
+    }).join('') +
+    '</div>';
+}
+
 app.get('/apps', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
 
@@ -1533,16 +1576,122 @@ app.get('/apps', (req, res) => {
 
 function renderModulePage(key){
   const map = {
-    repo: { title:'ClawdRepo', subtitle:'Repo info for this workspace (commits, status, links).', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">This page is a dedicated surface for repo-level operations.
+    repo: { title:'ClawdRepo', subtitle:'Commits for this project + useful repo links.', body:`
+      <div class="subcard" style="line-height:1.55;">
+        <div class="muted">Local repo: <code>${__dirname}</code></div>
+        <div class="muted" style="margin-top:6px;">GitHub: <a href="https://github.com/nwesource01/clawdconsole" target="_blank" rel="noopener">nwesource01/clawdconsole</a></div>
+        <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="pill" id="repoRefreshBtn" type="button" style="cursor:pointer;">Refresh</button>
+        </div>
+        <div id="repoCommits" class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);"></div>
+      </div>
 
-For now, use the Repo panel inside Console (ClawdApps → Repo tab) until we wire more here.</div>` },
+      <script>
+      (async () => {
+        const box = document.getElementById('repoCommits');
+        const btn = document.getElementById('repoRefreshBtn');
+
+        async function load(){
+          if (!box) return;
+          box.innerHTML = '<div class="muted">Loading…</div>';
+          try {
+            const res = await fetch('/api/repo/commits?limit=80', { credentials:'include', cache:'no-store' });
+            const j = await res.json();
+            const commits = (j && j.ok && Array.isArray(j.commits)) ? j.commits : [];
+            if (!commits.length) { box.innerHTML = '<div class="muted">No commits found.</div>'; return; }
+            box.innerHTML = commits.map(c => {
+              const short = String(c.hash||'').slice(0,7);
+              const msg = String(c.subject||'');
+              const when = String(c.date||'');
+              const refs = c.refs ? ('<span class="muted">(' + String(c.refs) + ')</span>') : '';
+              return '<div style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">' +
+                '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">' +
+                  '<div><code>' + short + '</code> ' + refs + '</div>' +
+                  '<div class="muted">' + when + '</div>' +
+                '</div>' +
+                '<div style="margin-top:6px;">' + msg + '</div>' +
+              '</div>';
+            }).join('');
+          } catch {
+            box.innerHTML = '<div class="muted">Failed to load commits.</div>';
+          }
+        }
+
+        if (btn) btn.addEventListener('click', load);
+        load();
+      })();
+      </script>
+    ` },
     sec: { title:'ClawdSec', subtitle:'Security SOP + safe operator patterns.', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder.
 
 Rule of thumb: do not paste real secrets into chat/web UI. Use server env files and rotate when needed.</div>` },
     ops: { title:'ClawdOps', subtitle:'Operations: uptime, deploy checklist, health checks.', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder.
 
 Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
-    pub: { title:'ClawdPub', subtitle:'Publishing + SOP / design guidelines.', body:`<div class="subcard" style="line-height:1.55;">Open SOP: <a href="/clawdpub/sop" target="_blank" rel="noopener">/clawdpub/sop</a></div>` },
+    pub: { title:'ClawdPub', subtitle:'Published artifacts + SOP.', body:`
+      <div class="subcard" style="line-height:1.55;">
+        <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+          <div>Open SOP: <a href="/clawdpub/sop" target="_blank" rel="noopener">/clawdpub/sop</a></div>
+          <button class="pill" id="pubRefreshBtn" type="button" style="cursor:pointer;">Refresh</button>
+        </div>
+        <div id="pubCounts" class="muted" style="margin-top:10px;"></div>
+        <div id="pubGrid" class="grid" style="grid-template-columns: repeat(3, minmax(0,1fr));"></div>
+      </div>
+
+      <script>
+      (async () => {
+        const grid = document.getElementById('pubGrid');
+        const counts = document.getElementById('pubCounts');
+        const btn = document.getElementById('pubRefreshBtn');
+
+        function esc(s){
+          return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
+        async function load(){
+          if (!grid) return;
+          grid.innerHTML = '<div class="muted">Loading…</div>';
+          try {
+            const res = await fetch('/api/pub/items', { credentials:'include', cache:'no-store' });
+            const j = await res.json();
+            const items = (j && j.ok && Array.isArray(j.items)) ? j.items : [];
+            const cts = (j && j.ok && j.counts) ? j.counts : {};
+
+            if (counts) {
+              const parts = Object.keys(cts).sort().map(k => k + ': ' + cts[k]);
+              counts.textContent = parts.length ? ('Counts: ' + parts.join(' • ')) : 'No published items yet.';
+            }
+
+            if (!items.length) {
+              grid.innerHTML = '<div class="muted">No published artifacts yet.</div>';
+              return;
+            }
+
+            grid.innerHTML = items.map(it => {
+              const title = esc(it.title||'');
+              const cat = esc(it.category||'');
+              const status = esc(it.status||'');
+              const sum = esc(it.summary||'');
+              const links = Array.isArray(it.links) ? it.links : [];
+              const linksHtml = links.map(l => '<a href="' + esc(l.url||'') + '" target="_blank" rel="noopener">' + esc(l.label||l.url||'link') + '</a>').join(' • ');
+
+              return '<div class="card" style="background: rgba(0,0,0,0.10);">' +
+                '<div style="font-weight:900;">' + title + '</div>' +
+                '<div class="muted" style="margin-top:6px;">' + [cat,status].filter(Boolean).join(' • ') + '</div>' +
+                (sum ? ('<div style="margin-top:10px; color: rgba(232,238,252,.80);">' + sum + '</div>') : '') +
+                (linksHtml ? ('<div class="muted" style="margin-top:10px;">' + linksHtml + '</div>') : '') +
+              '</div>';
+            }).join('');
+          } catch {
+            grid.innerHTML = '<div class="muted">Failed to load published items.</div>';
+          }
+        }
+
+        if (btn) btn.addEventListener('click', load);
+        load();
+      })();
+      </script>
+    ` },
     build: { title:'ClawdBuild', subtitle:'Build pipeline surface (placeholder).', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder for layered delivery: spec → tasks → code → tests → commits → release.</div>` },
     queue: { title:'ClawdQueue', subtitle:'Agent execution queue (placeholder).', body:`<div class="subcard" style="white-space:pre-wrap; line-height:1.55;">WIP placeholder.
 

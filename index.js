@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.53';
+const BUILD = '2026-03-02.54';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -394,7 +394,9 @@ app.get('/name', (req, res) => {
     :root{ --bg:#0b0f1a; --card:#11182a; --text:#e7e7e7; --muted: rgba(231,231,231,.70); --border: rgba(231,231,231,.12); --teal:#22c6c6; }
     body{margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background: var(--bg); color: var(--text)}
     .wrap{max-width: 1200px; margin:0 auto; padding: 16px;}
-    .top{display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:baseline}
+    .top{display:grid; grid-template-columns: auto 1fr; gap:12px; align-items:baseline}
+    @media (max-width: 820px){ .top{grid-template-columns: 1fr;} }
+    .topR{display:flex; justify-content:flex-end; justify-self:end; width:100%; }
     h1{margin:0; font-size:18px}
     .muted{color:var(--muted)}
     .pill{ display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid rgba(34,198,198,.40); background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08)); color: rgba(231,231,231,.92); text-decoration:none; white-space:nowrap; font-weight:750; font-size:12px; }
@@ -424,12 +426,12 @@ app.get('/name', (req, res) => {
 </head>
 <body>
   <div class="wrap">
-    <div class="top" style="display:grid; grid-template-columns: auto 1fr; gap:12px; align-items:baseline;">
+    <div class="top">
       <div>
         <h1>ClawdName</h1>
         <div class="muted">Domain availability (v0). DNS heuristic: <b>taken</b> if SOA/NS exists; <b>likely available</b> if ENOTFOUND; otherwise <b>unknown</b>.</div>
       </div>
-      <div style="display:flex; justify-content:flex-end; align-items:center; justify-self:end;">${appsMenuHtml('/name')}</div>
+      <div class="topR">${appsMenuHtml('/name')}</div>
     </div>
 
     <div class="card">
@@ -1792,13 +1794,11 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
     a{ color:#9ad0ff; }
     .wrap{ max-width: 1400px; margin:0 auto; padding: 18px; }
 
-    /* Title row: left title, centered app menu, right quick links */
-    .top{ display:grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items:baseline; }
+    /* Title row: left title, right app menu (aligned to container edge) */
+    .top{ display:grid; grid-template-columns: auto 1fr; gap: 12px; align-items:baseline; }
     @media (max-width: 980px){ .top{ grid-template-columns: 1fr; } }
     .topL{ min-width: 240px; }
-    .topC{ display:flex; justify-content:flex-end; }
-    .topR{ display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
-    @media (max-width: 980px){ .topC{ justify-content:flex-start; } .topR{ justify-content:flex-start; } }
+    .topC{ display:flex; justify-content:flex-end; justify-self:end; width:100%; }
 
     h1{ margin:0; font-size: 22px; }
     .muted{ color: var(--muted); font-size: 12px; }
@@ -1827,7 +1827,6 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
         <div class="muted" style="margin-top:6px;">${subtitle || ''}</div>
       </div>
       <div class="topC">${appsMenuHtml(activePath || '')}</div>
-      <div class="topR"></div>
     </div>
 
     ${bodyHtml || ''}
@@ -1872,7 +1871,7 @@ function appsMenuHtml(activePath){
     { label: 'ClawdQueue', href: '/apps/queue' },
   ];
 
-  return '<div class="appsMenu" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">' +
+  return '<div class="appsMenu" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; align-items:center; width:100%;">' +
     items.map(it => {
       const isActive = (path === it.href);
       return '<a class="pill" href="' + it.href + '" ' + (isActive ? 'aria-current="page"' : '') + '>' + it.label + '</a>';
@@ -3108,7 +3107,7 @@ app.get('/pm', (req, res) => {
         <div class="muted small">Cards are task-groups. Click a card to generate + manage to-dos.</div>
         <div class="muted small" id="pm_js_status" style="margin-top:6px;">JS: (loading…)</div>
       </div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; justify-self:end;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; justify-self:end; width:100%;">
         ${appsMenuHtml('/pm')}
         <button class="btn" id="pmRefresh" type="button">Refresh</button>
       </div>

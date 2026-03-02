@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.29';
+const BUILD = '2026-03-02.30';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1513,6 +1513,7 @@ function appsPageShell({ title, subtitle, bodyHtml }) {
     .appDesc{ margin-top:4px; color: rgba(232,238,252,.72); font-size: 12px; line-height:1.35; }
     .footer{ margin-top: 14px; color: rgba(232,238,252,.55); font-size: 12px; }
     .subcard{ margin-top: 14px; background: var(--card2); border:1px solid rgba(255,255,255,0.10); border-radius: 14px; padding: 14px; }
+    input, textarea, select{ background:#0d1426; border:1px solid rgba(255,255,255,0.14); color: var(--text); border-radius: 12px; padding: 10px 12px; font-size: 14px; font-family: inherit; }
   </style>
 </head>
 <body>
@@ -1741,7 +1742,7 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
 
         <div class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap; align-items:center;">
           <span class="muted">Column</span>
-          <select id="qCol" style="min-width:220px;"></select>
+          <select id="qCol" style="min-width:220px; padding:10px 12px;"></select>
           <button class="pill" id="qColSave" type="button">Use column</button>
 
           <label class="muted" style="display:flex; gap:8px; align-items:center;">

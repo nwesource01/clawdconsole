@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.55';
+const BUILD = '2026-03-02.56';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -394,9 +394,12 @@ app.get('/name', (req, res) => {
     :root{ --bg:#0b0f1a; --card:#11182a; --text:#e7e7e7; --muted: rgba(231,231,231,.70); --border: rgba(231,231,231,.12); --teal:#22c6c6; }
     body{margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background: var(--bg); color: var(--text)}
     .wrap{max-width: 1200px; margin:0 auto; padding: 16px;}
+
+    /* Header like the Apps suite: left title, right menu aligned to container edge */
     .top{display:grid; grid-template-columns: auto 1fr; gap:12px; align-items:baseline}
     @media (max-width: 820px){ .top{grid-template-columns: 1fr;} }
     .topR{display:flex; justify-content:flex-end; justify-self:end; width:100%; }
+
     h1{margin:0; font-size:18px}
     .muted{color:var(--muted)}
     .pill{ display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid rgba(34,198,198,.40); background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08)); color: rgba(231,231,231,.92); text-decoration:none; white-space:nowrap; font-weight:750; font-size:12px; }
@@ -408,8 +411,12 @@ app.get('/name', (req, res) => {
     textarea::placeholder,input::placeholder{color: rgba(231,231,231,.35)}
     textarea{min-height:110px; max-height:300px}
     .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
-    .nameGrid{display:grid; grid-template-columns: 1fr 260px; gap:10px; align-items:start}
-    @media (max-width: 820px){ .nameGrid{grid-template-columns: 1fr;} }
+    .nameGrid{display:grid; grid-template-columns: 1fr 320px; gap:12px; align-items:start}
+    @media (max-width: 980px){ .nameGrid{grid-template-columns: 1fr;} }
+    .sideFields{display:flex; flex-direction:column; gap:10px; min-width:0;}
+    .field{display:flex; flex-direction:column; gap:6px; min-width:0;}
+    .actions{display:flex; gap:10px; flex-wrap:wrap; justify-content:space-between; align-items:center; }
+    .actions > *{flex:0 0 auto;}
     .btn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 12px; padding:10px 12px; cursor:pointer}
     .btn:hover{border-color: rgba(34,198,198,.65)}
     table{width:100%; border-collapse: collapse; margin-top:12px; font-size:13px}
@@ -436,17 +443,22 @@ app.get('/name', (req, res) => {
 
     <div class="card">
       <div class="nameGrid">
-        <div style="flex:1; min-width: 260px;">
+        <div style="min-width:0;">
           <div class="muted" style="margin-bottom:6px;">Business names (one per line)</div>
           <textarea id="names" placeholder=""></textarea>
           <div class="muted" style="margin-top:6px; font-size:12px;">Example: <code>InfraClawd</code> <span class="muted">(one per line)</span></div>
         </div>
-        <div style="width:260px;">
-          <div class="muted" style="margin-bottom:6px;">TLDs (comma-separated)</div>
-          <input id="tlds" value=".com,.io,.ai,.app" />
-          <div class="muted" style="margin:10px 0 6px;">Max variants per name</div>
-          <input id="variants" value="8" />
-          <div class="row" style="margin-top:10px; justify-content:space-between;">
+
+        <div class="sideFields">
+          <div class="field">
+            <div class="muted">TLDs (comma-separated)</div>
+            <input id="tlds" value=".com,.io,.ai,.app" />
+          </div>
+          <div class="field">
+            <div class="muted">Max variants per name</div>
+            <input id="variants" value="8" />
+          </div>
+          <div class="actions">
             <button class="btn" id="run" type="button">Check</button>
             <button class="mini" id="clear" type="button">Clear</button>
           </div>

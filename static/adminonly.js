@@ -1,10 +1,12 @@
 (() => {
   const tabSitemap = document.getElementById('admTabSitemap');
+  const tabApps = document.getElementById('admTabApps');
   const tabAdoption = document.getElementById('admTabAdoption');
   const tabCRM = document.getElementById('admTabCRM');
   const tabChangelog = document.getElementById('admTabChangelog');
 
   const panelSitemap = document.getElementById('admPanelSitemap');
+  const panelApps = document.getElementById('admPanelApps');
   const panelAdoption = document.getElementById('admPanelAdoption');
   const panelCRM = document.getElementById('admPanelCRM');
   const panelChangelog = document.getElementById('admPanelChangelog');
@@ -26,6 +28,7 @@
 
   const tabs = [
     { key: 'sitemap', tab: tabSitemap, panel: panelSitemap },
+    { key: 'apps', tab: tabApps, panel: panelApps },
     { key: 'adoption', tab: tabAdoption, panel: panelAdoption },
     { key: 'crm', tab: tabCRM, panel: panelCRM },
     { key: 'changelog', tab: tabChangelog, panel: panelChangelog },

@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.45';
+const BUILD = '2026-03-02.46';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -622,6 +622,7 @@ app.get('/adminonly', (req, res) => {
       </div>
 
       <button id="admTabSitemap" class="tabbtn" type="button">Sitemap</button>
+      <button id="admTabApps" class="tabbtn" type="button" style="margin-top:10px;">ClawdApps</button>
       <button id="admTabAdoption" class="tabbtn" type="button" style="margin-top:10px;">Adoption</button>
       <button id="admTabCRM" class="tabbtn" type="button" style="margin-top:10px;">CRM</button>
       <button id="admTabChangelog" class="tabbtn" type="button" style="margin-top:10px;">Changelog</button>
@@ -657,6 +658,61 @@ app.get('/adminonly', (req, res) => {
         </ul>
 
         <div class="muted" style="margin-top:14px;">Note: keep truly-sensitive surfaces behind auth. This page is behind auth (basic/session).</div>
+      </div>
+
+      <div id="admPanelApps" class="card" style="display:none;">
+        <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline; flex-wrap:wrap;">
+          <h1 style="margin:0; font-size:18px;">ClawdApps</h1>
+          <div class="muted">Modules + structure overview</div>
+        </div>
+        <div class="muted" style="margin-top:8px;">Goal: mirror the ecosystem structure (Console parent + Hub + nested modules) like the transcript.</div>
+
+        <div style="margin-top:12px; display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; align-items:start;">
+          <div class="card" style="background: rgba(0,0,0,0.12);">
+            <div style="font-weight:900;">Console</div>
+            <div class="muted" style="margin-top:6px;">Primary operator cockpit.</div>
+            <div style="margin-top:10px; display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px;">
+              ${[
+                ['Transcript', '/transcript'],
+                ['PM', '/pm'],
+                ['Queue', '/apps/queue'],
+                ['Admin', '/adminonly'],
+              ].map(([t,href]) => (
+                `<div class="card" style="background: rgba(255,255,255,0.03); padding:10px;">
+                  <div style="font-weight:800;">${t}</div>
+                  <div class="muted">${href}</div>
+                </div>`
+              )).join('')}
+            </div>
+          </div>
+
+          <div class="card" style="background: rgba(0,0,0,0.12);">
+            <div style="font-weight:900;">ClawdApps Hub</div>
+            <div class="muted" style="margin-top:6px;">Directory / lobby (map-only): <code>/apps</code></div>
+
+            <div style="margin-top:10px; display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px;">
+              ${[
+                ['ClawdPM', '/pm'],
+                ['ClawdScript', '/apps/script'],
+                ['ClawdName', '/name'],
+                ['ClawdRepo', '/apps/repo'],
+                ['ClawdCode', '/apps/code'],
+                ['ClawdSec', '/apps/sec'],
+                ['ClawdOps', '/apps/ops'],
+                ['ClawdPub', '/apps/pub'],
+                ['ClawdBuild', '/apps/build'],
+                ['ClawdQueue', '/apps/queue'],
+              ].map(([t,href]) => (
+                `<div class="card" style="background: rgba(255,255,255,0.03); padding:10px;">
+                  <div style="font-weight:800;">${t}</div>
+                  <div class="muted">${href}</div>
+                </div>`
+              )).join('')}
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px; border-top:1px solid rgba(255,255,255,0.10); padding-top:12px;" class="muted">Divider: Console section above, ClawdApps Hub modules below.</div>
       </div>
 
       <div id="admPanelAdoption" class="card" style="display:none;">

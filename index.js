@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.23';
+const BUILD = '2026-03-02.24';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -460,7 +460,7 @@ const DEMO_MESSAGES = [
   { t: '2026-02-28T00:00:05.000Z', r: 'assistant', x: 'Draft v1 shipped. Next: tighten hero, add pricing, and a demo environment. DEL created for iteration steps.', d: ['Draft hero + CTA', 'Add modules section', 'Add pricing ($19/seat/year)', 'Create demo route (no outbound)', 'Wire waitlist form'] },
   { t: '2026-02-28T00:00:12.000Z', r: 'assistant', x: 'Uploaded screenshot mockups. You can paste images here too (demo shows the UI affordance).', a: [{ name: 'mock.png', url: '#', mime: 'image/png' }] },
   { t: '2026-02-28T00:00:20.000Z', r: 'user', x: 'Now revise the hero copy to be sharper and more specific.' },
-  { t: '2026-02-28T00:00:26.000Z', r: 'assistant', x: 'Revision v2: “Productivity amplification for Clawdbots. Multi-version workflows with visible deltas, jobs, commits, and publishing.”' },
+  { t: '2026-02-28T00:00:26.000Z', r: 'assistant', x: 'Revision v2: "Productivity amplification for Clawdbots. Multi-version workflows with visible deltas, jobs, commits, and publishing."' },
 ];
 
 const DEMO_DEL = {
@@ -482,7 +482,7 @@ app.get('/demo', (req, res) => {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Clawd Console — Demo</title>
+  <title>Clawd Console - Demo</title>
   <meta name="robots" content="noindex" />
   <link rel="stylesheet" href="/static/demo.css" />
 </head>
@@ -512,11 +512,11 @@ app.get('/demo', (req, res) => {
       <div class="hr"></div>
       <div class="h">Modules</div>
       <ul class="ul">
-        <li><b>ClawdSOP</b> — processitized SOP builds</li>
-        <li><b>ClawdBuild</b> — layered app delivery</li>
-        <li><b>ClawdJobs</b> — scheduled training + automation</li>
-        <li><b>ClawdPub</b> — iterative client/public pages</li>
-        <li><b>ClawdPM</b> — project manager layer</li>
+        <li><b>ClawdSOP</b> - processitized SOP builds</li>
+        <li><b>ClawdBuild</b> - layered app delivery</li>
+        <li><b>ClawdJobs</b> - scheduled training + automation</li>
+        <li><b>ClawdPub</b> - iterative client/public pages</li>
+        <li><b>ClawdPM</b> - project manager layer</li>
       </ul>
       <div class="hr"></div>
       <div class="cta">
@@ -672,17 +672,17 @@ app.get('/adminonly', (req, res) => {
         <div style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px;">
           <div style="border:1px solid rgba(255,255,255,0.10); border-radius:14px; padding:12px; background: rgba(255,255,255,0.03);">
             <div class="muted">Total installs</div>
-            <div style="font-weight:900; font-size:26px; margin-top:6px;" id="adoptTotal">—</div>
+            <div style="font-weight:900; font-size:26px; margin-top:6px;" id="adoptTotal">-</div>
             <div class="muted" style="margin-top:6px;">(Clawdbot + Moltbot + Console)</div>
           </div>
           <div style="border:1px solid rgba(255,255,255,0.10); border-radius:14px; padding:12px; background: rgba(255,255,255,0.03);">
             <div class="muted">Clawdbot installs</div>
-            <div style="font-weight:900; font-size:26px; margin-top:6px;" id="adoptClawdbot">—</div>
+            <div style="font-weight:900; font-size:26px; margin-top:6px;" id="adoptClawdbot">-</div>
           </div>
           <div style="border:1px solid rgba(255,255,255,0.10); border-radius:14px; padding:12px; background: rgba(255,255,255,0.03);">
             <div class="muted">Clawd Console installs</div>
-            <div style="font-weight:900; font-size:26px; margin-top:6px;" id="adoptConsole">—</div>
-            <div class="muted" style="margin-top:6px;">Console adoption rate: <span id="adoptRate">—</span></div>
+            <div style="font-weight:900; font-size:26px; margin-top:6px;" id="adoptConsole">-</div>
+            <div class="muted" style="margin-top:6px;">Console adoption rate: <span id="adoptRate">-</span></div>
           </div>
         </div>
 
@@ -815,6 +815,55 @@ function readChangelog(limit){
   }
   return out.reverse();
 }
+
+
+function updateChangelogFromTranscript({ mode } = {}){
+  const m = (mode === 'rebuild') ? 'rebuild' : 'append';
+  const buildRe = /(Build\s*(?:is\s*now|bumped\s*to|now)\s*[:=]?\s*(\d{4}-\d{2}-\d{2}\.\d+))/i;
+  const lines = fs.existsSync(TRANSCRIPT_FILE)
+    ? fs.readFileSync(TRANSCRIPT_FILE, 'utf8').split(/\r?\n/).filter(Boolean)
+    : [];
+
+  const existing = new Set();
+  if (fs.existsSync(CHANGELOG_FILE) && m === 'append') {
+    for (const ln of fs.readFileSync(CHANGELOG_FILE,'utf8').split(/\r?\n/).filter(Boolean)) {
+      try { const e = JSON.parse(ln); if (e && e.build) existing.add(String(e.build)); } catch {}
+    }
+  }
+
+  if (m === 'rebuild') {
+    try { fs.writeFileSync(CHANGELOG_FILE, '', 'utf8'); } catch {}
+    existing.clear();
+  }
+
+  let added = 0;
+  for (const ln of lines){
+    let obj; try { obj = JSON.parse(ln); } catch { obj = null; }
+    if (!obj || obj.r !== 'assistant') continue;
+    const text = String(obj.x || '');
+    const m2 = text.match(buildRe);
+    if (!m2) continue;
+    const build = m2[2];
+    if (existing.has(build)) continue;
+
+    const parts = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const body = parts.slice(0, 18).join('\n').slice(0, 5000);
+
+    appendChangelog({ title: 'Console build ' + build, body, build });
+    existing.add(build);
+    added++;
+  }
+
+  return { ok: true, mode: m, added };
+}
+
+app.post('/api/changelog/update', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const mode = (req.body && req.body.mode) ? String(req.body.mode) : 'append';
+  const out = updateChangelogFromTranscript({ mode });
+  logWork('changelog.updated', out);
+  res.json(out);
+});
 
 app.get('/api/changelog', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -1497,7 +1546,7 @@ function appsPageShell({ title, subtitle, bodyHtml }) {
 }
 
 function appsIcon(kind){
-  // lightweight icon set (inline SVG) — keeps the suite feeling like one product.
+  // lightweight icon set (inline SVG) - keeps the suite feeling like one product.
   const common = {
     script: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10M7 12h10M7 17h7"/></svg>',
     pm: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7z"/><path d="M9 10h6M9 13h6"/></svg>',
@@ -2102,8 +2151,12 @@ app.get('/pm', (req, res) => {
             </select>
           </div>
           <div class="field" style="grid-column: 1 / span 2;">
-            <label>Description</label>
-            <textarea id="cm_in_body"></textarea>
+            <label>Description (short)</label>
+            <textarea id="cm_in_desc"></textarea>
+          </div>
+          <div class="field" style="grid-column: 1 / span 2;">
+            <label>Content (details)</label>
+            <textarea id="cm_in_content"></textarea>
           </div>
           <div class="field" style="grid-column: 1 / span 2;">
             <label>Move To</label>
@@ -2113,15 +2166,15 @@ app.get('/pm', (req, res) => {
 
         <div class="rowbtn" style="margin-top:12px; justify-content:space-between;">
           <div class="rowbtn">
-            <button class="pillbtn" id="cm_generate" type="button">Generate To‑Dos</button>
-            <button class="pillbtn" id="cm_addtodo" type="button">+ To‑Do</button>
+            <button class="pillbtn" id="cm_generate" type="button">Generate To-Dos</button>
+            <button class="pillbtn" id="cm_addtodo" type="button">+ To-Do</button>
             <button class="pillbtn" id="cm_moveup" type="button">Move ↑</button>
             <button class="pillbtn" id="cm_movedn" type="button">Move ↓</button>
           </div>
           <button class="pillbtn" id="cm_save" type="button">Save</button>
         </div>
 
-        <div style="margin-top:12px;" class="muted small">To‑Dos</div>
+        <div style="margin-top:12px;" class="muted small">To-Dos</div>
         <div id="cm_todos"></div>
         <div class="muted small" id="cm_msg" style="margin-top:10px;"></div>
       </div>
@@ -2166,6 +2219,9 @@ app.get('/pm', (req, res) => {
     const cmMoveUp = $('cm_moveup');
     const cmMoveDn = $('cm_movedn');
 
+    const cmInDesc = $('cm_in_desc');
+    const cmInContent = $('cm_in_content');
+
     function fillMoveTo(){
       if (!cmMoveTo) return;
       cmMoveTo.innerHTML = '';
@@ -2186,9 +2242,14 @@ app.get('/pm', (req, res) => {
       if (!fc) return;
       const card = fc.card;
 
+      // migrate legacy fields
+      if (!card.desc && card.body) card.desc = card.body;
+      if (!card.content) card.content = '';
+
       $('cm_title').textContent = card.title || 'Card';
       $('cm_in_title').value = card.title || '';
-      $('cm_in_body').value = card.body || '';
+      $('cm_in_desc').value = card.desc || '';
+      $('cm_in_content').value = card.content || '';
       $('cm_in_pri').value = String(card.priority || 'normal');
 
       fillMoveTo();
@@ -2284,7 +2345,7 @@ app.get('/pm', (req, res) => {
       });
 
       if (!card.todos.length) {
-        cmTodos.innerHTML = '<div class="muted small" style="margin-top:8px;">No to-dos yet. Click Generate To‑Dos or + To‑Do.</div>';
+        cmTodos.innerHTML = '<div class="muted small" style="margin-top:8px;">No to-dos yet. Click Generate To-Dos or + To-Do.</div>';
       }
     }
 
@@ -2319,7 +2380,9 @@ app.get('/pm', (req, res) => {
       if (!fc2) return;
       const card2 = fc2.card;
       card2.title = $('cm_in_title').value.trim();
-      card2.body = $('cm_in_body').value.trim();
+      card2.desc = (cmInDesc ? cmInDesc.value : '').trim();
+      card2.content = (cmInContent ? cmInContent.value : '').trim();
+      card2.body = card2.desc; // legacy compatibility
       card2.priority = $('cm_in_pri').value;
       ensureTodos(card2);
       // prune blank todos
@@ -2349,7 +2412,10 @@ app.get('/pm', (req, res) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ title: $('cm_in_title').value.trim() || card.title, body: $('cm_in_body').value.trim() || card.body })
+          body: JSON.stringify({
+            title: $('cm_in_title').value.trim() || card.title,
+            body: (cmInContent ? cmInContent.value : '').trim() || card.content || card.body || ''
+          })
         });
         const j = await res.json();
         if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
@@ -2450,12 +2516,14 @@ app.get('/pm', (req, res) => {
             + '<button type="button" data-cup="' + esc(col.id) + '" data-cid="' + esc(c.id) + '" title="Move up">↑</button>'
             + '<button type="button" data-cdn="' + esc(col.id) + '" data-cid="' + esc(c.id) + '" title="Move down">↓</button>'
             + '</div>';
-          return '<div class="card ' + pc + '" data-card-id="' + esc(c.id) + '" data-col-id="' + esc(col.id) + '">'
+          const desc = (c.desc || c.body || '');
+          const short = String(desc).length > 110 ? (String(desc).slice(0, 110) + '…') : String(desc);
+          return '<div class="card ' + pc + '" data-card-id="' + esc(c.id) + '" data-col-id="' + esc(col.id) + '">' 
             + '<div class="cardRow">'
             +   '<b>' + esc(c.title) + '</b>'
             +   btns
             + '</div>'
-            + (c.body ? ('<p>' + esc(c.body) + '</p>') : '')
+            + (short ? ('<p>' + esc(short) + '</p>') : '')
             + badge
             + '</div>';
         }).join('');
@@ -2616,7 +2684,7 @@ app.get('/publish', (req, res) => {
       <div class="muted" style="margin-top:12px;">Note: This started as a scaffold; updated with a quick scan of Clawdbot-specific UIs and how Clawd Console might fit.</div>
 
       <div style="margin-top:16px; font-weight:700;">Current UIs in the Space</div>
-      <div class="muted" style="margin-top:4px;">Not exhaustive — these are the Clawdbot-native surfaces I could confirm quickly.</div>
+      <div class="muted" style="margin-top:4px;">Not exhaustive - these are the Clawdbot-native surfaces I could confirm quickly.</div>
       <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 10px;">
         <div class="card" style="flex:1; min-width: 260px;">
           <div style="font-weight:800;">Control UI</div>
@@ -2648,7 +2716,7 @@ app.get('/publish', (req, res) => {
       <div style="margin-top:16px;">
         <div style="font-weight:800;">Where Clawd Console fits</div>
         <div style="margin-top:8px; line-height:1.6; font-size: 14px; color: rgba(255,255,255,0.82);">
-          Clawdbot has solid general-purpose UIs (Control UI/WebChat), but nothing that’s obviously optimized for operator workflows like: persistent transcript indexing + action buttons, DEL checklists, scheduled reporting, and filterable worklogs. Clawd Console looks positioned as a <b>power-user cockpit</b> that complements the Control UI rather than replacing it.
+          Clawdbot has solid general-purpose UIs (Control UI/WebChat), but nothing that's obviously optimized for operator workflows like: persistent transcript indexing + action buttons, DEL checklists, scheduled reporting, and filterable worklogs. Clawd Console looks positioned as a <b>power-user cockpit</b> that complements the Control UI rather than replacing it.
         </div>
       </div>
 
@@ -2659,7 +2727,7 @@ app.get('/publish', (req, res) => {
         <div style="margin-top:10px; display:flex; flex-direction:column; gap: 10px;">
           <div>
             <div style="font-weight:700;">1) Package boundaries</div>
-            <div class="muted" style="margin-top:4px;">Decide what is the product: a standalone "Clawd Console" service, a Clawdbot plugin, or a skill + static UI bundle. Right now it’s a standalone Express service that talks to the Gateway WS.</div>
+            <div class="muted" style="margin-top:4px;">Decide what is the product: a standalone "Clawd Console" service, a Clawdbot plugin, or a skill + static UI bundle. Right now it's a standalone Express service that talks to the Gateway WS.</div>
           </div>
 
           <div>
@@ -2679,7 +2747,7 @@ app.get('/publish', (req, res) => {
 
           <div>
             <div style="font-weight:700;">5) Test the package the right way</div>
-            <div class="muted" style="margin-top:4px;">When we call it v1: spin up a second fresh Clawdbot instance (VM/Docker/new user) and install Clawd Console using only the README. No manual tweaks. If it works, it’s real.</div>
+            <div class="muted" style="margin-top:4px;">When we call it v1: spin up a second fresh Clawdbot instance (VM/Docker/new user) and install Clawd Console using only the README. No manual tweaks. If it works, it's real.</div>
           </div>
 
           <div>
@@ -3311,7 +3379,7 @@ app.get('/', (req, res) => {
         <div class="muted" style="margin-top: 6px;">(If UI looks stale, hard refresh. Build is server-tracked.)</div>
         <div class="muted" style="margin-top: 10px; display:flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
           <span>Storage: <code>${DATA_DIR}</code></span>
-          <div class="row" style="gap:8px; justify-content:flex-end;"><a class="scriptBtn" href="/transcript" target="_blank" rel="noopener">ClawdScript — View Entire Chat</a></div>
+          <div class="row" style="gap:8px; justify-content:flex-end;"><a class="scriptBtn" href="/transcript" target="_blank" rel="noopener">ClawdScript - View Entire Chat</a></div>
         </div>
       </div>
 
@@ -3360,7 +3428,7 @@ app.get('/', (req, res) => {
 
         <div id="panelRepo" style="display:none; flex-direction:column; gap: 10px;">
           <div class="row" style="justify-content:space-between; align-items:center;">
-            <div class="muted">ClawdRepo — commits (this project)</div>
+            <div class="muted">ClawdRepo - commits (this project)</div>
             <div class="row" style="gap:8px;">
               <a class="pill" id="repoOpen" href="https://github.com/nwesource01/clawdconsole" target="_blank" rel="noopener" style="cursor:pointer; text-decoration:none;">GitHub</a>
               <button class="pill" id="repoRefresh" type="button" style="cursor:pointer;">Refresh</button>
@@ -3371,9 +3439,9 @@ app.get('/', (req, res) => {
         </div>
 
         <div id="panelSec" style="display:none; flex-direction:column; gap: 10px;">
-          <div class="muted">ClawdSec (security) — WIP</div>
+          <div class="muted">ClawdSec (security) - WIP</div>
           <div style="line-height:1.5;">
-            <div><b>Rule:</b> don’t paste real secrets into chat or a web UI.</div>
+            <div><b>Rule:</b> don't paste real secrets into chat or a web UI.</div>
             <div class="muted" style="margin-top:6px;">Instead, store secrets in server env files (e.g. <code>/etc/clawdio-console.env</code>) and rotate them when needed.</div>
             <div class="muted" style="margin-top:10px;">Password reset (Console auth):</div>
             <div class="md_code" style="margin-top:8px;"><pre><code>sudo nano /etc/clawdio-console.env
@@ -3382,7 +3450,7 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         </div>
 
         <div id="panelOps" style="display:none; flex-direction:column; gap: 10px;">
-          <div class="muted">ClawdOps (operations) — WIP</div>
+          <div class="muted">ClawdOps (operations) - WIP</div>
           <div style="line-height:1.5;">
             <div>Uptime, backups, deploy checklist, and health checks.</div>
             <div class="muted" style="margin-top:8px;">Suggested keep-alive ping: set an UptimeRobot check to hit <code>/healthz</code> every minute.</div>
@@ -3393,7 +3461,7 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
           <div class="muted">ClawdBuild (coming)</div>
           <div style="line-height:1.45;">
             <div><b>Idea:</b> layered, iterative app delivery with visibility: spec → tasks → code → tests → commits → release.</div>
-            <div class="muted" style="margin-top:6px;">We’ll wire this into the Console as an operator-guided build pipeline.</div>
+            <div class="muted" style="margin-top:6px;">We'll wire this into the Console as an operator-guided build pipeline.</div>
           </div>
         </div>
         </div> <!-- /appsBody -->
@@ -3418,23 +3486,23 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
               <div class="ruleTitle">Formatting: use code blocks for commands</div>
               <div class="ruleChevron">▸</div>
             </div>
-            <div class="ruleBody">When I give shell commands, I will put them in fenced code blocks (triple backticks) so the Console renders a copyable command block. This prevents accidental “paste a URL into bash” mistakes and makes commands one-click copy.</div>
+            <div class="ruleBody">When I give shell commands, I will put them in fenced code blocks (triple backticks) so the Console renders a copyable command block. This prevents accidental "paste a URL into bash" mistakes and makes commands one-click copy.</div>
           </div>
 
           <div class="ruleItem">
             <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">URLs: don’t bold links</div>
+              <div class="ruleTitle">URLs: don't bold links</div>
               <div class="ruleChevron">▸</div>
             </div>
-            <div class="ruleBody">When sharing URLs, keep <b>**</b> out of the link (don’t wrap links in bold). It can break clickability and looks spammy.</div>
+            <div class="ruleBody">When sharing URLs, keep <b>**</b> out of the link (don't wrap links in bold). It can break clickability and looks spammy.</div>
           </div>
 
           <div class="ruleItem">
             <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">URLs: add “open in a new tab/window”</div>
+              <div class="ruleTitle">URLs: add "open in a new tab/window"</div>
               <div class="ruleChevron">▸</div>
             </div>
-            <div class="ruleBody">When I share a URL with you, I’ll explicitly say: <code>open in a new tab/window</code> so it’s obvious it’s safe to click and won’t derail your current context.</div>
+            <div class="ruleBody">When I share a URL with you, I'll explicitly say: <code>open in a new tab/window</code> so it's obvious it's safe to click and won't derail your current context.</div>
           </div>
 
           <div class="ruleItem">
@@ -3475,23 +3543,23 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
 
           <div class="ruleItem">
             <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">Layout: prefer grid/flow layouts that can’t overlap</div>
+              <div class="ruleTitle">Layout: prefer grid/flow layouts that can't overlap</div>
               <div class="ruleChevron">▸</div>
             </div>
-            <div class="ruleBody">When building Console UI, prefer normal document flow + CSS <code>grid</code> (or flex with <code>align-items:flex-start</code>) so controls can’t overlap each other. Avoid absolute positioning for form layouts; add responsive breakpoints instead.</div>
+            <div class="ruleBody">When building Console UI, prefer normal document flow + CSS <code>grid</code> (or flex with <code>align-items:flex-start</code>) so controls can't overlap each other. Avoid absolute positioning for form layouts; add responsive breakpoints instead.</div>
           </div>
 
           <div class="ruleItem">
             <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">Restore requests: confirm what “restore” means</div>
+              <div class="ruleTitle">Restore requests: confirm what "restore" means</div>
               <div class="ruleChevron">▸</div>
             </div>
-            <div class="ruleBody">If you ask me to <b>restore</b> something, I will first confirm whether you mean: (a) restore to the <b>latest git commit</b>, (b) restore to a specific <b>build/version</b>, or (c) restore only a specific feature/UI section — before I run any revert/restore commands.</div>
+            <div class="ruleBody">If you ask me to <b>restore</b> something, I will first confirm whether you mean: (a) restore to the <b>latest git commit</b>, (b) restore to a specific <b>build/version</b>, or (c) restore only a specific feature/UI section - before I run any revert/restore commands.</div>
           </div>
 
         </div>
 
-        <div class="muted" style="margin-top:10px;">We’ll keep adding to this list.</div>
+        <div class="muted" style="margin-top:10px;">We'll keep adding to this list.</div>
         </div> <!-- /rulesBody -->
       </div>
 

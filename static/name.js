@@ -45,10 +45,10 @@
   }
 
   function pill(status){
-    if (status === 'taken') return '<span class="pill p-bad">taken</span>';
-    if (status === 'likely_available') return '<span class="pill p-ok">likely available</span>';
-    if (status === 'invalid') return '<span class="pill p-inv">invalid</span>';
-    return '<span class="pill p-unk">unknown</span>';
+    if (status === 'taken') return '<span class="tag p-bad">taken</span>';
+    if (status === 'likely_available') return '<span class="tag p-ok">likely available</span>';
+    if (status === 'invalid') return '<span class="tag p-inv">invalid</span>';
+    return '<span class="tag p-unk">unknown</span>';
   }
 
   function setStatus(htmlOrText, isHtml=false){

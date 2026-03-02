@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.57';
+const BUILD = '2026-03-02.58';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -421,7 +421,7 @@ app.get('/name', (req, res) => {
     .btn:hover{border-color: rgba(34,198,198,.65)}
     table{width:100%; border-collapse: collapse; margin-top:12px; font-size:13px}
     th,td{padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.08); text-align:left; vertical-align:top}
-    .pill{display:inline-flex; padding:3px 8px; border-radius:999px; font-size:12px; border:1px solid rgba(255,255,255,.14)}
+    .tag{display:inline-flex; padding:3px 8px; border-radius:999px; font-size:12px; border:1px solid rgba(255,255,255,.14)}
     .p-ok{border-color: rgba(124,255,178,.40); background: rgba(124,255,178,.10)}
     .p-bad{border-color: rgba(255,120,120,.35); background: rgba(255,120,120,.10)}
     .p-unk{border-color: rgba(231,231,231,.18); background: rgba(231,231,231,.06)}

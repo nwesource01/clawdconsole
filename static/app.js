@@ -1488,29 +1488,24 @@
     });
   }
 
-  // Plan button (two-stage): FIRST click inserts prefix; SECOND click confirms by focusing Send.
+  // Plan button (two-stage): inserts PLAN MODE prefix (does not send)
   const planBtn = document.getElementById('plan');
   twoStage(planBtn, async () => {
     if (!ta) return;
     const cur = ta.value || '';
-    if (!/^PLAN MODE\n/.test(cur)) {
-      ta.value = 'PLAN MODE\n' + cur;
-    }
+    if (!/^PLAN MODE\n/.test(cur)) ta.value = 'PLAN MODE\n' + cur;
     ta.focus();
   }, { armedLabel: 'Insert Plan' });
 
-  // Iterate button (two-stage): inserts the iterative wrapper (does not send).
+  // Iterate button (two-stage): appends the iterative authorization block (does not send)
   const iterateBtn = document.getElementById('iterate');
   twoStage(iterateBtn, async () => {
     if (!ta) return;
     const cur = String(ta.value || '');
-    const goal = cur.trim();
+    if (/^ITERATIVE MODE \(AUTHORIZED\)/m.test(cur)) { ta.focus(); return; }
 
-    const rules = [
+    const block = [
       'ITERATIVE MODE (AUTHORIZED)',
-      '',
-      'Goal:',
-      goal,
       '',
       'Rules:',
       '1) You are authorized to loop: plan → implement → test → revise until the goal is accomplished.',
@@ -1524,8 +1519,7 @@
       '- Post the final result and how it was verified.',
     ].join('\n');
 
-    // Keep user's goal at top; append wrapper after a separator.
-    ta.value = goal + '\n\n' + rules;
+    ta.value = (cur.replace(/\s*$/,'') + '\n\n' + block + '\n');
     ta.focus();
   }, { armedLabel: 'Insert Iterate' });
 
@@ -1543,9 +1537,20 @@
     }, { armedLabel: 'Confirm Send' });
   }
 
-  // Disable Enter-to-send (per two-stage safety). Use Send button confirmation.
-  // Shift+Enter still inserts a newline normally.
-  // (If you want Enter-to-send back later, we can add a setting.)
+  // Enter-to-send is allowed (matches transcript behavior). Shift+Enter inserts newline.
+  if (ta) {
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const text = ta.value;
+        const atts = pendingAttachments;
+        pendingAttachments = [];
+        renderPreview();
+        ta.value = '';
+        sendMessageWsOrHttp(text, atts).then(refresh);
+      }
+    });
+  }
 
   // Quick action buttons
   const btnCatchUp = document.getElementById('btnCatchUp');

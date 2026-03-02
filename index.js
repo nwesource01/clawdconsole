@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.14';
+const BUILD = '2026-03-02.15';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -3256,6 +3256,7 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         <div id="quickbar" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; justify-content:flex-start; align-items:center;">
           <div class="row" id="quickButtons" style="gap: 10px;">
             <button id="btnCatchUp" type="button" class="qbtn">Catch Up</button>
+            <button id="btnGitCommit" type="button" class="qbtn">GitCommit</button>
             <button id="btnReviewRecent" type="button" class="qbtn">Review Recent</button>
             <button id="btnReviewWeek" type="button" class="qbtn">Review Week</button>
             <button id="btnRepeatLast" type="button" class="qbtn">Repeat Last</button>

@@ -1451,57 +1451,90 @@
     return sendMessageWsOrHttp(text, atts).then(refresh);
   }
 
-  // Plan button = send with auto-append (no toggle state)
+  // Two-stage click protection (prevents accidental sends)
+  function twoStage(btn, action, opts = {}) {
+    if (!btn) return;
+    const label = btn.textContent;
+    const armedLabel = opts.armedLabel || ('Confirm ' + label);
+    const timeoutMs = Number(opts.timeoutMs || 5000);
+
+    let armed = false;
+    let t = null;
+
+    function disarm() {
+      armed = false;
+      if (t) { clearTimeout(t); t = null; }
+      btn.textContent = label;
+      btn.classList.remove('armed');
+    }
+
+    btn.addEventListener('click', async () => {
+      if (!armed) {
+        armed = true;
+        btn.textContent = armedLabel;
+        btn.classList.add('armed');
+        if (t) clearTimeout(t);
+        t = setTimeout(disarm, timeoutMs);
+        return;
+      }
+
+      disarm();
+      await action();
+    });
+
+    // allow right-click to disarm quickly
+    btn.addEventListener('contextmenu', (e) => {
+      if (armed) { e.preventDefault(); disarm(); }
+    });
+  }
+
+  // Plan button (two-stage)
   const planBtn = document.getElementById('plan');
-  if (planBtn) {
-    planBtn.addEventListener('click', async () => {
-      const text = ta ? ta.value : '';
-      const atts = pendingAttachments;
-      pendingAttachments = [];
-      renderPreview();
-      if (ta) ta.value = '';
-      await sendMessageWsOrHttp('PLAN MODE\n' + (text || ''), atts);
-      await refresh();
-    });
-  }
+  twoStage(planBtn, async () => {
+    const text = ta ? ta.value : '';
+    const atts = pendingAttachments;
+    pendingAttachments = [];
+    renderPreview();
+    if (ta) ta.value = '';
+    await sendMessageWsOrHttp('PLAN MODE\n' + (text || ''), atts);
+    await refresh();
+  }, { armedLabel: 'Confirm Plan' });
 
-  // Iterate button = send with an explicit iterative authorization + ruleset.
+  // Iterate button (two-stage): send with an explicit iterative authorization + ruleset.
   const iterateBtn = document.getElementById('iterate');
-  if (iterateBtn) {
-    iterateBtn.addEventListener('click', async () => {
-      const text = ta ? ta.value : '';
-      const atts = pendingAttachments;
-      pendingAttachments = [];
-      renderPreview();
-      if (ta) ta.value = '';
+  twoStage(iterateBtn, async () => {
+    const text = ta ? ta.value : '';
+    const atts = pendingAttachments;
+    pendingAttachments = [];
+    renderPreview();
+    if (ta) ta.value = '';
 
-      const rules = [
-        'ITERATIVE MODE (AUTHORIZED)',
-        '',
-        'Goal:',
-        String(text || '').trim(),
-        '',
-        'Rules:',
-        '1) You are authorized to loop: plan → implement → test → revise until the goal is accomplished.',
-        '2) Keep each iteration small. After each change, run the most relevant test/check and report the result.',
-        '3) If a test fails, fix it before moving on. Don\'t paper over failures.',
-        '4) If there\'s ambiguity, pick the safest reasonable default and state the assumption.',
-        '5) Stop when success criteria is met (with a passing test / clear verification), or when blocked and you need my input.',
-        '6) If I say "stop" or hit Stop, stop iterating and summarize current state + next actions.',
-        '',
-        'Deliverable:',
-        '- Post the final result and how it was verified.',
-      ].join('\n');
+    const rules = [
+      'ITERATIVE MODE (AUTHORIZED)',
+      '',
+      'Goal:',
+      String(text || '').trim(),
+      '',
+      'Rules:',
+      '1) You are authorized to loop: plan → implement → test → revise until the goal is accomplished.',
+      '2) Keep each iteration small. After each change, run the most relevant test/check and report the result.',
+      '3) If a test fails, fix it before moving on. Don\'t paper over failures.',
+      '4) If there\'s ambiguity, pick the safest reasonable default and state the assumption.',
+      '5) Stop when success criteria is met (with a passing test / clear verification), or when blocked and you need my input.',
+      '6) If I say "stop" or hit Stop, stop iterating and summarize current state + next actions.',
+      '',
+      'Deliverable:',
+      '- Post the final result and how it was verified.',
+    ].join('\n');
 
-      await sendMessageWsOrHttp(rules, atts);
-      await refresh();
-    });
-  }
+    await sendMessageWsOrHttp(rules, atts);
+    await refresh();
+  }, { armedLabel: 'Confirm Iterate' });
 
-  // override send button to use ws when available
+  // Send button (two-stage)
   if (sendBtn) {
-    sendBtn.removeEventListener('click', sendMessage);
-    sendBtn.addEventListener('click', async () => {
+    try { sendBtn.removeEventListener('click', sendMessage); } catch {}
+    twoStage(sendBtn, async () => {
       const text = ta ? ta.value : '';
       const atts = pendingAttachments;
       pendingAttachments = [];
@@ -1509,7 +1542,7 @@
       if (ta) ta.value = '';
       await sendMessageWsOrHttp(text, atts);
       await refresh();
-    });
+    }, { armedLabel: 'Confirm Send' });
   }
 
   if (ta) {
@@ -1536,22 +1569,18 @@
   }
 
   const btnRecent = document.getElementById('btnReviewRecent');
-  if (btnRecent) {
-    btnRecent.addEventListener('click', () => {
-      quickSend(
-        'Review Recent: Please review the last 100 messages from *me* in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.'
-      );
-    });
-  }
+  twoStage(btnRecent, async () => {
+    quickSend(
+      'Review Recent: Please review the last 100 messages from *me* in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.'
+    );
+  }, { armedLabel: 'Confirm Review Recent' });
 
   const btnWeek = document.getElementById('btnReviewWeek');
-  if (btnWeek) {
-    btnWeek.addEventListener('click', () => {
-      quickSend(
-        'Review Week: Please review all messages from the last 7 days in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.'
-      );
-    });
-  }
+  twoStage(btnWeek, async () => {
+    quickSend(
+      'Review Week: Please review all messages from the last 7 days in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.'
+    );
+  }, { armedLabel: 'Confirm Review Week' });
 
   // Repeat Last: copy your most recent message back into the textarea (no send).
   const btnRepeat = document.getElementById('btnRepeatLast');
@@ -1567,6 +1596,16 @@
       }
     });
   }
+
+  // GitCommit: ask the agent to commit current repo changes (two-stage)
+  const btnGitCommit = document.getElementById('btnGitCommit');
+  twoStage(btnGitCommit, async () => {
+    quickSend(
+      'GitCommit: Please commit the current changes in /home/master/clawd/apps/console.\n' +
+      '- Use: git status → review diff → git add -A → git commit -m "<message>"\n' +
+      '- If you are unsure of message, propose 2-3 options and wait for confirmation.\n'
+    );
+  }, { armedLabel: 'Confirm GitCommit' });
 
   function initRulesAccordion() {
     const heads = Array.from(document.querySelectorAll('.ruleHead'));

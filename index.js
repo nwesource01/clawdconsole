@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.38';
+const BUILD = '2026-03-02.39';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1752,6 +1752,7 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
 
           <span style="flex:1;"></span>
 
+          <button class="pill" id="qRun" type="button" style="border-color: rgba(124,255,178,.55); background: linear-gradient(180deg, rgba(124,255,178,.22), rgba(124,255,178,.10));">Run next</button>
           <button class="pill" id="qRefresh" type="button">Refresh</button>
           <button class="pill" id="qEnqueueAll" type="button">Enqueue all</button>
           <button class="pill" id="qClearQueue" type="button">Clear queued</button>
@@ -1993,12 +1994,32 @@ Suggested: set an UptimeRobot check to hit /healthz every minute.</div>` },
           load();
         }
 
+        async function runNext(){
+          try {
+            const stRes = await fetch('/api/queue/state', { credentials:'include', cache:'no-store' });
+            const stJ = await stRes.json();
+            const en = !!(stJ && stJ.ok && stJ.state && stJ.state.autorunEnabled);
+            if (!en) {
+              setMsg('Auto-run is OFF. Turn it on first.');
+              return;
+            }
+            setMsg('Scheduling…');
+            startCountdown(2, 'Starting next queued card…');
+            await fetch('/api/queue/autorun/scheduleNext', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ delayMs: 1500 }) });
+            setMsg('Scheduled.');
+          } catch {
+            setMsg('Run failed.');
+          }
+        }
+
+        const btnRun = $('qRun');
         const btnR = $('qRefresh');
         const btnA = $('qEnqueueAll');
         const btnC = $('qClearQueue');
         const btnS = $('qColSave');
         const cbA = $('qAuto');
         const btnStop = $('qStop');
+        if (btnRun) btnRun.addEventListener('click', runNext);
         if (btnR) btnR.addEventListener('click', load);
         if (btnA) btnA.addEventListener('click', enqueueAll);
         if (btnC) btnC.addEventListener('click', clearQueued);

@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.32';
+const BUILD = '2026-03-02.33';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -2769,11 +2769,11 @@ app.get('/pm', (req, res) => {
       fillMoveTo();
       renderTodos();
       if (cmMsg) cmMsg.textContent = '';
-      if (modal) modal.classList.add('open');
+      if (modal) { modal.classList.add('open'); modal.style.display = 'flex'; }
     }
 
     function closeModal(){
-      if (modal) modal.classList.remove('open');
+      if (modal) { modal.classList.remove('open'); modal.style.display = 'none'; }
       ACTIVE = null;
     }
 

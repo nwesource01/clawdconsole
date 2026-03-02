@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.20';
+const BUILD = '2026-03-02.21';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -3479,6 +3479,14 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
               <div class="ruleChevron">▸</div>
             </div>
             <div class="ruleBody">When building Console UI, prefer normal document flow + CSS <code>grid</code> (or flex with <code>align-items:flex-start</code>) so controls can’t overlap each other. Avoid absolute positioning for form layouts; add responsive breakpoints instead.</div>
+          </div>
+
+          <div class="ruleItem">
+            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
+              <div class="ruleTitle">Restore requests: confirm what “restore” means</div>
+              <div class="ruleChevron">▸</div>
+            </div>
+            <div class="ruleBody">If you ask me to <b>restore</b> something, I will first confirm whether you mean: (a) restore to the <b>latest git commit</b>, (b) restore to a specific <b>build/version</b>, or (c) restore only a specific feature/UI section — before I run any revert/restore commands.</div>
           </div>
 
         </div>

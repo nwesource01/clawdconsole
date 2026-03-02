@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.47';
+const BUILD = '2026-03-02.48';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1702,7 +1702,7 @@ app.post('/api/scheduled/add', (req, res) => {
 });
 
 // --- ClawdApps (ecosystem map + module pages) ---
-function appsPageShell({ title, subtitle, bodyHtml }) {
+function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
   return `<!doctype html>
 <html>
 <head>
@@ -1714,7 +1714,15 @@ function appsPageShell({ title, subtitle, bodyHtml }) {
     body{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--bg); color: var(--text); margin:0; }
     a{ color:#9ad0ff; }
     .wrap{ max-width: 1400px; margin:0 auto; padding: 18px; }
-    .top{ display:flex; justify-content:space-between; gap: 12px; flex-wrap:wrap; align-items:baseline; }
+
+    /* Title row: left title, centered app menu, right quick links */
+    .top{ display:grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items:baseline; }
+    @media (max-width: 980px){ .top{ grid-template-columns: 1fr; } }
+    .topL{ min-width: 240px; }
+    .topC{ display:flex; justify-content:center; }
+    .topR{ display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
+    @media (max-width: 980px){ .topC{ justify-content:flex-start; } .topR{ justify-content:flex-start; } }
+
     h1{ margin:0; font-size: 22px; }
     .muted{ color: var(--muted); font-size: 12px; }
     .pill{ display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid rgba(34,198,198,.40); background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08)); color: rgba(231,231,231,.92); text-decoration:none; white-space:nowrap; font-weight:750; font-size:12px; }
@@ -1736,14 +1744,14 @@ function appsPageShell({ title, subtitle, bodyHtml }) {
 <body>
   <div class="wrap">
     <div class="top">
-      <div>
+      <div class="topL">
         <h1>${title}</h1>
         <div class="muted" style="margin-top:6px;">${subtitle || ''}</div>
       </div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <div class="topC">${appsMenuHtml(activePath || '')}</div>
+      <div class="topR">
         <a class="pill" href="/apps" target="_blank" rel="noopener">Apps</a>
         <a class="pill" href="/" target="_blank" rel="noopener">Console</a>
-        <a class="pill" href="/transcript" target="_blank" rel="noopener">Script</a>
         <a class="pill" href="/pm" target="_blank" rel="noopener">PM</a>
       </div>
     </div>
@@ -1782,6 +1790,7 @@ function appsMenuHtml(activePath){
     { label: 'ClawdScript', href: '/apps/script' },
     { label: 'ClawdName', href: '/name' },
     { label: 'ClawdRepo', href: '/apps/repo' },
+    { label: 'ClawdCode', href: '/apps/code' },
     { label: 'ClawdSec', href: '/apps/sec' },
     { label: 'ClawdOps', href: '/apps/ops' },
     { label: 'ClawdPub', href: '/apps/pub' },
@@ -1834,6 +1843,7 @@ app.get('/apps', (req, res) => {
     title: 'ClawdApps',
     subtitle: 'Directory / lobby (map-only). Open modules in new tabs.',
     bodyHtml,
+    activePath: '/apps',
   }));
 });
 
@@ -2499,15 +2509,20 @@ function renderModulePage(key){
   const spec = map[key];
   if (!spec) return null;
 
-  const bodyHtml = `
-    <div class="subcard">
-      <div style="font-weight:900;">${spec.title}</div>
-      <div class="muted" style="margin-top:6px;">${spec.subtitle}</div>
-      <div style="margin-top:12px;">${spec.body}</div>
-    </div>
-  `;
+  const bodyHtml = `${spec.body || ''}`;
 
-  return appsPageShell({ title: spec.title, subtitle: spec.subtitle, bodyHtml });
+  const hrefMap = {
+    script: '/apps/script',
+    repo: '/apps/repo',
+    code: '/apps/code',
+    sec: '/apps/sec',
+    ops: '/apps/ops',
+    pub: '/apps/pub',
+    build: '/apps/build',
+    queue: '/apps/queue',
+  };
+
+  return appsPageShell({ title: spec.title, subtitle: spec.subtitle, bodyHtml, activePath: hrefMap[key] || '' });
 }
 
 app.get('/apps/script', (req,res) => {

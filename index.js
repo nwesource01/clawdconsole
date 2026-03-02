@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.25';
+const BUILD = '2026-03-02.26';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -2045,13 +2045,19 @@ app.get('/pm', (req, res) => {
   <title>ClawdPM</title>
   <style>
     :root { --bg:#0b0f1a; --card:#11182a; --text:#e7e7e7; --muted: rgba(231,231,231,.70); --border: rgba(231,231,231,.12); --teal:#22c6c6; }
+    html,body{height:100%}
     body{margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background: var(--bg); color: var(--text)}
-    .wrap{max-width: 1600px; margin:0 auto; padding: 16px;}
+
+    /* Full-width board with horizontal scroll pinned to bottom of viewport */
+    .wrap{width:100%; max-width:none; margin:0 auto; padding:16px; box-sizing:border-box; min-height:100vh; display:flex; flex-direction:column;}
     .top{display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:baseline}
     .top h1{margin:0; font-size:18px}
     .muted{color:var(--muted)}
-    .board{display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; align-items:start}
-    .col{border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,.03); overflow:hidden}
+
+    .boardWrap{flex:1; min-height:0; overflow-x:auto; overflow-y:auto; margin-top:12px; padding-bottom:10px;}
+    .board{display:flex; gap:12px; align-items:flex-start; width:max-content; min-width:100%;}
+    .col{flex:0 0 320px; border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,.03); overflow:hidden}
+    @media (max-width: 780px){ .col{flex-basis: 280px;} }
     .colHead{padding:12px 12px; border-bottom:1px solid rgba(255,255,255,.08); display:flex; justify-content:space-between; align-items:center}
     .colHead b{font-size:14px}
     .colActions{display:flex; gap:8px; align-items:center}
@@ -2116,7 +2122,9 @@ app.get('/pm', (req, res) => {
       <button class="btn" id="pmRefresh" type="button">Refresh</button>
     </div>
 
-    <div class="board" id="pmBoard"></div>
+    <div class="boardWrap" id="pmBoardWrap">
+      <div class="board" id="pmBoard"></div>
+    </div>
   </div>
 
   <div class="modal" id="cardModal" role="dialog" aria-modal="true" aria-label="Card details">

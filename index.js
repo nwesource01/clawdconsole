@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.49';
+const BUILD = '2026-03-02.50';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -1094,6 +1094,79 @@ app.get('/api/build', (req, res) => {
   res.json({ ok: true, build: BUILD });
 });
 
+// --- ClawdBuild: Templates index (file-backed) ---
+const CLAWDBUILD_TEMPLATES_FILE = path.join(DATA_DIR, 'clawdbuild-templates.json');
+function readBuildTemplates(){
+  const fallback = { updatedAt: null, templates: [
+    {
+      id: 'tpl_nextjs_tailwind',
+      title: 'Next.js + Tailwind (starter)',
+      repoUrl: 'https://github.com/vercel/next.js/tree/canary/examples/with-tailwindcss',
+      stack: 'Next.js',
+      tags: ['tailwind', 'frontend'],
+      desc: 'Good default for landing pages + dashboards.',
+      notes: 'Start here for fast UI work.'
+    }
+  ]};
+  return readJson(CLAWDBUILD_TEMPLATES_FILE, fallback);
+}
+function writeBuildTemplates(obj){
+  const out = (obj && Array.isArray(obj.templates)) ? obj : readBuildTemplates();
+  out.updatedAt = new Date().toISOString();
+  out.templates = Array.isArray(out.templates) ? out.templates : [];
+  writeJson(CLAWDBUILD_TEMPLATES_FILE, out);
+  return out;
+}
+
+app.get('/api/build/templates', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const j = readBuildTemplates();
+  res.json({ ok:true, updatedAt: j.updatedAt, templates: j.templates || [] });
+});
+
+app.post('/api/build/templates', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const tpl = req.body && req.body.template;
+  if (!tpl || typeof tpl !== 'object') return res.status(400).json({ ok:false, error:'Expected {template}' });
+
+  const cur = readBuildTemplates();
+  cur.templates = Array.isArray(cur.templates) ? cur.templates : [];
+
+  const id = String(tpl.id || '').trim() || ('tpl_' + crypto.randomBytes(6).toString('hex'));
+  const next = {
+    id,
+    title: String(tpl.title || '').trim().slice(0, 200),
+    repoUrl: String(tpl.repoUrl || '').trim().slice(0, 500),
+    stack: String(tpl.stack || '').trim().slice(0, 80),
+    tags: Array.isArray(tpl.tags) ? tpl.tags.map(x => String(x||'').trim()).filter(Boolean).slice(0, 12) : [],
+    desc: String(tpl.desc || tpl.description || '').trim().slice(0, 500),
+    notes: String(tpl.notes || '').trim().slice(0, 4000),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const i = cur.templates.findIndex(x => x && String(x.id||'') === id);
+  if (i >= 0) cur.templates[i] = { ...cur.templates[i], ...next };
+  else cur.templates.unshift(next);
+
+  const saved = writeBuildTemplates(cur);
+  logWork('build.templates.saved', { id });
+  res.json({ ok:true, updatedAt: saved.updatedAt, templates: saved.templates });
+});
+
+app.post('/api/build/templates/delete', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const id = String(req.body?.id || '').trim();
+  if (!id) return res.status(400).json({ ok:false, error:'Missing id' });
+
+  const cur = readBuildTemplates();
+  cur.templates = Array.isArray(cur.templates) ? cur.templates : [];
+  const before = cur.templates.length;
+  cur.templates = cur.templates.filter(x => x && String(x.id||'') !== id);
+  const saved = writeBuildTemplates(cur);
+  logWork('build.templates.deleted', { id, before, after: saved.templates.length });
+  res.json({ ok:true, updatedAt: saved.updatedAt, templates: saved.templates });
+});
+
 // --- ClawdCode (browse + edit files under CODE_ROOT) ---
 function safeCodePath(rel){
   const r = String(rel || '').replace(/\\/g, '/');
@@ -2088,123 +2161,74 @@ function renderModulePage(key){
       })();
       </script>
     ` },
-    build: { title:'ClawdBuild', subtitle:'Versioning + release surface (console build, commits, changelog).', body:`
+    build: { title:'ClawdBuild', subtitle:'Templates + spec prompt generator (coming).', body:`
       <div class="subcard" style="line-height:1.55;">
-        <div class="muted">A lightweight build/release surface: what’s running, what changed, and what to test next.</div>
+        <div class="muted">ClawdBuild is about going from an idea → a build plan → a real shipped app. First step: a template system.</div>
 
-        <div class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap; align-items:center;">
-          <button class="pill" id="bRefresh" type="button">Refresh</button>
-          <span class="muted" id="bMsg"></span>
-        </div>
-
-        <div class="grid" style="margin-top:12px; grid-template-columns: 1fr 1fr; align-items:start;">
+        <div class="grid" style="margin-top:12px; grid-template-columns: 1.2fr .8fr; align-items:start;">
           <div class="card" style="background: rgba(0,0,0,0.10);">
-            <div style="font-weight:900; margin-bottom:8px;">Current Build</div>
-            <div id="bBuild" class="muted">Loading…</div>
-            <div style="margin-top:10px; font-weight:900;">Queue</div>
-            <div id="bQueue" class="muted" style="margin-top:6px;">Loading…</div>
+            <div style="font-weight:900; margin-bottom:8px;">Template libraries (curated)</div>
+            <div class="muted">Browse templates where they live. Pick one, then we’ll generate a spec + tasks.</div>
+
+            <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
+              <a class="pill" href="https://replit.com/templates" target="_blank" rel="noopener">Replit Templates</a>
+              <a class="pill" href="https://lovable.dev/templates" target="_blank" rel="noopener">Lovable Templates</a>
+              <a class="pill" href="https://github.com/topics" target="_blank" rel="noopener">GitHub Topics</a>
+            </div>
+
+            <div style="margin-top:12px;">
+              <details>
+                <summary style="cursor:pointer; font-weight:900;">Categories</summary>
+                <div style="margin-top:10px; display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                  <div class="card" style="background: rgba(255,255,255,0.03); padding:10px;">
+                    <div style="font-weight:800;">CRM</div>
+                    <div class="muted" style="margin-top:6px;"><a href="https://github.com/topics/crm" target="_blank" rel="noopener">github.com/topics/crm</a></div>
+                  </div>
+                  <div class="card" style="background: rgba(255,255,255,0.03); padding:10px;">
+                    <div style="font-weight:800;">Project manager / Kanban</div>
+                    <div class="muted" style="margin-top:6px;"><a href="https://github.com/topics/kanban" target="_blank" rel="noopener">github.com/topics/kanban</a></div>
+                  </div>
+                  <div class="card" style="background: rgba(255,255,255,0.03); padding:10px;">
+                    <div style="font-weight:800;">Dashboard / Admin</div>
+                    <div class="muted" style="margin-top:6px;"><a href="https://github.com/topics/admin-dashboard" target="_blank" rel="noopener">github.com/topics/admin-dashboard</a></div>
+                  </div>
+                  <div class="card" style="background: rgba(255,255,255,0.03); padding:10px;">
+                    <div style="font-weight:800;">Landing page</div>
+                    <div class="muted" style="margin-top:6px;"><a href="https://github.com/topics/landing-page" target="_blank" rel="noopener">github.com/topics/landing-page</a></div>
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <div class="muted" style="margin-top:12px;">Note: this is intentionally link-first (curated) to avoid building a heavy template marketplace UI too early.</div>
           </div>
 
           <div class="card" style="background: rgba(0,0,0,0.10);">
-            <div style="font-weight:900; margin-bottom:8px;">Health</div>
-            <div id="bHealth" class="muted">Loading…</div>
-            <div class="muted" style="margin-top:10px;">Tip: use Changelog → Update to keep patch notes aligned with transcript history.</div>
+            <div style="font-weight:900; margin-bottom:8px;">Prompt Generator (placeholder)</div>
+            <div class="muted">Next phase: “I want a CRM like Salesforce…” → generate a build spec prompt + task breakdown + recommended templates.</div>
+
+            <div class="muted" style="margin-top:10px;">Planned inputs:</div>
+            <ul style="margin:8px 0 0 18px;">
+              <li>Use-case</li>
+              <li>Tech stack (filter)</li>
+              <li>Complexity</li>
+              <li>Ships-with checklist (auth/db/deploy)</li>
+            </ul>
           </div>
         </div>
 
         <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
-          <div style="font-weight:900; margin-bottom:8px;">Recent commits</div>
-          <div id="bCommits" class="muted">Loading…</div>
-        </div>
-
-        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
-          <div style="font-weight:900; margin-bottom:8px;">Changelog</div>
-          <div id="bChangelog" class="muted">Loading…</div>
+          <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+            <div style="font-weight:900;">Local Template Index (advanced)</div>
+            <button class="pill" id="cbRefresh" type="button">Refresh</button>
+          </div>
+          <div class="muted" style="margin-top:6px;">File-backed index for internal use. UI editing is disabled on purpose (curated link-first UX above).</div>
+          <div class="muted" style="margin-top:6px;">Source: <code>${DATA_DIR}/clawdbuild-templates.json</code></div>
+          <div class="muted" id="cbMsg" style="margin-top:10px;"></div>
+          <div id="cbLocalList" style="margin-top:10px;"></div>
         </div>
       </div>
-
-      <script>
-      (() => {
-        const $ = (id) => document.getElementById(id);
-        const msg = $('bMsg');
-        const setMsg = (t) => { if (msg) msg.textContent = t || ''; };
-        const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
-        async function load(){
-          setMsg('');
-          try {
-            const [bRes, hRes, qRes, cRes, chRes] = await Promise.all([
-              fetch('/api/build', { credentials:'include', cache:'no-store' }),
-              fetch('/healthz', { credentials:'include', cache:'no-store' }),
-              fetch('/api/queue/state', { credentials:'include', cache:'no-store' }),
-              fetch('/api/repo/commits?limit=25', { credentials:'include', cache:'no-store' }),
-              fetch('/api/changelog?limit=30', { credentials:'include', cache:'no-store' }),
-            ]);
-
-            const bJ = await bRes.json().catch(() => null);
-            const build = (bJ && bJ.ok) ? String(bJ.build||'') : '';
-            if ($('bBuild')) $('bBuild').innerHTML = build ? ('Build: <code>' + esc(build) + '</code>') : 'Unknown';
-
-            const hTxt = await hRes.text();
-            if ($('bHealth')) $('bHealth').textContent = hRes.ok ? ('OK (' + String(hTxt||'').slice(0,120) + ')') : ('FAIL ' + hRes.status);
-
-            const qJ = await qRes.json().catch(() => null);
-            if ($('bQueue')) {
-              const st = (qJ && qJ.ok && qJ.state) ? qJ.state : {};
-              const parts = [
-                st.selectedColumnId ? ('column=' + st.selectedColumnId) : null,
-                (st.autorunEnabled ? 'autorun=ON' : 'autorun=OFF'),
-                st.currentCardId ? ('current=' + st.currentCardId) : null,
-                st.pendingRunAt ? ('pending=' + String(st.pendingRunAt).slice(0,19).replace('T',' ')) : null,
-              ].filter(Boolean);
-              $('bQueue').textContent = parts.join(' • ') || 'No queue state.';
-            }
-
-            const cJ = await cRes.json().catch(() => null);
-            const commits = (cJ && cJ.ok && Array.isArray(cJ.commits)) ? cJ.commits : [];
-            if ($('bCommits')) {
-              if (!commits.length) $('bCommits').textContent = 'No commits found.';
-              else $('bCommits').innerHTML = commits.map(c => {
-                const short = String(c.hash||'').slice(0,7);
-                const subj = esc(c.subject||'');
-                const when = esc(c.date||'');
-                return '<div style="padding:10px 8px; border-top:1px solid rgba(255,255,255,0.08);">'
-                  + '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">'
-                  + '<div><code>' + esc(short) + '</code></div>'
-                  + '<div class="muted">' + when + '</div>'
-                  + '</div>'
-                  + '<div style="margin-top:6px;">' + subj + '</div>'
-                  + '</div>';
-              }).join('');
-            }
-
-            const chJ = await chRes.json().catch(() => null);
-            const entries = (chJ && chJ.ok && Array.isArray(chJ.entries)) ? chJ.entries : [];
-            if ($('bChangelog')) {
-              if (!entries.length) $('bChangelog').textContent = 'No changelog entries yet.';
-              else $('bChangelog').innerHTML = entries.map(e => {
-                const t = esc(e.title||'');
-                const ts = esc(String(e.ts||'').slice(0,19).replace('T',' '));
-                const b = esc(e.build||'');
-                return '<div style="padding:10px 8px; border-top:1px solid rgba(255,255,255,0.08);">'
-                  + '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">'
-                  + '<div style="font-weight:900;">' + t + (b?(' <span class="muted">(' + b + ')</span>'):'') + '</div>'
-                  + '<div class="muted">' + ts + '</div>'
-                  + '</div>'
-                  + '</div>';
-              }).join('');
-            }
-
-          } catch (e) {
-            setMsg('Load failed: ' + String(e));
-          }
-        }
-
-        const btn = $('bRefresh');
-        if (btn) btn.addEventListener('click', load);
-        load();
-      })();
-      </script>
+      <script src="/static/build.js"></script>
     ` },
     queue: { title:'ClawdQueue', subtitle:'Serial execution rail (PM-backed).', body:`
       <div class="subcard" style="line-height:1.55;">

@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.48';
+const BUILD = '2026-03-02.49';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -420,12 +420,14 @@ app.get('/name', (req, res) => {
 </head>
 <body>
   <div class="wrap">
-    <div class="top">
-      <div>
-        <h1>ClawdName</h1>
-        <div class="muted">Domain availability (v0). DNS heuristic: <b>taken</b> if SOA/NS exists; <b>likely available</b> if ENOTFOUND; otherwise <b>unknown</b>.</div>
+    <div class="top" style="display:grid; grid-template-columns: 1fr; gap:12px; align-items:baseline;">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:baseline; justify-content:space-between;">
+        <div>
+          <h1>ClawdName</h1>
+          <div class="muted">Domain availability (v0). DNS heuristic: <b>taken</b> if SOA/NS exists; <b>likely available</b> if ENOTFOUND; otherwise <b>unknown</b>.</div>
+        </div>
+        <div style="display:flex; justify-content:center; flex:1;">${appsMenuHtml('/name')}</div>
       </div>
-      <a class="btn" href="/" style="text-decoration:none;">Back to Console</a>
     </div>
 
     <div class="card">
@@ -1749,11 +1751,7 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
         <div class="muted" style="margin-top:6px;">${subtitle || ''}</div>
       </div>
       <div class="topC">${appsMenuHtml(activePath || '')}</div>
-      <div class="topR">
-        <a class="pill" href="/apps" target="_blank" rel="noopener">Apps</a>
-        <a class="pill" href="/" target="_blank" rel="noopener">Console</a>
-        <a class="pill" href="/pm" target="_blank" rel="noopener">PM</a>
-      </div>
+      <div class="topR"></div>
     </div>
 
     ${bodyHtml || ''}
@@ -1801,7 +1799,7 @@ function appsMenuHtml(activePath){
   return '<div class="appsMenu" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center; align-items:center;">' +
     items.map(it => {
       const isActive = (path === it.href);
-      return '<a class="pill" href="' + it.href + '" target="_blank" rel="noopener" ' + (isActive ? 'aria-current="page"' : '') + '>' + it.label + '</a>';
+      return '<a class="pill" href="' + it.href + '" ' + (isActive ? 'aria-current="page"' : '') + '>' + it.label + '</a>';
     }).join('') +
     '</div>';
 }
@@ -3074,11 +3072,14 @@ app.get('/pm', (req, res) => {
 </head>
 <body>
   <div class="wrap">
-    <div class="top">
-      <div>
-        <h1>ClawdPM</h1>
-        <div class="muted small">Cards are task-groups. Click a card to generate + manage to-dos.</div>
-        <div class="muted small" id="pm_js_status" style="margin-top:6px;">JS: (loading…)</div>
+    <div class="top" style="display:grid; grid-template-columns: 1fr auto; gap:12px; align-items:baseline;">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:baseline; justify-content:space-between;">
+        <div>
+          <h1>ClawdPM</h1>
+          <div class="muted small">Cards are task-groups. Click a card to generate + manage to-dos.</div>
+          <div class="muted small" id="pm_js_status" style="margin-top:6px;">JS: (loading…)</div>
+        </div>
+        <div style="display:flex; justify-content:center; flex:1;">${appsMenuHtml('/pm')}</div>
       </div>
       <button class="btn" id="pmRefresh" type="button">Refresh</button>
     </div>

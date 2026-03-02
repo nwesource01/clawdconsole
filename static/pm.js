@@ -206,7 +206,6 @@
     if (!fc) return;
     const { col, card } = fc;
 
-    // mark status for Queue/PM badges
     card.completedAt = new Date().toISOString();
     card.queueStatus = 'done';
 
@@ -214,7 +213,6 @@
     col.cards = Array.isArray(col.cards) ? col.cards : [];
     doneCol.cards = Array.isArray(doneCol.cards) ? doneCol.cards : [];
 
-    // remove from current column and append to Done
     col.cards = col.cards.filter(x => x && x.id !== card.id);
     doneCol.cards.push(card);
 
@@ -236,7 +234,6 @@
     card.body = card.desc; // legacy
     card.priority = $('cm_in_pri').value;
 
-    // move column
     const targetColId = cmMoveTo ? String(cmMoveTo.value||'') : '';
     if (targetColId && targetColId !== col.id) {
       const to = (PM.columns || []).find(c => c && c.id === targetColId);
@@ -311,25 +308,88 @@
     render();
   }
 
+  async function addCard(colId){
+    const title = (prompt('Card title') || '').trim();
+    if (!title) return;
+    const desc = (prompt('Description (optional)') || '').trim();
+    const p = (prompt('Priority: ultra / high / normal / planning', 'normal') || 'normal').trim().toLowerCase();
+    const priority = (['ultra','high','normal','planning'].includes(p)) ? p : 'normal';
+
+    const col = (PM && PM.columns || []).find(c => c && c.id === colId);
+    if (!col) return;
+    col.cards = Array.isArray(col.cards) ? col.cards : [];
+    col.cards.push({ id: rand(), title, desc, content:'', body: desc, priority, createdAt: new Date().toISOString(), todos: [] });
+    await persist();
+    render();
+  }
+
+  async function moveColumn(colId, dir){
+    const cols = (PM && PM.columns) ? PM.columns : [];
+    const i = cols.findIndex(c => c && c.id === colId);
+    if (i < 0) return;
+    const j = i + dir;
+    if (j < 0 || j >= cols.length) return;
+    const tmp = cols[j];
+    cols[j] = cols[i];
+    cols[i] = tmp;
+    await persist();
+    render();
+  }
+
+  async function renameColumn(colId){
+    const cols = (PM && PM.columns) ? PM.columns : [];
+    const col = cols.find(c => c && c.id === colId);
+    if (!col) return;
+    const name = (prompt('Column name', col.title || '') || '').trim();
+    if (!name) return;
+    col.title = name;
+    await persist();
+    render();
+  }
+
+  async function moveCardInline(colId, cardId, dir){
+    const col = (PM && PM.columns || []).find(c => c && c.id === colId);
+    if (!col) return;
+    col.cards = Array.isArray(col.cards) ? col.cards : [];
+    const i = col.cards.findIndex(c => c && c.id === cardId);
+    if (i < 0) return;
+    const j = i + dir;
+    if (j < 0 || j >= col.cards.length) return;
+    const tmp = col.cards[j];
+    col.cards[j] = col.cards[i];
+    col.cards[i] = tmp;
+    await persist();
+    render();
+  }
+
   function render(){
     const pm = PM || { columns: [] };
     const host = document.getElementById('pmBoard');
     if (!host) return;
     host.innerHTML = '';
+
     for (const col of (pm.columns || [])){
       const el = document.createElement('div');
       el.className = 'col';
 
-      const cardsHtml = (col.cards || []).map((c) => {
+      const cards = Array.isArray(col.cards) ? col.cards : [];
+
+      const cardsHtml = cards.map((c) => {
         const q = (c.queueStatus || (c.completedAt ? 'done' : (c.queuedAt ? 'queued' : '')));
         const qBadge = q ? ('<span class="badge" style="margin-left:6px;">' + esc(q === 'done' ? '✓ done' : (q === 'queued' ? '⏳ queued' : q)) + '</span>') : '';
         const badge = '<span class="badge">' + esc(String(c.priority || 'planning')) + '</span>' + qBadge;
         const desc = (c.desc || c.body || '');
         const short = String(desc).length > 110 ? (String(desc).slice(0, 110) + '…') : String(desc);
 
+        const btns = '<div class="cardBtns">'
+          + '<button type="button" data-cup="' + esc(col.id) + '" data-cid="' + esc(c.id) + '" title="Move up">↑</button>'
+          + '<button type="button" data-cdn="' + esc(col.id) + '" data-cid="' + esc(c.id) + '" title="Move down">↓</button>'
+          + '</div>';
+
         return '<div class="card ' + priClass(c.priority) + '" data-card-id="' + esc(c.id) + '" data-col-id="' + esc(col.id) + '">' 
           + '<div class="cardRow">'
           +   '<b>' + esc(c.title) + '</b>'
+          +   btns
           + '</div>'
           + (short ? ('<p>' + esc(short) + '</p>') : '')
           + badge
@@ -340,13 +400,39 @@
         + '<div class="colHead">'
         +   '<b>' + esc(col.title) + '</b>'
         +   '<div class="colActions">'
-        +     '<span class="muted small">' + (col.cards || []).length + '</span>'
+        +     '<button class="mini2" type="button" data-col-left="' + esc(col.id) + '" title="Move column left">◀</button>'
+        +     '<button class="mini2" type="button" data-col-right="' + esc(col.id) + '" title="Move column right">▶</button>'
+        +     '<button class="mini2" type="button" data-col-rename="' + esc(col.id) + '" title="Rename column">✎</button>'
+        +     '<span class="muted small">' + cards.length + '</span>'
+        +     '<button class="addBtn" type="button" data-add="' + esc(col.id) + '">+ Card</button>'
         +   '</div>'
         + '</div>'
         + '<div class="cards">' + cardsHtml + '</div>';
 
       host.appendChild(el);
     }
+
+    // column actions
+    Array.from(document.querySelectorAll('button[data-col-left]')).forEach(b => {
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); moveColumn(b.getAttribute('data-col-left'), -1); });
+    });
+    Array.from(document.querySelectorAll('button[data-col-right]')).forEach(b => {
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); moveColumn(b.getAttribute('data-col-right'), +1); });
+    });
+    Array.from(document.querySelectorAll('button[data-col-rename]')).forEach(b => {
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); renameColumn(b.getAttribute('data-col-rename')); });
+    });
+    Array.from(document.querySelectorAll('button[data-add]')).forEach(b => {
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); addCard(b.getAttribute('data-add')); });
+    });
+
+    // card actions
+    Array.from(document.querySelectorAll('button[data-cup]')).forEach(b => {
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); moveCardInline(b.getAttribute('data-cup'), b.getAttribute('data-cid'), -1); });
+    });
+    Array.from(document.querySelectorAll('button[data-cdn]')).forEach(b => {
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); moveCardInline(b.getAttribute('data-cdn'), b.getAttribute('data-cid'), +1); });
+    });
 
     Array.from(document.querySelectorAll('.card[data-card-id]')).forEach((c) => {
       c.addEventListener('click', () => {

@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.33';
+const BUILD = '2026-03-02.34';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -2569,6 +2569,7 @@ app.get('/pm', (req, res) => {
       <div>
         <h1>ClawdPM</h1>
         <div class="muted small">Cards are task-groups. Click a card to generate + manage to-dos.</div>
+        <div class="muted small" id="pm_js_status" style="margin-top:6px;">JS: (loading…)</div>
       </div>
       <button class="btn" id="pmRefresh" type="button">Refresh</button>
     </div>
@@ -2682,6 +2683,12 @@ app.get('/pm', (req, res) => {
   </div>
 
   <script>
+    const pmJsStatus = document.getElementById('pm_js_status');
+    const setPmStatus = (t) => { try { if (pmJsStatus) pmJsStatus.textContent = 'JS: ' + String(t||''); } catch {} };
+    window.addEventListener('error', (e) => setPmStatus('ERROR ' + (e && e.message ? e.message : 'unknown')));
+    window.addEventListener('unhandledrejection', (e) => setPmStatus('REJECT ' + String(e && e.reason ? e.reason : e)));
+    setPmStatus('running (build ${BUILD})');
+
     const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const rand = () => (window.crypto && window.crypto.randomUUID)
       ? window.crypto.randomUUID()
@@ -2747,9 +2754,10 @@ app.get('/pm', (req, res) => {
     }
 
     function openModal(colId, cardId){
+      setPmStatus('click ' + String(colId||'') + ' / ' + String(cardId||''));
       ACTIVE = { colId, cardId };
       const fc = findCard();
-      if (!fc) return;
+      if (!fc) { setPmStatus('click: card not found in model'); return; }
       const card = fc.card;
 
       // migrate legacy fields
@@ -3168,7 +3176,7 @@ app.get('/pm', (req, res) => {
     }
 
     // Boot immediately from server-provided PM so cards are clickable even if fetch/auth fails.
-    try { render(); } catch {}
+    try { render(); setPmStatus('rendered (server model)'); } catch { setPmStatus('render failed'); }
 
     document.getElementById('pmRefresh').addEventListener('click', load);
     // Refresh from API in background (authoritative), but UI works even if this fails.

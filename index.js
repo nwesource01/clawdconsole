@@ -1468,6 +1468,46 @@ app.get('/api/repo/install', (req, res) => {
   }
 });
 
+// Upstream releases feed (read-only)
+const UPSTREAM_RELEASE_LATEST_URL = String(process.env.UPSTREAM_RELEASE_LATEST_URL || 'https://clawdconsole.com/releases/latest.json').trim();
+app.get('/api/repo/releases/latest', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const u = new URL(UPSTREAM_RELEASE_LATEST_URL);
+    if (u.protocol !== 'https:') return res.status(400).json({ ok:false, error:'bad_url' });
+
+    const https = require('https');
+    const data = await new Promise((resolve, reject) => {
+      const r = https.get(u, { timeout: 5000, headers: { 'User-Agent':'ClawdConsole/1.0' } }, (resp) => {
+        let buf = '';
+        resp.setEncoding('utf8');
+        resp.on('data', (d) => buf += d);
+        resp.on('end', () => resolve({ status: resp.statusCode || 0, body: buf }));
+      });
+      r.on('error', reject);
+      r.on('timeout', () => { try { r.destroy(new Error('timeout')); } catch {} });
+    });
+
+    if (data.status < 200 || data.status >= 300) return res.status(502).json({ ok:false, error:'upstream_http_'+String(data.status) });
+    let j; try { j = JSON.parse(String(data.body||'')); } catch { j = null; }
+    if (!j || typeof j !== 'object') return res.status(502).json({ ok:false, error:'bad_json' });
+
+    // normalize
+    const out = {
+      build: String(j.build || ''),
+      level: String(j.level || ''),
+      ts: String(j.ts || ''),
+      title: String(j.title || ''),
+      body: String(j.body || ''),
+      url: j.url ? String(j.url) : null,
+    };
+
+    return res.json({ ok:true, upstreamUrl: UPSTREAM_RELEASE_LATEST_URL, latest: out, local: { build: BUILD } });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 function readButtons(){
   const fallback = { updatedAt: null, buttons: [] };
   try {
@@ -3159,6 +3199,14 @@ function renderModulePage(key){
 
         <div class="grid" id="repoCards" style="margin-top:12px; grid-template-columns: repeat(5, minmax(0,1fr)); align-items:stretch;"></div>
 
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+            <div style="font-weight:900;">Upstream release feed</div>
+            <span class="muted" id="repoUpMsg"></span>
+          </div>
+          <div id="repoUpstream" class="muted" style="margin-top:8px;">Loading…</div>
+        </div>
+
         <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);" id="repoChangelogCard">
           <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
             <div style="font-weight:900;">Changelog (last 24h vibes)</div>
@@ -3182,11 +3230,14 @@ function renderModulePage(key){
         const msgEl = document.getElementById('repoMsg');
         const cardsEl = document.getElementById('repoCards');
         const chEl = document.getElementById('repoChangelog');
+        const upEl = document.getElementById('repoUpstream');
+        const upMsg = document.getElementById('repoUpMsg');
 
         function esc(s){
           return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         }
         function setMsg(t){ if (msgEl) msgEl.textContent = t || ''; }
+        function setUpMsg(t){ if (upMsg) upMsg.textContent = t || ''; }
 
         function card(label, value){
           return '<div class="card" style="background: rgba(255,255,255,0.03); padding:10px;">'
@@ -3239,6 +3290,39 @@ function renderModulePage(key){
           }
         }
 
+        async function loadUpstream(){
+          if (!upEl) return;
+          setUpMsg('');
+          upEl.textContent = 'Loading…';
+          try {
+            const res = await fetch('/api/repo/releases/latest', { credentials:'include', cache:'no-store' });
+            const j = await res.json();
+            if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+            const latest = j.latest || {};
+            const localBuild = (j.local && j.local.build) ? String(j.local.build) : '';
+            const upBuild = String(latest.build || '');
+            const lvl = String(latest.level || '');
+            const title = String(latest.title || '');
+            const ts = String(latest.ts || '');
+            const url = latest.url ? String(latest.url) : '';
+
+            const status = (upBuild && localBuild && upBuild !== localBuild) ? 'Update available' : 'Up to date';
+            setUpMsg(status);
+
+            upEl.innerHTML = ''
+              + '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:baseline;">'
+              +   '<div><b>Latest:</b> <code>' + esc(upBuild || '—') + '</code></div>'
+              +   (lvl ? ('<div class="muted">level: ' + esc(lvl) + '</div>') : '')
+              +   (ts ? ('<div class="muted">' + esc(ts.slice(0,19).replace('T',' ')) + '</div>') : '')
+              + '</div>'
+              + (title ? ('<div style="margin-top:6px;">' + esc(title) + '</div>') : '')
+              + (url ? ('<div style="margin-top:6px;"><a href="' + esc(url) + '" target="_blank" rel="noopener">Release notes</a></div>') : '');
+          } catch (e) {
+            setUpMsg('');
+            upEl.innerHTML = '<div class="muted">Upstream feed unavailable.</div>';
+          }
+        }
+
         function renderChangelogInto(el, items, limit){
           if (!el) return;
           const arr = Array.isArray(items) ? items : [];
@@ -3288,7 +3372,7 @@ function renderModulePage(key){
         async function refreshAll(){
           setMsg('');
           setMsg('Refreshing…');
-          await Promise.all([loadCards(), loadChangelog(), loadCommits()]);
+          await Promise.all([loadCards(), loadUpstream(), loadChangelog(), loadCommits()]);
           setMsg('');
         }
 

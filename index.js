@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-03.75';
+const BUILD = '2026-03-03.76';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -2887,9 +2887,9 @@ function renderModulePage(key){
           <div class="twoCol">
             <div>
               <div class="muted" style="margin-bottom:6px;">Gateway WS URL</div>
-              <input id="codexGatewayUrl" class="inp" placeholder="ws://127.0.0.1:18789" style="width:100%;" />
+              <input id="codexGatewayUrl" class="inp" placeholder="ws://127.0.0.1:18789" style="width:100%; max-width: 640px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />
               <div class="muted" style="margin-top:10px; margin-bottom:6px;">Console sessionKey</div>
-              <input id="codexSessionKey" class="inp" placeholder="claw-console" style="width:100%;" />
+              <input id="codexSessionKey" class="inp" placeholder="claw-console" style="width:100%; max-width: 420px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />
               <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap;">
                 <button class="pill" id="codexSave" type="button">Save integration</button>
                 <button class="pill" id="codexReconnect" type="button">Reconnect gateway</button>
@@ -4678,13 +4678,14 @@ app.get('/', (req, res) => {
       --accent: #9ad0ff;
     }
     html, body { height: 100%; overflow: hidden; }
+    html{ color-scheme: dark; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 18px; line-height: 1.35; background: var(--bg); color: var(--text); }
 
-    /* brand: dark scrollbars everywhere */
-    * { scrollbar-color: rgba(154,208,255,0.28) rgba(0,0,0,0.35); }
+    /* brand: dark scrollbars everywhere (including textarea/pre) */
+    * { scrollbar-color: rgba(154,208,255,0.28) rgba(0,0,0,0.55); }
     *::-webkit-scrollbar { width: 12px; height: 12px; }
-    *::-webkit-scrollbar-track { background: rgba(0,0,0,0.35); border-radius: 999px; }
-    *::-webkit-scrollbar-thumb { background: rgba(154,208,255,0.26); border-radius: 999px; border: 2px solid rgba(0,0,0,0.45); }
+    *::-webkit-scrollbar-track { background: rgba(0,0,0,0.55); border-radius: 999px; }
+    *::-webkit-scrollbar-thumb { background: rgba(154,208,255,0.26); border-radius: 999px; border: 2px solid rgba(0,0,0,0.55); }
     *::-webkit-scrollbar-thumb:hover { background: rgba(154,208,255,0.40); }
     a { color: var(--accent); }
 
@@ -4749,7 +4750,7 @@ app.get('/', (req, res) => {
     .row { display:flex; gap: 10px; align-items:center; flex-wrap: wrap; }
 
     /* inputs: never overlap / always shrink inside flex+grid */
-    .inp{ box-sizing:border-box; min-width:0; max-width:100%; }
+    .inp{ box-sizing:border-box; min-width:0; max-width:100%; padding:10px 12px; border-radius: 12px; border:1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.18); color: rgba(231,231,231,0.92); font-size: 13px; line-height: 1.2; }
 
     /* two-column grids must collapse to one column on narrow screens to prevent overlap */
     .twoCol{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }

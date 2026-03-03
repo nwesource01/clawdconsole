@@ -137,6 +137,7 @@
   const tabClawd = $('opsTabClawd');
   const tabClawdwell = $('opsTabClawdwell');
   const tabBridge = $('opsTabBridge');
+  const tabRes = $('opsTabRes');
   const tabMsg = $('opsTabMsg');
   const viewQ = $('opsTabQuestionnaire');
   const viewG = $('opsTabGateway');
@@ -144,6 +145,7 @@
   const viewClawd = $('opsTabClawdView');
   const viewClawdwell = $('opsTabClawdwellView');
   const viewBridge = $('opsTabBridgeView');
+  const viewRes = $('opsTabResView');
 
   function setTabMsg(t){ if (tabMsg) tabMsg.textContent = t || ''; }
   function showTab(which){
@@ -153,6 +155,7 @@
     if (viewClawd) viewClawd.style.display = (which === 'clawd') ? '' : 'none';
     if (viewClawdwell) viewClawdwell.style.display = (which === 'clawdwell') ? '' : 'none';
     if (viewBridge) viewBridge.style.display = (which === 'bridge') ? '' : 'none';
+    if (viewRes) viewRes.style.display = (which === 'res') ? '' : 'none';
   }
 
   if (tabQ) tabQ.addEventListener('click', () => showTab('q'));
@@ -164,6 +167,10 @@
     showTab('bridge');
     // Opening the tab marks everything as seen.
     loadBridge();
+  });
+  if (tabRes) tabRes.addEventListener('click', () => {
+    showTab('res');
+    loadResources();
   });
 
   // default
@@ -327,6 +334,69 @@
 
   if (brRefresh) brRefresh.addEventListener('click', loadBridge);
   if (brPost) brPost.addEventListener('click', postBridge);
+
+  // --- Resources ---
+  const resRefresh = $('resRefresh');
+  const resMsg = $('resMsg');
+  const resPre = $('resPre');
+  const resAlerts = $('resAlerts');
+
+  const setResMsg = (t) => { try { if (resMsg) resMsg.textContent = t || ''; } catch {} };
+
+  function fmtBytes(n){
+    const v = Number(n||0);
+    if (!Number.isFinite(v) || v <= 0) return '0 B';
+    const u = ['B','KB','MB','GB','TB'];
+    let x = v; let i = 0;
+    while (x >= 1024 && i < u.length-1){ x /= 1024; i++; }
+    return x.toFixed(i ? 1 : 0) + ' ' + u[i];
+  }
+
+  function renderResources(j){
+    if (!j || !j.ok || !j.host) return;
+    const h = j.host;
+    const lines = [];
+    lines.push('host: ' + (h.hostname || '?') + ' (' + (h.platform || '?') + ')');
+    lines.push('uptime: ' + (h.uptimeSec ? Math.floor(h.uptimeSec/60) + ' min' : '?'));
+    lines.push('cores: ' + (h.cores || '?'));
+    lines.push('load: ' + [h.load1,h.load5,h.load15].map(x => (x==null?'?':Number(x).toFixed(2))).join(' / '));
+    lines.push('ram: ' + fmtBytes(h.memUsed) + ' used / ' + fmtBytes(h.memTotal) + ' total (' + Math.round((h.memPct||0)*100) + '%)');
+    if (h.disk) {
+      lines.push('disk(/): ' + fmtBytes(h.disk.usedBytes) + ' used / ' + fmtBytes(h.disk.totalBytes) + ' total (' + Math.round((h.disk.usedPct||0)*100) + '%)');
+    } else {
+      lines.push('disk(/): (unavailable)');
+    }
+    lines.push('ts: ' + (j.ts || ''));
+
+    if (resPre) resPre.textContent = lines.join('\n');
+
+    const alerts = Array.isArray(j.alerts) ? j.alerts : [];
+    if (!resAlerts) return;
+    if (!alerts.length) {
+      resAlerts.textContent = '(none)';
+      return;
+    }
+    resAlerts.innerHTML = alerts.map(a => {
+      const lvl = esc(a.level||'warn');
+      const msg = esc(a.msg||'');
+      return '<div style="margin-top:6px;"><b>' + lvl + '</b>: ' + msg + '</div>';
+    }).join('');
+  }
+
+  async function loadResources(){
+    setResMsg('Loading…');
+    try {
+      const res = await fetch('/api/ops/resources', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      renderResources(j);
+      setResMsg('');
+    } catch (e) {
+      setResMsg('Load failed: ' + String(e));
+    }
+  }
+
+  if (resRefresh) resRefresh.addEventListener('click', loadResources);
 
   // --- Brand / assistant name ---
   const bName = $('brandAssistantName');

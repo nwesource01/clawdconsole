@@ -2104,6 +2104,67 @@ app.post('/api/ops/commit', (req, res) => {
   }
 });
 
+// Host resource snapshot for ClawdOps (best-effort, no external deps)
+app.get('/api/ops/resources', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const os = require('os');
+    const cpus = os.cpus() || [];
+    const cores = cpus.length || 1;
+    const load = os.loadavg ? os.loadavg() : [0,0,0];
+    const memTotal = os.totalmem ? os.totalmem() : 0;
+    const memFree = os.freemem ? os.freemem() : 0;
+    const memUsed = memTotal - memFree;
+    const memPct = memTotal ? (memUsed / memTotal) : 0;
+
+    // disk: root fs only (fast)
+    let disk = null;
+    try {
+      const { execFileSync } = require('child_process');
+      const out = execFileSync('df', ['-Pk', '/'], { encoding:'utf8' });
+      const lines = out.trim().split(/\r?\n/);
+      const parts = (lines[lines.length-1] || '').trim().split(/\s+/);
+      // Filesystem 1024-blocks Used Available Capacity Mounted on
+      if (parts.length >= 6) {
+        const totalK = Number(parts[1]||0);
+        const usedK = Number(parts[2]||0);
+        const availK = Number(parts[3]||0);
+        const pct = String(parts[4]||'').replace('%','');
+        disk = { mount: parts[5], totalBytes: totalK*1024, usedBytes: usedK*1024, availBytes: availK*1024, usedPct: Number(pct)/100 };
+      }
+    } catch {}
+
+    // alerts (simple thresholds)
+    const alerts = [];
+    if (memPct >= 0.90) alerts.push({ level:'warn', kind:'mem', msg:'RAM usage above 90%' });
+    if (disk && disk.usedPct >= 0.90) alerts.push({ level:'warn', kind:'disk', msg:'Disk usage above 90% on /' });
+    const load1 = Number(load[0]||0);
+    if (load1 > (cores * 1.25)) alerts.push({ level:'warn', kind:'cpu', msg:'Load average high for core count' });
+
+    return res.json({
+      ok:true,
+      host:{
+        hostname: os.hostname ? os.hostname() : null,
+        platform: os.platform ? os.platform() : null,
+        uptimeSec: os.uptime ? os.uptime() : null,
+        cores,
+        load1: load[0],
+        load5: load[1],
+        load15: load[2],
+        memTotal,
+        memUsed,
+        memFree,
+        memPct,
+        disk,
+      },
+      alerts,
+      ts: new Date().toISOString(),
+    });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 app.get('/api/ops/repeated-questions', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
@@ -3141,6 +3202,7 @@ function renderModulePage(key){
           <button class="pill" id="opsTabClawd" type="button">Clawd</button>
           <button class="pill" id="opsTabClawdwell" type="button">Clawdwell</button>
           <button class="pill" id="opsTabBridge" type="button">ClawdBridge</button>
+          <button class="pill" id="opsTabRes" type="button">Resources</button>
           <span class="muted" id="opsTabMsg"></span>
         </div>
 
@@ -3304,6 +3366,33 @@ function renderModulePage(key){
             <div id="bridgeList" style="margin-top:8px; max-height: 55vh; overflow:auto; padding-right:6px;"></div>
           </div>
         </div><!-- /opsTabBridgeView -->
+
+        <div id="opsTabResView" style="display:none;">
+          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+            <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+              <div>
+                <div style="font-weight:900;">Resources</div>
+                <div class="muted" style="margin-top:4px;">Live snapshot of CPU/RAM/disk + basic alerts.</div>
+              </div>
+              <div class="row" style="gap:10px; flex-wrap:wrap;">
+                <button class="pill" id="resRefresh" type="button">Refresh</button>
+                <span class="muted" id="resMsg"></span>
+              </div>
+            </div>
+
+            <div class="twoCol" style="margin-top:12px;">
+              <div>
+                <div style="font-weight:900; margin-bottom:8px;">Snapshot</div>
+                <pre id="resPre" style="white-space:pre-wrap; word-break:break-word; margin:0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.12); max-height: 45vh; overflow:auto;"></pre>
+              </div>
+              <div>
+                <div style="font-weight:900; margin-bottom:8px;">Alerts</div>
+                <div id="resAlerts" class="muted">(none)</div>
+                <div class="muted" style="margin-top:10px;">Tip: alerts are simple thresholds (90% RAM/disk, high load). We can tune later.</div>
+              </div>
+            </div>
+          </div>
+        </div><!-- /opsTabResView -->
 
       </div>
       <script src="/static/ops.js"></script>

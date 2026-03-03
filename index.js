@@ -3830,10 +3830,14 @@ function readPM(){
     updatedAt: null,
     columns: [
       { id: 'p0', title: 'Projects', cards: [
-        { id: 'c1', title: 'Clawdbot Clone Spinup', body: 'Spin up a fresh Clawdbot/Moltbot box reliably.', priority: 'high', createdAt: new Date().toISOString() },
-        { id: 'c2', title: 'Clawdbot Install Revision', body: 'Make install easier (target: < 30 minutes, not 6 hours).', priority: 'ultra', createdAt: new Date().toISOString() },
-        { id: 'c3', title: 'Manage ClawdConsole Open Source Branch', body: 'Keep OSS repo clean, reviewed, tagged releases.', priority: 'normal', createdAt: new Date().toISOString() },
-        { id: 'c4', title: 'Test ClawdConsole on New Box (Validation)', body: 'Install + run on a clean box; verify docs + defaults.', priority: 'planning', createdAt: new Date().toISOString() },
+        {
+          id: 'welcome',
+          title: 'Welcome to ClawdPM',
+          body: 'This is a simple board. Click a card to edit details, generate to-dos, and move it through columns.\n\nTip: use + Card to add work, and keep cards as small task-groups.',
+          priority: 'planning',
+          createdAt: new Date().toISOString(),
+          todos: []
+        },
       ]},
       { id: 'p1', title: 'Backlog', cards: [] },
       { id: 'p2', title: 'Doing', cards: [] },
@@ -4176,17 +4180,17 @@ app.get('/pm', (req, res) => {
 </head>
 <body>
   <div class="wrap">
-    <div class="top" style="display:grid; grid-template-columns: auto auto 1fr; gap:12px; align-items:baseline;">
-      <div>
+    <div class="top" style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
+      <div style="min-width: 220px;">
         <h1>ClawdPM</h1>
         <div class="muted small">Cards are task-groups. Click a card to generate + manage to-dos.</div>
         <div class="muted small" id="pm_js_status" style="margin-top:6px;">JS: (loading…)</div>
       </div>
-      <div style="align-self:start;">
+      <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; flex:1; min-width: 260px;">
         <button class="btn" id="pmRefresh" type="button">Refresh</button>
-      </div>
-      <div id="pmMenuWrap" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; justify-self:end; width:100%;">
-        ${appsMenuHtml('/pm')}
+        <div id="pmMenuWrap" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end;">
+          ${appsMenuHtml('/pm')}
+        </div>
       </div>
     </div>
 

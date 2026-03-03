@@ -160,7 +160,11 @@
   if (tabC) tabC.addEventListener('click', () => showTab('c'));
   if (tabClawd) tabClawd.addEventListener('click', () => showTab('clawd'));
   if (tabClawdwell) tabClawdwell.addEventListener('click', () => showTab('clawdwell'));
-  if (tabBridge) tabBridge.addEventListener('click', () => { showTab('bridge'); loadBridge(); });
+  if (tabBridge) tabBridge.addEventListener('click', () => {
+    showTab('bridge');
+    // Opening the tab marks everything as seen.
+    loadBridge();
+  });
 
   // default
   showTab('q');
@@ -168,7 +172,8 @@
   // initial loads
   loadBrand();
   loadClawdwellNotes();
-  // Bridge is loaded on demand when tab is opened
+  // Bridge is loaded on demand when tab is opened, but we also poll for a "new" indicator.
+  setInterval(() => { try { loadBridge({ silent:true }); } catch {} }, 8000);
 
   // --- Clawdwell notes ---
   const cwTa = $('cwNotes');
@@ -260,16 +265,40 @@
     });
   }
 
-  async function loadBridge(){
-    setBrMsg('Loading…');
+  let bridgeLastSeenTs = 0;
+
+  async function loadBridge(opts = {}){
+    const silent = !!opts.silent;
+    if (!silent) setBrMsg('Loading…');
     try {
       const res = await fetch('/api/ops/bridge/list?limit=120', { credentials:'include', cache:'no-store' });
       const j = await res.json();
       if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
-      renderBridge(j.items || []);
-      setBrMsg('');
+      const items = Array.isArray(j.items) ? j.items : [];
+      renderBridge(items);
+      if (!silent) setBrMsg('');
+
+      // indicator: if there are messages newer than last seen, mark the tab.
+      let newest = 0;
+      for (const it of items){
+        const t = Date.parse(it && it.ts ? String(it.ts) : '');
+        if (Number.isFinite(t) && t > newest) newest = t;
+      }
+      if (!bridgeLastSeenTs) bridgeLastSeenTs = newest;
+
+      // If bridge tab is visible, we consider everything seen.
+      const bridgeOpen = viewBridge && viewBridge.style.display !== 'none';
+      if (bridgeOpen) {
+        bridgeLastSeenTs = newest;
+        if (tabBridge) tabBridge.textContent = 'ClawdBridge';
+      } else {
+        if (newest > bridgeLastSeenTs) {
+          if (tabBridge) tabBridge.textContent = 'ClawdBridge • new';
+        }
+      }
+
     } catch (e) {
-      setBrMsg('Load failed: ' + String(e));
+      if (!silent) setBrMsg('Load failed: ' + String(e));
     }
   }
 

@@ -138,6 +138,7 @@
   const tabClawdwell = $('opsTabClawdwell');
   const tabBridge = $('opsTabBridge');
   const tabRes = $('opsTabRes');
+  const tabUpd = $('opsTabUpd');
   const tabMsg = $('opsTabMsg');
   const viewQ = $('opsTabQuestionnaire');
   const viewG = $('opsTabGateway');
@@ -146,6 +147,7 @@
   const viewClawdwell = $('opsTabClawdwellView');
   const viewBridge = $('opsTabBridgeView');
   const viewRes = $('opsTabResView');
+  const viewUpd = $('opsTabUpdView');
 
   function setTabMsg(t){ if (tabMsg) tabMsg.textContent = t || ''; }
   function showTab(which){
@@ -156,6 +158,7 @@
     if (viewClawdwell) viewClawdwell.style.display = (which === 'clawdwell') ? '' : 'none';
     if (viewBridge) viewBridge.style.display = (which === 'bridge') ? '' : 'none';
     if (viewRes) viewRes.style.display = (which === 'res') ? '' : 'none';
+    if (viewUpd) viewUpd.style.display = (which === 'upd') ? '' : 'none';
   }
 
   if (tabQ) tabQ.addEventListener('click', () => showTab('q'));
@@ -171,6 +174,10 @@
   if (tabRes) tabRes.addEventListener('click', () => {
     showTab('res');
     loadResources();
+  });
+  if (tabUpd) tabUpd.addEventListener('click', () => {
+    showTab('upd');
+    loadUpdates();
   });
 
   // default
@@ -341,6 +348,15 @@
   const resPre = $('resPre');
   const resAlerts = $('resAlerts');
 
+  // --- Updates ---
+  const updReload = $('updReload');
+  const updSave = $('updSave');
+  const updMsg = $('updMsg');
+  const updMode = $('updMode');
+  const updLevel = $('updLevel');
+  const updStatus = $('updStatus');
+  const updLatest = $('updLatest');
+
   const setResMsg = (t) => { try { if (resMsg) resMsg.textContent = t || ''; } catch {} };
 
   function fmtBytes(n){
@@ -397,6 +413,52 @@
   }
 
   if (resRefresh) resRefresh.addEventListener('click', loadResources);
+
+  async function loadUpdates(){
+    try { if (updMsg) updMsg.textContent = 'Loading…'; } catch {}
+    try {
+      const [cfgRes, relRes] = await Promise.all([
+        fetch('/api/ops/updates/config', { credentials:'include', cache:'no-store' }),
+        fetch('/api/repo/releases/latest', { credentials:'include', cache:'no-store' }),
+      ]);
+      const cfgJ = await cfgRes.json();
+      const relJ = await relRes.json();
+
+      if (cfgJ && cfgJ.ok && cfgJ.cfg) {
+        if (updMode) updMode.value = String(cfgJ.cfg.mode || 'notify');
+        if (updLevel) updLevel.value = String(cfgJ.cfg.maxLevel || 'patch');
+      }
+
+      if (updStatus) {
+        const local = relJ && relJ.ok && relJ.local ? String(relJ.local.build||'') : '';
+        const up = relJ && relJ.ok && relJ.latest ? String(relJ.latest.build||'') : '';
+        const lvl = relJ && relJ.ok && relJ.latest ? String(relJ.latest.level||'') : '';
+        updStatus.textContent = (up && local && up !== local) ? ('Update available: ' + up + (lvl ? (' ('+lvl+')') : '')) : ('Up to date (' + (local||'?') + ')');
+      }
+      if (updLatest) updLatest.textContent = (relJ && relJ.ok) ? JSON.stringify(relJ.latest || {}, null, 2) : ('(feed unavailable)');
+
+      if (updMsg) updMsg.textContent = '';
+    } catch (e) {
+      if (updMsg) updMsg.textContent = 'Load failed: ' + String(e);
+    }
+  }
+
+  async function saveUpdates(){
+    try { if (updMsg) updMsg.textContent = 'Saving…'; } catch {}
+    try {
+      const body = { cfg: { mode: updMode ? updMode.value : 'notify', maxLevel: updLevel ? updLevel.value : 'patch' } };
+      const res = await fetch('/api/ops/updates/config', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(body) });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      if (updMsg) updMsg.textContent = 'Saved.';
+      setTimeout(() => { try { if (updMsg) updMsg.textContent = ''; } catch {} }, 900);
+    } catch (e) {
+      if (updMsg) updMsg.textContent = 'Save failed: ' + String(e);
+    }
+  }
+
+  if (updReload) updReload.addEventListener('click', loadUpdates);
+  if (updSave) updSave.addEventListener('click', saveUpdates);
 
   // --- Brand / assistant name ---
   const bName = $('brandAssistantName');

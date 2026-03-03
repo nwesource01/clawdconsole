@@ -2274,6 +2274,40 @@ app.get('/api/ops/resources', (req, res) => {
   }
 });
 
+const UPDATES_CFG_FILE = path.join(DATA_DIR, 'update-config.json');
+function readUpdatesCfg(){
+  const fb = { mode:'notify', maxLevel:'patch', updatedAt:null };
+  const j = readJson(UPDATES_CFG_FILE, fb);
+  if (!j || typeof j !== 'object') return fb;
+  const mode = ['manual','notify','auto'].includes(String(j.mode)) ? String(j.mode) : 'notify';
+  const maxLevel = ['patch','minor','major'].includes(String(j.maxLevel)) ? String(j.maxLevel) : 'patch';
+  return { mode, maxLevel, updatedAt: j.updatedAt || null };
+}
+function writeUpdatesCfg(cfg){
+  const cur = readUpdatesCfg();
+  const mode = ['manual','notify','auto'].includes(String(cfg?.mode)) ? String(cfg.mode) : cur.mode;
+  const maxLevel = ['patch','minor','major'].includes(String(cfg?.maxLevel)) ? String(cfg.maxLevel) : cur.maxLevel;
+  const out = { mode, maxLevel, updatedAt: new Date().toISOString() };
+  writeJson(UPDATES_CFG_FILE, out);
+  return out;
+}
+
+app.get('/api/ops/updates/config', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try { return res.json({ ok:true, cfg: readUpdatesCfg() }); }
+  catch (e) { return res.status(500).json({ ok:false, error: String(e) }); }
+});
+app.post('/api/ops/updates/config', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const saved = writeUpdatesCfg(req.body?.cfg || {});
+    logWork('ops.updates.saved', saved);
+    return res.json({ ok:true, cfg: saved });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 app.get('/api/ops/repeated-questions', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
@@ -3461,6 +3495,7 @@ function renderModulePage(key){
           <button class="pill" id="opsTabClawdwell" type="button">Clawdwell</button>
           <button class="pill" id="opsTabBridge" type="button">ClawdBridge</button>
           <button class="pill" id="opsTabRes" type="button">Resources</button>
+          <button class="pill" id="opsTabUpd" type="button">Updates</button>
           <span class="muted" id="opsTabMsg"></span>
         </div>
 
@@ -3651,6 +3686,50 @@ function renderModulePage(key){
             </div>
           </div>
         </div><!-- /opsTabResView -->
+
+        <div id="opsTabUpdView" style="display:none;">
+          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+            <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+              <div>
+                <div style="font-weight:900;">Updates</div>
+                <div class="muted" style="margin-top:4px;">Choose update mode + channel. Auto-update will be gated on snapshots (next step).</div>
+              </div>
+              <div class="row" style="gap:10px; flex-wrap:wrap;">
+                <button class="pill" id="updReload" type="button">Reload</button>
+                <button class="pill" id="updSave" type="button">Save</button>
+                <span class="muted" id="updMsg"></span>
+              </div>
+            </div>
+
+            <div class="twoCol" style="margin-top:12px;">
+              <div>
+                <div style="font-weight:900; margin-bottom:8px;">Settings</div>
+                <div class="field">
+                  <label>Mode</label>
+                  <select id="updMode">
+                    <option value="manual">Manual</option>
+                    <option value="notify">Notify only</option>
+                    <option value="auto">Auto (requires snapshot support)</option>
+                  </select>
+                </div>
+                <div class="field" style="margin-top:10px;">
+                  <label>Max level</label>
+                  <select id="updLevel">
+                    <option value="patch">Patch</option>
+                    <option value="minor">Minor</option>
+                    <option value="major">Major</option>
+                  </select>
+                </div>
+                <div class="muted" style="margin-top:10px;">Upstream feed: <code>https://clawdconsole.com/releases/latest.json</code></div>
+              </div>
+              <div>
+                <div style="font-weight:900; margin-bottom:8px;">Status</div>
+                <div id="updStatus" class="muted">Loading…</div>
+                <pre id="updLatest" style="white-space:pre-wrap; word-break:break-word; margin:10px 0 0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.12); max-height: 40vh; overflow:auto;"></pre>
+              </div>
+            </div>
+          </div>
+        </div><!-- /opsTabUpdView -->
 
       </div>
       <script src="/static/ops.js"></script>

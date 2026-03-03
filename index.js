@@ -1934,7 +1934,56 @@ app.post('/api/ops/brand', (req, res) => {
   }
 });
 
-// Clawdwell first-run notes (file-backed; safe from git pulls)
+// --- Bridge notes (bidirectional, token-gated) ---
+// Use this to let Clawdwell post diffs/results and let Clawdio reply, without email.
+// Stored in DATA_DIR so it survives code updates.
+const BRIDGE_TOKEN = String(process.env.BRIDGE_TOKEN || '').trim();
+function bridgeOk(req){
+  if (!BRIDGE_TOKEN) return false;
+  const t = String(req.headers['x-clawd-bridge-token'] || '').trim();
+  return t && t === BRIDGE_TOKEN;
+}
+
+function readTextFile(fp){
+  try { return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : ''; } catch { return ''; }
+}
+function writeTextFile(fp, txt){
+  fs.mkdirSync(path.dirname(fp), { recursive:true });
+  fs.writeFileSync(fp, String(txt || ''), 'utf8');
+}
+
+const BRIDGE_INBOX_FILE = path.join(DATA_DIR, 'bridge-inbox.md');
+const BRIDGE_OUTBOX_FILE = path.join(DATA_DIR, 'bridge-outbox.md');
+
+app.get('/api/ops/bridge/inbox', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!bridgeOk(req)) return res.status(403).json({ ok:false, error:'forbidden' });
+  return res.json({ ok:true, path: BRIDGE_INBOX_FILE, text: readTextFile(BRIDGE_INBOX_FILE) });
+});
+app.post('/api/ops/bridge/inbox', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!bridgeOk(req)) return res.status(403).json({ ok:false, error:'forbidden' });
+  const text = String(req.body?.text || '');
+  writeTextFile(BRIDGE_INBOX_FILE, text);
+  logWork('ops.bridge.inbox.saved', { bytes: Buffer.byteLength(text,'utf8') });
+  return res.json({ ok:true, path: BRIDGE_INBOX_FILE });
+});
+
+app.get('/api/ops/bridge/outbox', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!bridgeOk(req)) return res.status(403).json({ ok:false, error:'forbidden' });
+  return res.json({ ok:true, path: BRIDGE_OUTBOX_FILE, text: readTextFile(BRIDGE_OUTBOX_FILE) });
+});
+app.post('/api/ops/bridge/outbox', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!bridgeOk(req)) return res.status(403).json({ ok:false, error:'forbidden' });
+  const text = String(req.body?.text || '');
+  writeTextFile(BRIDGE_OUTBOX_FILE, text);
+  logWork('ops.bridge.outbox.saved', { bytes: Buffer.byteLength(text,'utf8') });
+  return res.json({ ok:true, path: BRIDGE_OUTBOX_FILE });
+});
+
+// Backwards-compat: keep the single clawdwell-notes endpoint around (UI uses it), file-backed.
 const CLAWDWELL_NOTES_FILE = path.join(DATA_DIR, 'clawdwell-notes.md');
 app.get('/api/ops/clawdwell-notes', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');

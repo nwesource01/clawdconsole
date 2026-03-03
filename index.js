@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-02.59';
+const BUILD = '2026-03-03.70';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -227,8 +227,79 @@ function readLastJsonl(filePath, limit = 50) {
 
 const app = express();
 
-// --- ClawdCode root (restrict file browsing to this repo subtree) ---
-const CODE_ROOT = path.resolve(__dirname);
+// --- ClawdCode workspaces (file-backed) ---
+const CODE_WS_ROOT = '/home/master/clawd/code/workspaces';
+const CODE_WS_FILE = path.join(DATA_DIR, 'code-workspaces.json');
+
+function slugifyWsTitle(s){
+  return String(s||'')
+    .trim()
+    .replace(/\s+/g,'-')
+    .replace(/[^a-zA-Z0-9._-]/g,'')
+    .slice(0, 60) || 'workspace';
+}
+
+function loadCodeWs(){
+  try {
+    if (!fs.existsSync(CODE_WS_FILE)) throw new Error('missing');
+    const j = JSON.parse(fs.readFileSync(CODE_WS_FILE, 'utf8'));
+    if (!j || !Array.isArray(j.workspaces)) throw new Error('bad');
+    return j;
+  } catch {
+    // seed
+    const seeded = {
+      workspaces: [
+        { id:'console', title:'Console', root: path.resolve(__dirname), git: null },
+      ],
+    };
+    try {
+      fs.mkdirSync(path.dirname(CODE_WS_FILE), { recursive:true });
+      fs.writeFileSync(CODE_WS_FILE, JSON.stringify(seeded, null, 2), 'utf8');
+    } catch {}
+    return seeded;
+  }
+}
+
+function saveCodeWs(state){
+  const next = {
+    workspaces: Array.isArray(state && state.workspaces) ? state.workspaces : [],
+    updatedAt: new Date().toISOString(),
+  };
+  fs.mkdirSync(path.dirname(CODE_WS_FILE), { recursive:true });
+  fs.writeFileSync(CODE_WS_FILE, JSON.stringify(next, null, 2), 'utf8');
+  return next;
+}
+
+function listCodeWorkspaces(){
+  const st = loadCodeWs();
+  const wss = Array.isArray(st.workspaces) ? st.workspaces : [];
+  // hide duplicates + invalid
+  const seen = new Set();
+  const out = [];
+  for (const w of wss){
+    if (!w || !w.id || !w.root) continue;
+    if (seen.has(w.id)) continue;
+    seen.add(w.id);
+    out.push({
+      id: String(w.id),
+      title: String(w.title || w.id),
+      root: String(w.root),
+      git: w.git ? { remote: String(w.git.remote||''), branch: String(w.git.branch||'') } : null,
+    });
+  }
+  return out;
+}
+
+function defaultCodeWsId(){ return 'console'; }
+
+function currentCodeWorkspace(req){
+  const sess = getSessionFromReq(req);
+  const want = String(sess && sess.codeWorkspace || '').trim() || defaultCodeWsId();
+  const wss = listCodeWorkspaces();
+  const ws = wss.find(w => w && w.id === want) || wss.find(w => w && w.id === 'console') || wss[0];
+  return ws || { id:'console', title:'Console', root: path.resolve(__dirname), git:null };
+}
+
 app.disable('x-powered-by');
 app.use(helmet({
   contentSecurityPolicy: false, // keep it simple for now
@@ -251,7 +322,8 @@ app.use((req, res, next) => {
   const cookies = parseCookies(req);
   const tok = cookies[SESS_COOKIE];
   if (tok) {
-    const exp = sessions.get(tok);
+    const sess = sessions.get(tok);
+    const exp = (sess && typeof sess === 'object') ? sess.exp : sess;
     if (exp && exp > Date.now()) {
       return next();
     }
@@ -270,13 +342,76 @@ app.use((req, res, next) => {
 
   // set session cookie so fetch() works without Authorization header
   const token = newToken();
-  sessions.set(token, Date.now() + SESS_TTL_MS);
+  sessions.set(token, { exp: Date.now() + SESS_TTL_MS, unlocks: {} });
   res.setHeader('Set-Cookie', `${SESS_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${Math.floor(SESS_TTL_MS/1000)}; HttpOnly; Secure; SameSite=Strict`);
 
   return next();
 });
 
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+
+// --- Preview proxy (server-side): /proxy/<port>/<path> -> http://127.0.0.1:<port>/<path>
+const PREVIEW_PORTS = new Set([5000, 5001]);
+app.use('/proxy/:port', (req, res) => {
+  try {
+    const port = Number(req.params.port || 0);
+    if (!PREVIEW_PORTS.has(port)) return res.status(400).type('text/plain').send('bad port');
+
+    // preserve full path after /proxy/:port
+    const basePrefix = '/proxy/' + String(port);
+    const rest = String(req.originalUrl || '').startsWith(basePrefix) ? String(req.originalUrl).slice(basePrefix.length) : (req.url || '');
+    const pathPart = rest && rest.startsWith('/') ? rest : ('/' + String(rest || ''));
+
+    const target = 'http://127.0.0.1:' + String(port) + pathPart;
+    const u = new URL(target);
+
+    const mod = (u.protocol === 'https:') ? require('https') : require('http');
+
+    const headers = { ...req.headers };
+    headers.host = u.host;
+    delete headers['content-length'];
+
+    const pr = mod.request({
+      protocol: u.protocol,
+      hostname: u.hostname,
+      port: u.port,
+      method: req.method,
+      path: u.pathname + u.search,
+      headers,
+    }, (pres) => {
+      res.statusCode = pres.statusCode || 502;
+
+      // rewrite Location headers back through the proxy
+      const loc = pres.headers && pres.headers.location;
+      if (loc) {
+        try {
+          const locUrl = new URL(loc, u.toString());
+          if (locUrl.hostname === '127.0.0.1' && String(locUrl.port) === String(port)) {
+            res.setHeader('Location', basePrefix + locUrl.pathname + locUrl.search);
+            delete pres.headers.location;
+          }
+        } catch {}
+      }
+
+      for (const [k,v] of Object.entries(pres.headers || {})) {
+        if (!k) continue;
+        if (k.toLowerCase() === 'content-security-policy') continue;
+        try { if (v != null) res.setHeader(k, v); } catch {}
+      }
+
+      pres.pipe(res);
+    });
+
+    pr.on('error', (e) => {
+      res.status(502).type('text/plain').send('proxy error: ' + String(e));
+    });
+
+    if (req.method === 'GET' || req.method === 'HEAD') pr.end();
+    else req.pipe(pr);
+  } catch (e) {
+    res.status(500).type('text/plain').send('proxy exception: ' + String(e));
+  }
+});
 
 // --- ClawdName (domain availability v0: DNS heuristics) ---
 const DOMAIN_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -1184,19 +1319,70 @@ app.post('/api/build/templates/delete', (req, res) => {
   res.json({ ok:true, updatedAt: saved.updatedAt, templates: saved.templates });
 });
 
-// --- ClawdCode (browse + edit files under CODE_ROOT) ---
-function safeCodePath(rel){
+// --- ClawdCode (browse + edit files under selected workspace root) ---
+function safeCodePath(rootAbs, rel){
+  const base = path.resolve(String(rootAbs || ''));
   const r = String(rel || '').replace(/\\/g, '/');
   const clean = r.replace(/^\/+/, '');
-  const abs = path.resolve(CODE_ROOT, clean);
-  if (!abs.startsWith(CODE_ROOT + path.sep) && abs !== CODE_ROOT) return null;
+  const abs = path.resolve(base, clean);
+  if (!abs.startsWith(base + path.sep) && abs !== base) return null;
   return abs;
+}
+
+function codeModeFor(rel, abs){
+  const p = String(rel || '').replace(/\\/g,'/');
+  const base = path.basename(abs || p);
+
+  // default
+  let mode = 'rw';
+
+  // protect common secret-bearing files (visible in tree, but blocked from open unless break-glass)
+  const secretNames = [
+    '.env', '.env.local', '.env.development', '.env.production',
+    '.npmrc', '.netrc',
+    'id_rsa', 'id_ed25519',
+    'auth-profiles.json',
+  ];
+
+  const secretExts = ['.pem','.key','.p12','.pfx','.kdbx'];
+
+  if (secretNames.includes(base)) mode = 'list';
+  if (base.startsWith('.env.')) mode = 'list';
+  if (secretExts.some(x => base.toLowerCase().endsWith(x))) mode = 'list';
+
+  // never show these even in tree if they exist under repo (rare)
+  if (p.replace(/\/+$/,'') === '.git' || p.startsWith('.git/')) mode = 'deny';
+
+  return mode;
+}
+
+function getSessionFromReq(req){
+  const cookies = parseCookies(req);
+  const tok = cookies[SESS_COOKIE];
+  if (!tok) return null;
+  const sess = sessions.get(tok);
+  if (!sess) return null;
+  if (typeof sess === 'object') return sess;
+  // legacy sessions map value
+  return { exp: sess, unlocks: {} };
+}
+
+function hasBreakglass(req, wsId, rel, wantWrite){
+  const sess = getSessionFromReq(req);
+  if (!sess || !sess.unlocks) return false;
+  const k = String(wsId || '') + ':' + String(rel||'');
+  const u = sess.unlocks[k];
+  if (!u) return false;
+  if (Number(u.until || 0) < Date.now()) return false;
+  if (wantWrite && !u.write) return false;
+  return true;
 }
 
 app.get('/api/code/tree', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
+  const ws = currentCodeWorkspace(req);
   const rel = String(req.query.path || '').trim();
-  const abs = safeCodePath(rel);
+  const abs = safeCodePath(ws.root, rel);
   if (!abs) return res.status(400).json({ ok:false, error:'bad_path' });
 
   try {
@@ -1204,22 +1390,25 @@ app.get('/api/code/tree', (req, res) => {
     if (!st.isDirectory()) return res.status(400).json({ ok:false, error:'not_dir' });
     const names = fs.readdirSync(abs);
     const items = names
-      .filter(n => n && !n.startsWith('.'))
+      .filter(n => !!n)
       .map(n => {
         const p = path.join(abs, n);
         let s; try { s = fs.statSync(p); } catch { s = null; }
         const isDir = !!(s && s.isDirectory());
+        const relp = path.relative(ws.root, p).replace(/\\/g,'/');
+        const mode = isDir ? 'rw' : codeModeFor(relp, p);
         return {
           name: n,
           type: isDir ? 'dir' : 'file',
-          path: path.relative(CODE_ROOT, p).replace(/\\/g,'/'),
+          path: relp,
+          mode,
           size: s && !isDir ? s.size : null,
           mtime: s ? new Date(s.mtimeMs).toISOString() : null,
         };
       })
       .sort((a,b) => (a.type === b.type) ? a.name.localeCompare(b.name) : (a.type === 'dir' ? -1 : 1));
 
-    res.json({ ok:true, root: CODE_ROOT, path: path.relative(CODE_ROOT, abs).replace(/\\/g,'/'), items });
+    res.json({ ok:true, workspace: { id: ws.id, title: ws.title, root: ws.root }, path: path.relative(ws.root, abs).replace(/\\/g,'/'), items });
   } catch (e) {
     res.status(500).json({ ok:false, error: String(e) });
   }
@@ -1227,18 +1416,38 @@ app.get('/api/code/tree', (req, res) => {
 
 app.get('/api/code/file', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
+  const ws = currentCodeWorkspace(req);
   const rel = String(req.query.path || '').trim();
-  const abs = safeCodePath(rel);
+  const abs = safeCodePath(ws.root, rel);
   if (!abs) return res.status(400).json({ ok:false, error:'bad_path' });
 
   try {
     const st = fs.statSync(abs);
     if (!st.isFile()) return res.status(400).json({ ok:false, error:'not_file' });
+
+    const relp = path.relative(ws.root, abs).replace(/\\/g,'/');
+    const mode = codeModeFor(relp, abs);
+
+    if (mode === 'deny') return res.status(404).json({ ok:false, error:'not_found' });
+
+    // list-mode: visible, but not renderable unless break-glass
+    if (mode === 'list' && !hasBreakglass(req, ws.id, relp, false)) {
+      return res.status(403).json({
+        ok:false,
+        error:'blocked',
+        mode,
+        path: relp,
+        size: st.size,
+        mtime: new Date(st.mtimeMs).toISOString(),
+        why: 'This file is protected and cannot be displayed in the browser UI without break-glass.'
+      });
+    }
+
     if (st.size > 1024*1024) return res.status(413).json({ ok:false, error:'file_too_large' });
     const buf = fs.readFileSync(abs);
     if (buf.includes(0)) return res.status(415).json({ ok:false, error:'binary_file' });
     const text = buf.toString('utf8');
-    res.json({ ok:true, path: path.relative(CODE_ROOT, abs).replace(/\\/g,'/'), size: st.size, mtime: new Date(st.mtimeMs).toISOString(), text });
+    res.json({ ok:true, mode, path: relp, size: st.size, mtime: new Date(st.mtimeMs).toISOString(), text });
   } catch (e) {
     res.status(500).json({ ok:false, error: String(e) });
   }
@@ -1246,19 +1455,219 @@ app.get('/api/code/file', (req, res) => {
 
 app.post('/api/code/file', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
+  const ws = currentCodeWorkspace(req);
   const rel = String(req.body?.path || '').trim();
   const text = String(req.body?.text ?? '');
-  const abs = safeCodePath(rel);
+  const abs = safeCodePath(ws.root, rel);
   if (!abs) return res.status(400).json({ ok:false, error:'bad_path' });
   if (Buffer.byteLength(text, 'utf8') > 1024*1024) return res.status(413).json({ ok:false, error:'payload_too_large' });
 
   try {
     const st = fs.existsSync(abs) ? fs.statSync(abs) : null;
     if (st && !st.isFile()) return res.status(400).json({ ok:false, error:'not_file' });
+
+    const relp = path.relative(ws.root, abs).replace(/\\/g,'/');
+    const mode = codeModeFor(relp, abs);
+    if (mode === 'deny') return res.status(404).json({ ok:false, error:'not_found' });
+
+    if (mode === 'list' && !hasBreakglass(req, ws.id, relp, true)) {
+      return res.status(403).json({ ok:false, error:'blocked_write', mode, path: relp, why:'Protected file; use break-glass or edit locally.' });
+    }
+
     fs.writeFileSync(abs, text, 'utf8');
     const st2 = fs.statSync(abs);
-    logWork('code.file.saved', { path: path.relative(CODE_ROOT, abs).replace(/\\/g,'/'), bytes: Buffer.byteLength(text,'utf8') });
-    res.json({ ok:true, size: st2.size, mtime: new Date(st2.mtimeMs).toISOString() });
+    logWork('code.file.saved', { path: relp, bytes: Buffer.byteLength(text,'utf8') });
+    res.json({ ok:true, mode, size: st2.size, mtime: new Date(st2.mtimeMs).toISOString() });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.get('/api/code/workspaces', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ws = currentCodeWorkspace(req);
+  const workspaces = listCodeWorkspaces();
+  res.json({ ok:true, workspaces, current: ws.id });
+});
+
+app.post('/api/code/workspace', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const id = String(req.body?.id || '').trim();
+  const workspaces = listCodeWorkspaces();
+  const ws = workspaces.find(w => w && w.id === id);
+  if (!ws) return res.status(400).json({ ok:false, error:'bad_workspace' });
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  sess.codeWorkspace = ws.id;
+  logWork('code.workspace.set', { workspace: ws.id });
+  res.json({ ok:true, current: ws.id });
+});
+
+app.post('/api/code/workspace/create', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+
+  const title = String(req.body?.title || '').trim().slice(0, 80);
+  if (!title) return res.status(400).json({ ok:false, error:'missing_title' });
+
+  const id = 'ws_' + crypto.randomBytes(6).toString('hex');
+  const slug = slugifyWsTitle(title);
+  const root = path.join(CODE_WS_ROOT, slug);
+
+  try {
+    fs.mkdirSync(root, { recursive:true });
+    const cur = loadCodeWs();
+    cur.workspaces = Array.isArray(cur.workspaces) ? cur.workspaces : [];
+    cur.workspaces.push({ id, title, root, git: null, createdAt: new Date().toISOString() });
+    saveCodeWs(cur);
+    sess.codeWorkspace = id;
+    logWork('code.workspace.created', { id, title, root });
+    res.json({ ok:true, workspace: { id, title, root, git:null }, current: id });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.post('/api/code/git/connect', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+
+  const wsId = String(req.body?.workspaceId || sess.codeWorkspace || '').trim();
+  const remoteUrl = String(req.body?.remoteUrl || '').trim();
+  const branch = String(req.body?.branch || '').trim();
+
+  if (!wsId) return res.status(400).json({ ok:false, error:'missing_workspace' });
+  if (!remoteUrl) return res.status(400).json({ ok:false, error:'missing_remote' });
+
+  // only github for now
+  if (!/^https:\/\/(www\.)?github\.com\//i.test(remoteUrl) && !/^git@github\.com:/i.test(remoteUrl)) {
+    return res.status(400).json({ ok:false, error:'only_github_supported' });
+  }
+
+  const token = String(process.env.CODE_GIT_TOKEN || process.env.GITHUB_TOKEN || '').trim();
+  if (!token) return res.status(400).json({ ok:false, error:'missing_token', hint:'Set CODE_GIT_TOKEN in /etc/clawdio-console.env' });
+
+  const wss = listCodeWorkspaces();
+  const ws = wss.find(w => w && w.id === wsId);
+  if (!ws) return res.status(400).json({ ok:false, error:'bad_workspace' });
+
+  try {
+    fs.mkdirSync(ws.root, { recursive:true });
+
+    // determine if directory is empty enough to clone
+    const names = fs.readdirSync(ws.root).filter(n => n && n !== '.DS_Store');
+    const hasGit = fs.existsSync(path.join(ws.root, '.git'));
+
+    const execFileSync = require('child_process').execFileSync;
+
+    function sanitize(u){
+      return String(u||'').replace(token, '***');
+    }
+
+    // Build clone URL with token (never store token)
+    let cloneUrl = remoteUrl;
+    if (/^git@github\.com:/i.test(remoteUrl)) {
+      // convert to https
+      const m = remoteUrl.match(/^git@github\.com:(.+?)(\.git)?$/i);
+      const pathPart = m ? m[1] : '';
+      cloneUrl = 'https://github.com/' + pathPart + '.git';
+    }
+    if (/^https:\/\//i.test(cloneUrl)) {
+      cloneUrl = cloneUrl.replace(/^https:\/\//i, 'https://x-access-token:' + encodeURIComponent(token) + '@');
+    }
+
+    if (!hasGit) {
+      if (names.length) return res.status(409).json({ ok:false, error:'workspace_not_empty' });
+      execFileSync('git', ['clone', cloneUrl, '.'], { cwd: ws.root, stdio:'pipe' });
+    } else {
+      // repo exists: ensure origin remote set
+      try { execFileSync('git', ['remote','remove','origin'], { cwd: ws.root, stdio:'pipe' }); } catch {}
+      execFileSync('git', ['remote','add','origin', remoteUrl], { cwd: ws.root, stdio:'pipe' });
+      execFileSync('git', ['fetch','--all','--prune'], { cwd: ws.root, stdio:'pipe' });
+    }
+
+    if (branch) {
+      try { execFileSync('git', ['checkout', branch], { cwd: ws.root, stdio:'pipe' }); } catch {
+        execFileSync('git', ['checkout','-b', branch, 'origin/' + branch], { cwd: ws.root, stdio:'pipe' });
+      }
+    }
+
+    // persist mapping (no token)
+    const cur = loadCodeWs();
+    cur.workspaces = Array.isArray(cur.workspaces) ? cur.workspaces : [];
+    const i = cur.workspaces.findIndex(w => w && w.id === wsId);
+    if (i >= 0) {
+      cur.workspaces[i].git = { remote: remoteUrl, branch: branch || '' };
+      cur.workspaces[i].updatedAt = new Date().toISOString();
+    }
+    saveCodeWs(cur);
+
+    logWork('code.git.connected', { workspace: wsId, remote: remoteUrl, branch: branch || '' });
+    res.json({ ok:true });
+  } catch (e) {
+    logWork('code.git.connect.error', { workspace: wsId, error: String(e) });
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.post('/api/code/git/disconnect', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  const wsId = String(req.body?.workspaceId || sess.codeWorkspace || '').trim();
+  if (!wsId) return res.status(400).json({ ok:false, error:'missing_workspace' });
+
+  try {
+    const cur = loadCodeWs();
+    cur.workspaces = Array.isArray(cur.workspaces) ? cur.workspaces : [];
+    const i = cur.workspaces.findIndex(w => w && w.id === wsId);
+    if (i >= 0) {
+      cur.workspaces[i].git = null;
+      cur.workspaces[i].updatedAt = new Date().toISOString();
+    }
+    saveCodeWs(cur);
+    logWork('code.git.disconnected', { workspace: wsId });
+    res.json({ ok:true });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.post('/api/code/breakglass', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const pass = String(req.body?.pass || '');
+  const rel = String(req.body?.path || '').trim();
+  const write = !!req.body?.write;
+  const mins = Math.max(1, Math.min(60, Number(req.body?.minutes || 10)));
+
+  const BG_PASS = String(process.env.CODE_BREAKGLASS_PASS || '').trim();
+  if (!BG_PASS) return res.status(400).json({ ok:false, error:'breakglass_disabled' });
+  if (!pass || pass !== BG_PASS) return res.status(403).json({ ok:false, error:'bad_pass' });
+
+  const ws = currentCodeWorkspace(req);
+  const abs = safeCodePath(ws.root, rel);
+  if (!abs) return res.status(400).json({ ok:false, error:'bad_path' });
+
+  try {
+    const st = fs.statSync(abs);
+    if (!st.isFile()) return res.status(400).json({ ok:false, error:'not_file' });
+
+    const relp = path.relative(ws.root, abs).replace(/\\/g,'/');
+    const mode = codeModeFor(relp, abs);
+    if (mode !== 'list') return res.json({ ok:true, path: relp, mode, note:'not_protected' });
+
+    const sess = getSessionFromReq(req);
+    if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+    sess.unlocks = sess.unlocks || {};
+
+    const until = Date.now() + (mins * 60 * 1000);
+    const k = ws.id + ':' + relp;
+    sess.unlocks[k] = { until, write: write ? true : false };
+
+    logWork('code.breakglass', { workspace: ws.id, path: relp, minutes: mins, write: !!write });
+    res.json({ ok:true, workspace: ws.id, path: relp, mode, until: new Date(until).toISOString(), write: !!write });
   } catch (e) {
     res.status(500).json({ ok:false, error: String(e) });
   }
@@ -1805,13 +2214,27 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
     :root{ --bg:#0b1020; --text:#e8eefc; --muted: rgba(232,238,252,.68); --border: rgba(255,255,255,0.10); --card: rgba(255,255,255,0.04); --card2: rgba(0,0,0,0.14); --accent:#22c6c6; }
     body{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--bg); color: var(--text); margin:0; }
     a{ color:#9ad0ff; }
-    .wrap{ max-width: 1400px; margin:0 auto; padding: 18px; }
+    .wrap{ width:100%; max-width: 1400px; margin:0 auto; padding: 18px; }
+    body[data-wide="1"] .wrap{ max-width:none; padding: 10px 12px 26px 12px; height: 100vh; box-sizing:border-box; display:flex; flex-direction:column; overflow:hidden; }
+    body[data-wide="1"]{ height:100vh; overflow:hidden; }
+    body[data-wide="1"] .subcard{ padding: 10px 12px; }
+    body[data-wide="1"] .footer{ display:none; }
 
     /* Title row: left title, right app menu (aligned to container edge) */
-    .top{ display:grid; grid-template-columns: auto 1fr; gap: 12px; align-items:baseline; }
+    .top{ display:grid; grid-template-columns: auto 1fr; gap: 12px; align-items:flex-start; }
     @media (max-width: 980px){ .top{ grid-template-columns: 1fr; } }
-    .topL{ min-width: 240px; }
-    .topC{ display:flex; justify-content:flex-end; justify-self:end; width:100%; }
+    .topL{ min-width: 240px; display:flex; flex-direction:column; gap:6px; min-width:0; }
+    .topC{ display:flex; justify-content:flex-end; justify-self:end; width:100%; min-width:0; max-width:100%; flex-wrap:wrap; gap:10px; overflow:visible; }
+
+    /* Header workspace selector: use the "empty space" between title and menu.
+       Keep it closer to the title (not centered), and wrap under the title when narrow. */
+    .hdrRow{ display:flex; gap:10px; align-items:center; min-width:0; flex-wrap:wrap; }
+    .hdrRow .hdrTitle{ flex:0 1 auto; min-width: 240px; }
+    .hdrWs{ display:flex; gap:8px; align-items:center; justify-content:flex-start; flex: 0 1 auto; margin-left: clamp(50px, 6vw, 240px); }
+    .hdrWs .muted{ font-size:12px; }
+    .hdrWsSel{ padding:6px 8px; height: 34px; width: 200px; max-width: 220px; }
+    body[data-wide="1"] .top{ grid-template-columns: auto 1fr; }
+    body[data-wide="1"] .topC{ justify-content:flex-end; margin-top: 0; min-width:0; }
 
     h1{ margin:0; font-size: 22px; }
     .muted{ color: var(--muted); font-size: 12px; }
@@ -1832,12 +2255,27 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
     input, textarea, select{ background:#0d1426; border:1px solid rgba(255,255,255,0.14); color: var(--text); border-radius: 12px; padding: 10px 12px; font-size: 14px; font-family: inherit; }
   </style>
 </head>
-<body>
+<body data-wide="${(activePath === '/apps/code') ? '1' : '0'}">
   <div class="wrap">
     <div class="top">
       <div class="topL">
-        <h1>${title}</h1>
-        <div class="muted" style="margin-top:6px;">${subtitle || ''}</div>
+        ${(activePath === '/apps/code') ? (`<div class=\"hdrRow\">
+          <div class=\"hdrTitle\">
+            <h1 style=\"margin:0;\">${title} <span class=\"muted\" style=\"font-weight:700; font-size:12px; color: rgba(232,238,252,.48);\">build ${BUILD}</span></h1>
+          </div>
+          <div class=\"hdrWs\">
+            <span class=\"muted\" style=\"font-size:12px;\">Workspace</span>
+            <select id=\"hdrWsSel\" class=\"hdrWsSel\"></select>
+            <button class=\"pill\" id=\"hdrWsAdd\" type=\"button\">Add</button>
+          </div>
+          <div class=\"hdrWs\" style=\"margin-left: clamp(50px, 6vw, 240px);\">
+            <span class=\"muted\" style=\"font-size:12px;\">Git</span>
+            <select id=\"hdrGitSel\" class=\"hdrWsSel\"><option value=\"\">None</option></select>
+            <button class=\"pill\" id=\"hdrGitConnect\" type=\"button\">Connect</button>
+            <button class=\"pill\" id=\"hdrGitDisc\" type=\"button\">Disconnect</button>
+          </div>
+        </div>`) : (`<h1>${title}</h1>`)}
+        <div class="muted" style="margin-top:4px;">${subtitle || ''}</div>
       </div>
       <div class="topC">${appsMenuHtml(activePath || '')}</div>
     </div>
@@ -1946,31 +2384,239 @@ function renderModulePage(key){
         </div>
       </div>
     ` },
-    code: { title:'ClawdCode', subtitle:'Browse + edit files (scoped to the Console project).', body:`
-      <div class="subcard" style="line-height:1.55;">
-        <div class="muted">Root: <code>${CODE_ROOT}</code></div>
+    code: { title:'ClawdCode', subtitle:'Ultrawide IDE cockpit: workspace + file/app previews + chat + operator stack.', body:`
+      <div style="line-height:1.55; display:flex; flex-direction:column; flex:1; min-height:0; padding-bottom: 12px; box-sizing:border-box;">
+        <style>
+          /* local-only layout helpers */
+          .ccIde {
+            /* Independent columns; only App Preview is flexible.
+               Use minmax(min, max) so we NEVER lose the last column on smaller viewports/zoom. */
+            --wsMax: clamp(140px, 16vw, 280px);
+            --fileMax: clamp(200px, 26vw, 520px);
+            --chatMax: clamp(200px, 20vw, 360px);
+            --opMax: clamp(200px, 20vw, 360px);
+
+            --wsCol: minmax(88px, var(--wsMax));
+            --fileCol: minmax(140px, var(--fileMax));
+            --chatCol: minmax(88px, var(--chatMax));
+            --opCol: minmax(88px, var(--opMax));
+
+            display:grid;
+            grid-template-columns:
+              var(--wsCol)
+              var(--fileCol)
+              minmax(0, 1fr)
+              var(--chatCol)
+              var(--opCol);
+            gap:12px;
+            align-items:stretch;
+            width:100%;
+            flex: 1;
+            min-height: 0;
+            height: auto;
+            box-sizing:border-box;
+            overflow: visible; /* let card borders render; wrapper controls overflow */
+          }
+
+          @media (max-width: 1600px){
+            .ccIde{ --fileMax: clamp(180px, 24vw, 440px); --chatMax: clamp(180px, 18vw, 320px); --opMax: clamp(180px, 18vw, 320px); }
+          }
+          .ccIde.exp-file { --fileW: minmax(900px, 1.6fr); }
+          .ccIde.exp-app { --fileW: 360px; }
+          /* app column is always the flexible one (1fr) */
+          .ccIde.c-ws { --wsMax: 92px; --wsCol: fit-content(92px); }
+          .ccIde.c-file { --fileMax: 160px; --fileCol: fit-content(180px); }
+
+          .ccIde.work-expanded #worklog{ max-height: 56vh; }
+          .ccIde.work-expanded #opListCard{ max-height: 32vh; }
+
+          .ccIde.c-chat { --chatMax: 92px; --chatCol: fit-content(140px); }
+          .ccIde.c-op { --opMax: 92px; --opCol: fit-content(160px); }
+
+          .ccIde.c-ws #codeTree{ display:none; }
+          .ccIde.c-ws #codeCwd{ display:none; }
+          .ccIde.c-ws #wsSel, .ccIde.c-ws #codeUp{ display:none; }
+
+          .ccIde.c-file #codeEditor, .ccIde.c-file #codeBlocked, .ccIde.c-file #codePath{ display:none; }
+          .ccIde.c-file #codeSave, .ccIde.c-file #codeReload, .ccIde.c-file #codeExpFile{ display:none; }
+
+          .ccIde.c-chat #chatLog, .ccIde.c-chat #chatInput, .ccIde.c-chat #chatSend, .ccIde.c-chat #chatJump{ display:none; }
+          /* Operator column collapse: hide body (both List + Work), keep header visible for restore */
+          .ccIde.c-op #opPanel .ccPanelBody{ display:none !important; }
+
+          /* ClawdWork collapse: hide log + shrink card to toolbar height */
+          .ccIde.work-hide #worklogWrap{ display:none; }
+          .ccIde.work-hide #opWorkCard{ flex: 0 0 auto !important; min-height: 0 !important; max-height: 90px; overflow:hidden; }
+          .ccIde.work-hide #opListCard{ flex: 1 1 auto; min-height: 240px; }
+
+          /* scrollbar styling */
+          .ccIde * { scrollbar-width: thin; scrollbar-color: rgba(232,238,252,.25) rgba(0,0,0,0.25); }
+          .ccIde *::-webkit-scrollbar{ width: 10px; height: 10px; }
+          .ccIde *::-webkit-scrollbar-thumb{ background: rgba(232,238,252,.18); border-radius: 10px; border: 2px solid rgba(0,0,0,0.35); }
+          .ccIde *::-webkit-scrollbar-track{ background: rgba(0,0,0,0.18); border-radius: 10px; }
+          .ccPanel { background: rgba(0,0,0,0.10); display:flex; flex-direction:column; min-height:0; height:100%; overflow:hidden; }
+          .ccPanelHead .pill{ padding:6px 8px; }
+          .ccChevron{ border:1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.03); color: rgba(232,238,252,.68); padding:4px 8px; border-radius:999px; font-weight:800; }
+          .ccPanelHead { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:nowrap; padding:10px 10px 0 10px; min-width:0; }
+          .ccGridHead{ display:grid; grid-template-columns: auto minmax(90px, 1fr) auto; align-items:center; gap:10px; min-width:0; overflow:hidden; }
+          .ccPanelHead.ccGridHead{ display:grid !important; justify-content:initial; }
+          .ccTitle{ font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+          /* keep workspace selector from eating the whole header */
+          #wsPanel #wsSel{ width: 120px; max-width: 120px; }
+          @media (max-width: 1200px){ #wsPanel #wsSel{ width: 104px; max-width: 104px; } }
+          #wsPanel .ccTitle{ min-width: 90px; }
+          /* Workspace header sizing */
+          .ccHeadRow{ display:flex; gap:8px; align-items:center; min-width:0; }
+          .ccHeadRow.left{ flex:1; }
+          .ccHeadRow.right{ justify-content:flex-end; flex:0 0 auto; }
+
+          /* when a column is collapsed, hide the title text to avoid vertical letter-stacking */
+          .ccIde.c-ws #wsPanel .ccTitle,
+          .ccIde.c-file #filePanel .ccTitle,
+          .ccIde.c-chat #chatPanel .ccTitle,
+          .ccIde.c-op #opPanel .ccTitle{ display:none !important; }
+          /* ensure titles are visible when not collapsed (guards against stale inline styles/extensions) */
+          #wsPanel .ccTitle, #filePanel .ccTitle, #chatPanel .ccTitle, #opPanel .ccTitle{ display:block; }
+
+          /* collapse should hide the entire panel body (inline styles require !important) */
+          .ccIde.c-ws #wsPanel .ccPanelBody{ display:none !important; }
+          .ccIde.c-file #filePanel .ccPanelBody{ display:none !important; }
+          .ccIde.c-chat #chatPanel .ccPanelBody{ display:none !important; }
+          .ccIde.c-op #opPanel .ccPanelBody{ display:none !important; }
+          .ccPanelBody { padding:10px; overflow:auto; min-height:0; }
+          .ccPanelBody.tight { padding:10px; overflow:hidden; min-height:0; }
+          .ccEditor { width:100%; max-width:100%; box-sizing:border-box; height:100%; min-height:0; flex:1; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
+          .ccSmall { font-size: 12px; }
+          .ccIframe { width:100%; height: 100%; min-height: 56vh; border:0; border-radius:12px; background:#0b1020; }
+          .ccMono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
+          .ccGrow { flex:1; min-height:0; }
+        </style>
+
         <div class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap; align-items:center;">
-          <button class="pill" id="codeUp" type="button">Up</button>
-          <button class="pill" id="codeSave" type="button">Save</button>
-          <button class="pill" id="codeReload" type="button">Reload</button>
           <span class="muted" id="codeMsg"></span>
         </div>
 
-        <div style="margin-top:12px; display:grid; grid-template-columns: 360px 1fr; gap:12px; align-items:stretch;">
-          <div class="card" style="background: rgba(0,0,0,0.10); overflow:auto; max-height: 75vh;">
-            <div style="font-weight:900; margin-bottom:8px;">Files</div>
-            <div id="codeTree"></div>
-          </div>
-          <div class="card" style="background: rgba(0,0,0,0.10); display:flex; flex-direction:column; gap:10px;">
-            <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
-              <div style="font-weight:900;">Editor</div>
-              <div class="muted" id="codePath" style="max-width: 70ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
+        <div class="ccIde" id="ccIde" style="margin-top:12px;">
+          <!-- 1) Workspace -->
+          <div class="card ccPanel" id="wsPanel">
+            <div class="ccPanelHead ccGridHead">
+              <button class="pill" id="wsToggle" type="button" title="Collapse Workspace">◀</button>
+              <div class="ccTitle">Workspace</div>
+              <div class="ccHeadRow right" style="justify-self:end;"></div>
             </div>
-            <textarea id="codeEditor" spellcheck="false" style="flex:1; min-height: 65vh; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></textarea>
+            <div class="ccPanelBody" style="padding-top:8px; display:flex; flex-direction:column; gap:8px;">
+              <div class="muted ccSmall" id="codeCwd"></div>
+              <div id="codeTree" style="flex:1; min-height:0;"></div>
+            </div>
+          </div>
+
+          <!-- 2) File Preview -->
+          <div class="card ccPanel" id="filePanel">
+            <div class="ccPanelHead">
+              <div class="ccHeadRow left">
+                <button class="pill" id="fileToggle" type="button" title="Collapse File Preview">◀</button>
+                <div class="ccTitle">File Preview</div>
+              </div>
+              <div class="ccHeadRow right">
+                <button class="pill" id="codeSave" type="button">Save</button>
+                <button class="pill" id="codeReload" type="button">Reload</button>
+                <button class="pill" id="codeExpFile" type="button">Expand</button>
+              </div>
+            </div>
+            <div class="ccPanelBody tight" style="display:flex; flex-direction:column; gap:10px; flex:1; min-height:0;">
+              <div class="muted ccSmall" id="codePath" style="max-width: 70ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
+              <div id="codeBlocked" style="display:none; border:1px solid rgba(255,255,255,0.12); border-radius:12px; padding:10px; background: rgba(255,255,255,0.03);"></div>
+              <textarea id="codeEditor" class="ccEditor" spellcheck="false" style="flex:1; min-height:0;"></textarea>
+            </div>
+          </div>
+
+          <!-- 3) App Preview -->
+          <div class="card ccPanel">
+            <div class="ccPanelHead">
+              <div style="font-weight:900;">App Preview</div>
+              <div class="row" style="gap:8px; align-items:center;">
+                <select id="appPreset" style="padding:8px 10px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text);">
+                  <option value="/proxy/5000/">localhost:5000 (server)</option>
+                  <option value="/proxy/5001/">localhost:5001 (server)</option>
+                </select>
+                <button class="pill" id="appOpen" type="button">Open</button>
+                <button class="pill" id="codeExpApp" type="button">Expand</button>
+              </div>
+            </div>
+            <div class="ccPanelBody" style="padding-top:8px;">
+              <div class="muted ccSmall">Server-side preview (proxied). This loads the app running on the Console host, not your laptop.</div>
+              <div class="row" style="margin-top:8px; gap:10px; align-items:center; flex-wrap:wrap;">
+                <input id="appUrl" class="ccMono" value="/proxy/5000/" style="flex:1; min-width: 260px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text);" />
+                <button class="pill" id="appGo" type="button">Go</button>
+                <span class="muted ccSmall" id="appMsg"></span>
+              </div>
+              <div style="margin-top:10px;">
+                <iframe id="appFrame" class="ccIframe" src="/proxy/5000/"></iframe>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4) Chat -->
+          <div class="card ccPanel" id="chatPanel">
+            <div class="ccPanelHead">
+              <div class="ccHeadRow left">
+                <button class="pill" id="chatToggle" type="button" title="Collapse Chat">▶</button>
+                <div class="ccTitle">Chat</div>
+              </div>
+              <div class="ccHeadRow right">
+                <div class="muted ccSmall" id="chatMsg"></div>
+              </div>
+            </div>
+            <div class="ccPanelBody" style="display:flex; flex-direction:column; gap:10px;">
+              <div id="chatLog" style="flex:1; min-height:0; overflow:auto; border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:8px; background: rgba(0,0,0,0.10);"></div>
+              <textarea id="chatInput" placeholder="Message…" style="width:100%; min-height: 90px; max-height: 180px;"></textarea>
+              <div class="row" style="gap:10px; align-items:center;">
+                <button class="pill" id="chatSend" type="button" style="border-color: rgba(154,208,255,0.55);">Send</button>
+                <button class="pill" id="chatJump" type="button">Jump to latest</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5) Operator stack -->
+          <div class="card ccPanel" id="opPanel">
+            <div class="ccPanelHead">
+              <div class="ccHeadRow left">
+                <button class="pill" id="opToggle" type="button" title="Collapse ClawdList/Work">▶</button>
+                <div class="ccTitle">ClawdList</div>
+              </div>
+              <div class="ccHeadRow right"></div>
+            </div>
+            <div class="ccPanelBody" style="display:flex; flex-direction:column; gap:12px; min-height:0; padding-top:10px;">
+              <div class="card ccGrow" id="opListCard" style="background: rgba(255,255,255,0.03); overflow:auto; min-height:180px; flex: 1 1 auto;">
+                <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
+                  <div class="muted ccSmall" id="deStatus">Idle</div>
+                </div>
+                <div class="row" style="margin-top:10px; gap:10px; align-items:center;">
+                  <button class="pill" id="dePrev" type="button">Prev</button>
+                  <button class="pill" id="deNext" type="button">Next</button>
+                </div>
+                <div id="deLists" style="margin-top:10px;"></div>
+              </div>
+
+              <div class="card" id="opWorkCard" style="background: rgba(255,255,255,0.03); flex: 0 0 44%; min-height: 220px; display:flex; flex-direction:column;">
+                <div class="row" style="gap:8px; flex-wrap:wrap; align-items:center;">
+                  <div style="font-weight:900;">ClawdWork</div>
+                  <button id="wlToggle" type="button" class="wlbtn" title="Collapse" style="border:1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.03); color: rgba(232,238,252,.68); padding:4px 8px; border-radius:999px; font-weight:800;">▾</button>
+                  <button class="pill" id="wlAdd" type="button">Add</button>
+                  <button class="pill" id="wlStop" type="button">Stop</button>
+                  <span class="muted ccSmall" id="wlThinking">Idle</span>
+                  <span style="flex:1;"></span>
+                  <div class="muted ccSmall" id="wlMsg"></div>
+                </div>
+                <div id="worklogWrap" style="margin-top:10px; flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column;">
+                  <div id="worklog" style="flex:1; min-height:0; overflow:auto;"></div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-      <script src="/static/code.js"></script>
+      <script src="/static/code.js?v=${BUILD}"></script>
     ` },
     repo: { title:'ClawdRepo', subtitle:'Commits for this project + useful repo links.', body:`
       <div class="subcard" style="line-height:1.55;">
@@ -3088,16 +3734,22 @@ app.get('/pm', (req, res) => {
     /* Card detail modal */
     .modal{position:fixed; inset:0; z-index:50; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(0,0,0,.65); backdrop-filter: blur(6px);}
     .modal.open{display:flex}
-    .box{width:min(920px, 96vw); border:1px solid rgba(255,255,255,.14); border-radius:16px; background:rgba(11,15,26,.96); box-shadow: 0 25px 70px rgba(0,0,0,.55); overflow:hidden}
-    .head{display:flex; justify-content:space-between; gap:10px; align-items:flex-start; padding:14px 14px; border-bottom:1px solid rgba(255,255,255,.10)}
+    .box{width:min(920px, 96vw); max-height: calc(100vh - 36px); border:1px solid rgba(255,255,255,.14); border-radius:16px; background:rgba(11,15,26,.96); box-shadow: 0 25px 70px rgba(0,0,0,.55); overflow:hidden; display:flex; flex-direction:column;}
+    .head{flex:0 0 auto; display:flex; justify-content:space-between; gap:10px; align-items:flex-start; padding:14px 14px; border-bottom:1px solid rgba(255,255,255,.10)}
     .head b{font-size:16px}
     .close{background:transparent; border:1px solid rgba(255,255,255,.18); color:var(--text); border-radius:12px; padding:8px 10px; cursor:pointer}
-    .body{padding:14px}
+    .body{flex:1; min-height:0; padding:14px; overflow:auto;}
     .grid{display:grid; grid-template-columns: 1fr 1fr; gap:12px}
     .field label{display:block; font-size:12px; color: var(--muted); margin-bottom:6px}
     .field input,.field textarea,.field select{width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text); font-size:14px; font-family: inherit}
     .field textarea{min-height:110px; max-height:260px}
     .rowbtn{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+
+    /* dark scrollbars inside the modal */
+    .box *, #cm_todos { scrollbar-width: thin; scrollbar-color: rgba(231,231,231,.22) rgba(0,0,0,0.25); }
+    .box *::-webkit-scrollbar, #cm_todos::-webkit-scrollbar{ width:10px; height:10px; }
+    .box *::-webkit-scrollbar-thumb, #cm_todos::-webkit-scrollbar-thumb{ background: rgba(231,231,231,.16); border-radius: 10px; border: 2px solid rgba(0,0,0,0.35); }
+    .box *::-webkit-scrollbar-track, #cm_todos::-webkit-scrollbar-track{ background: rgba(0,0,0,0.18); border-radius: 10px; }
     .pillbtn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 999px; padding:8px 10px; cursor:pointer; font-size:12px}
     .pillbtn:hover{border-color: rgba(34,198,198,.65)}
 
@@ -3225,7 +3877,7 @@ app.get('/pm', (req, res) => {
         </div>
 
         <div style="margin-top:12px;" class="muted small">To-Dos</div>
-        <div id="cm_todos" style="max-height: 260px; overflow:auto; padding-right:6px;"></div>
+        <div id="cm_todos" style="max-height: min(260px, calc(100vh - 420px)); overflow:auto; padding-right:6px;"></div>
         <div class="muted small" id="cm_msg" style="margin-top:10px;"></div>
 
         <div style="margin-top:14px;">
@@ -4475,7 +5127,8 @@ function authedWs(req) {
   const cookies = parseCookies(req);
   const tok = cookies[SESS_COOKIE];
   if (tok) {
-    const exp = sessions.get(tok);
+    const sess = sessions.get(tok);
+    const exp = (sess && typeof sess === 'object') ? sess.exp : sess;
     if (exp && exp > Date.now()) return true;
   }
   return false;

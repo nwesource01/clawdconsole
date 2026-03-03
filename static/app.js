@@ -1189,9 +1189,13 @@
       dbg('');
       statusEl.textContent = 'Talking to Clawdio • your IP: ' + (j.clientIp || '?') + ' • server: ' + (j.hostname || '?') + ' • build: ' + (j.build || '?');
 
-      // thinking light survives reloads
-      if (j.inFlight && !waitingForBot) {
-        setThinking('Thinking…');
+      // thinking light survives reloads, but should also self-clear
+      if (j.inFlight) {
+        if (!waitingForBot) setThinking('Thinking…');
+      } else {
+        // if backend says idle, force UI idle too
+        setThinking('Idle');
+        waitingForBot = false;
       }
     } catch (e) {
       const msg = 'status exception: ' + String(e);
@@ -1250,9 +1254,15 @@
   const btnAdd = document.getElementById('btnAdd');
   if (btnStop) {
     btnStop.addEventListener('click', async () => {
+      // Stop should also clear the thinking UI optimistically.
+      setThinking('Stopping…');
+      waitingForBot = false;
       try {
         await fetch(apiUrl('/api/abort'), { method: 'POST', credentials: 'include', cache: 'no-store' });
       } catch {}
+      // Force a status refresh to settle the light.
+      try { await updateStatus(); } catch {}
+      setThinking('Idle');
     });
   }
   if (btnAdd) {

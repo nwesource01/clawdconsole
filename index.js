@@ -384,7 +384,7 @@ app.use((req, res, next) => {
     return res.status(401).type('text/plain').send('Auth required');
   }
 
-  // set session cookie so fetch() works without Authorization header
+  // set session cookie so fetch() and WS auth work without Authorization header
   const token = newToken();
   sessions.set(token, { exp: Date.now() + SESS_TTL_MS, unlocks: {} });
 

@@ -3159,12 +3159,20 @@ function renderModulePage(key){
 
         <div class="grid" id="repoCards" style="margin-top:12px; grid-template-columns: repeat(5, minmax(0,1fr)); align-items:stretch;"></div>
 
-        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
-          <div style="font-weight:900; margin-bottom:8px;">Changelog (last 24h vibes)</div>
-          <div id="repoChangelog" class="muted">Loading…</div>
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);" id="repoChangelogCard">
+          <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+            <div style="font-weight:900;">Changelog (last 24h vibes)</div>
+            <button class="pill" id="repoToggleChangelog" type="button">Full Changelog</button>
+          </div>
+          <div id="repoChangelog" class="muted" style="margin-top:8px;">Loading…</div>
         </div>
 
         <div id="repoCommits" class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);"></div>
+
+        <div id="repoChangelogFull" class="card" style="display:none; margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="font-weight:900; margin-bottom:8px;">Full changelog</div>
+          <div id="repoChangelogAll" class="muted">Loading…</div>
+        </div>
       </div>
 
       <script>
@@ -3231,26 +3239,50 @@ function renderModulePage(key){
           }
         }
 
+        function renderChangelogInto(el, items, limit){
+          if (!el) return;
+          const arr = Array.isArray(items) ? items : [];
+          if (!arr.length) { el.innerHTML = '<div class="muted">(no entries)</div>'; return; }
+          el.innerHTML = arr.slice(0, limit).map(it => {
+            const title = esc(it.title || 'Changelog');
+            const ts = esc(String(it.ts||'').slice(0,19).replace('T',' '));
+            const body = esc(it.body || '');
+            return '<details style="border-top:1px solid rgba(255,255,255,0.08); padding:10px 8px;">'
+              + '<summary style="cursor:pointer;"><b>' + title + '</b> <span class="muted">' + ts + '</span></summary>'
+              + '<pre style="white-space:pre-wrap; margin:10px 0 0;">' + body + '</pre>'
+              + '</details>';
+          }).join('');
+        }
+
         async function loadChangelog(){
-          if (!chEl) return;
-          chEl.textContent = 'Loading…';
+          if (chEl) chEl.textContent = 'Loading…';
+          const allEl = document.getElementById('repoChangelogAll');
+          if (allEl) allEl.textContent = 'Loading…';
           try {
-            const res = await fetch('/api/changelog?limit=15', { credentials:'include', cache:'no-store' });
+            const res = await fetch('/api/changelog?limit=200', { credentials:'include', cache:'no-store' });
             const j = await res.json();
             const items = (j && j.ok && Array.isArray(j.items)) ? j.items : [];
-            if (!items.length) { chEl.innerHTML = '<div class="muted">(no entries)</div>'; return; }
-            chEl.innerHTML = items.slice(0, 10).map(it => {
-              const title = esc(it.title || 'Changelog');
-              const ts = esc(String(it.ts||'').slice(0,19).replace('T',' '));
-              const body = esc(it.body || '');
-              return '<details style="border-top:1px solid rgba(255,255,255,0.08); padding:10px 8px;">'
-                + '<summary style="cursor:pointer;"><b>' + title + '</b> <span class="muted">' + ts + '</span></summary>'
-                + '<pre style="white-space:pre-wrap; margin:10px 0 0;">' + body + '</pre>'
-                + '</details>';
-            }).join('');
+            renderChangelogInto(chEl, items, 10);
+            renderChangelogInto(allEl, items, 200);
           } catch {
-            chEl.innerHTML = '<div class="muted">Failed to load changelog.</div>';
+            if (chEl) chEl.innerHTML = '<div class="muted">Failed to load changelog.</div>';
+            if (allEl) allEl.innerHTML = '<div class="muted">Failed to load changelog.</div>';
           }
+        }
+
+        function wireToggle(){
+          const tBtn = document.getElementById('repoToggleChangelog');
+          const full = document.getElementById('repoChangelogFull');
+          const commits = document.getElementById('repoCommits');
+          if (!tBtn || !full || !commits) return;
+          let on = false;
+          const sync = () => {
+            full.style.display = on ? '' : 'none';
+            commits.style.display = on ? 'none' : '';
+            tBtn.textContent = on ? 'Back to Repo' : 'Full Changelog';
+          };
+          tBtn.addEventListener('click', () => { on = !on; sync(); });
+          sync();
         }
 
         async function refreshAll(){
@@ -3261,6 +3293,7 @@ function renderModulePage(key){
         }
 
         if (btn) btn.addEventListener('click', refreshAll);
+        wireToggle();
         refreshAll();
       })();
       </script>

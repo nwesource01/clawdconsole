@@ -5302,7 +5302,7 @@ function consoleBotSay(text) {
 
 gw.pending = new Map(); // id -> {resolve,reject,method}
 
-function gwSendReq(method, params) {
+function gwSendReq(method, params, timeoutMs = 60_000) {
   if (!gw.ws || gw.ws.readyState !== WebSocket.OPEN) {
     const eobj = { message: 'gateway ws not connected' };
     gwLastError = { ts: new Date().toISOString(), message: eobj.message, raw: eobj };
@@ -5314,6 +5314,7 @@ function gwSendReq(method, params) {
   gw.ws.send(JSON.stringify({ type: 'req', id, method, params }));
   return new Promise((resolve, reject) => {
     gw.pending.set(id, { resolve, reject, method, ts: Date.now() });
+    const t = Math.max(1000, Number(timeoutMs) || 60_000);
     setTimeout(() => {
       const p = gw.pending.get(id);
       if (!p) return;
@@ -5323,7 +5324,7 @@ function gwSendReq(method, params) {
       const err = new Error(eobj.message);
       err.raw = eobj;
       reject(err);
-    }, 60_000);
+    }, t);
   });
 }
 
@@ -5483,29 +5484,39 @@ function acceptMessage({ text, attachments, meta }) {
 
         logWork('gateway.chat.send', { runId, sessionKey: CONSOLE_SESSION_KEY });
 
-        // Poll chat.history for the assistant reply
-        const startedAt = Date.now();
-        let lastTxt = '';
-        while (Date.now() - startedAt < 90_000) {
-          await new Promise(r => setTimeout(r, 900));
-          const payload = await gwSendReq('chat.history', { sessionKey: CONSOLE_SESSION_KEY, limit: 50 });
-          const messages = payload?.messages;
-          if (!Array.isArray(messages)) continue;
-          const assistants = messages
-            .map(m => (m && m.message) ? m.message : m)
-            .filter(m => m && m.role === 'assistant');
-          const latest = assistants[assistants.length - 1];
-          const txt = extractTextFromGatewayMessage(latest);
-          if (txt && txt !== lastTxt) {
-            lastTxt = txt;
-            consoleBotSay(txt);
-            logWork('gateway.reply.posted', { sessionKey: CONSOLE_SESSION_KEY, runId });
-            setInFlight(false);
-            return;
+        // Primary reply path is via gateway chat final events (WS).
+        // chat.history is a fallback only (and should not be hammered).
+        const fallbackOnce = async () => {
+          try {
+            if (!runState.inFlight) return;
+            const payload = await gwSendReq('chat.history', { sessionKey: CONSOLE_SESSION_KEY, limit: 50 }, 120_000);
+            const messages = payload?.messages;
+            if (!Array.isArray(messages)) return;
+            const assistants = messages
+              .map(m => (m && m.message) ? m.message : m)
+              .filter(m => m && m.role === 'assistant');
+            const latest = assistants[assistants.length - 1];
+            const txt = extractTextFromGatewayMessage(latest);
+            if (txt) {
+              consoleBotSay(txt);
+              logWork('gateway.reply.posted', { sessionKey: CONSOLE_SESSION_KEY, runId, via: 'history_fallback' });
+              setInFlight(false);
+            }
+          } catch (e) {
+            logWork('gateway.reply.fallback.error', { runId, error: String(e) });
           }
-        }
-        logWork('gateway.reply.timeout', { runId });
-        setInFlight(false);
+        };
+
+        // give the WS event path a chance to arrive first
+        setTimeout(() => { void fallbackOnce(); }, 4500);
+        // hard-stop: if nothing arrives, clear thinking so the UI doesn't hang forever
+        setTimeout(() => {
+          if (!runState.inFlight) return;
+          logWork('gateway.reply.timeout', { runId });
+          setInFlight(false);
+        }, 150_000);
+
+        return;
       } catch (e) {
         const detail = (e && e.raw) ? e.raw : (e && e.message) ? e.message : String(e);
         consoleBotSay('Codex/Gateway error:\n' + (typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2)));

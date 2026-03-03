@@ -342,6 +342,31 @@
     render();
   }
 
+  function slug(s){
+    return String(s||'').trim().toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40);
+  }
+
+  async function addColumn(){
+    const name = (prompt('Column name', 'New Column') || '').trim();
+    if (!name) return;
+
+    PM.columns = Array.isArray(PM.columns) ? PM.columns : [];
+    const base = slug(name) || 'col';
+    let id = base;
+    let n = 2;
+    while (PM.columns.some(c => c && String(c.id||'') === id)) {
+      id = base + '-' + String(n++);
+    }
+
+    PM.columns.push({ id, title: name, cards: [] });
+    await persist();
+    render();
+    alignMenuToLastColumn();
+  }
+
   async function moveColumn(colId, dir){
     const cols = (PM && PM.columns) ? PM.columns : [];
     const i = cols.findIndex(c => c && c.id === colId);
@@ -560,6 +585,9 @@
 
   const btn = document.getElementById('pmRefresh');
   if (btn) btn.addEventListener('click', () => { load().finally(() => alignMenuToLastColumn()); });
+
+  const addColBtn = document.getElementById('pmAddCol');
+  if (addColBtn) addColBtn.addEventListener('click', () => { addColumn(); });
 
   window.addEventListener('resize', () => alignMenuToLastColumn());
   const bw = document.getElementById('pmBoardWrap');

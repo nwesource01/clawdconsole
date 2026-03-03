@@ -3974,7 +3974,7 @@ function readPM(){
   const fallback = {
     updatedAt: null,
     columns: [
-      { id: 'p0', title: 'Projects', cards: [
+      { id: 'get-started', title: 'Get Started', cards: [
         {
           id: 'welcome',
           title: 'Welcome to ClawdPM',
@@ -3984,12 +3984,40 @@ function readPM(){
           todos: []
         },
       ]},
+      { id: 'p0', title: 'Projects', cards: [] },
       { id: 'p1', title: 'Backlog', cards: [] },
       { id: 'p2', title: 'Doing', cards: [] },
       { id: 'p3', title: 'Done', cards: [] },
     ]
   };
-  return readJson(PM_FILE, fallback);
+
+  const pm = readJson(PM_FILE, fallback);
+
+  // Lightweight migration: ensure a leftmost "Get Started" column exists.
+  // If the Welcome card exists under Projects, move it into Get Started.
+  try {
+    pm.columns = Array.isArray(pm.columns) ? pm.columns : [];
+    const hasGetStarted = pm.columns.some(c => c && (String(c.id||'') === 'get-started' || String(c.title||'').toLowerCase() === 'get started'));
+    if (!hasGetStarted) {
+      pm.columns.unshift({ id:'get-started', title:'Get Started', cards: [] });
+    }
+
+    const gs = pm.columns.find(c => c && String(c.id||'') === 'get-started') || pm.columns[0];
+    if (gs) gs.cards = Array.isArray(gs.cards) ? gs.cards : [];
+
+    const proj = pm.columns.find(c => c && (String(c.id||'') === 'p0' || String(c.title||'').toLowerCase() === 'projects'));
+    if (proj) {
+      proj.cards = Array.isArray(proj.cards) ? proj.cards : [];
+      const wi = proj.cards.findIndex(c => c && String(c.id||'') === 'welcome');
+      if (wi >= 0 && gs) {
+        const [welcome] = proj.cards.splice(wi, 1);
+        const already = gs.cards.some(c => c && String(c.id||'') === 'welcome');
+        if (!already) gs.cards.unshift(welcome);
+      }
+    }
+  } catch {}
+
+  return pm;
 }
 function writePM(pm){
   const out = pm && Array.isArray(pm.columns) ? pm : readPM();
@@ -4335,6 +4363,7 @@ app.get('/pm', (req, res) => {
         <button class="btn" id="pmRefresh" type="button">Refresh</button>
         <div id="pmMenuWrap" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end;">
           ${appsMenuHtml('/pm')}
+          <button class="pillbtn" id="pmAddCol" type="button">+ Column</button>
         </div>
       </div>
     </div>

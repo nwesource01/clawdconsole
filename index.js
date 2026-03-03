@@ -954,12 +954,13 @@ app.post('/api/ops/codex/reconnect', (req, res) => {
 });
 
 // Optional: allow restarting gateway service from UI (explicitly gated)
-const GATEWAY_RESTART_ENABLED = String(process.env.GATEWAY_RESTART_ENABLED || '').trim() === '1';
+// This is a "remote ops" capability. It MUST be opt-in.
+const REMOTE_OPS_ENABLED = String(process.env.REMOTE_OPS_ENABLED || '').trim() === '1';
 app.post('/api/ops/gateway/restart', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const sess = getSessionFromReq(req);
   if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
-  if (!GATEWAY_RESTART_ENABLED) return res.status(404).json({ ok:false, error:'not_enabled' });
+  if (!REMOTE_OPS_ENABLED) return res.status(404).json({ ok:false, error:'not_enabled' });
   try {
     execFileSync('clawdbot', ['gateway', 'restart'], { stdio:['ignore','pipe','pipe'], timeout: 25_000 });
     logWork('ops.gateway.restart', {});

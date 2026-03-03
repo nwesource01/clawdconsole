@@ -1241,6 +1241,8 @@
 
   const sendBtn = document.getElementById('send');
 
+  const gwRestartBtn = document.getElementById('gwRestart');
+
   async function updateStatus() {
     if (!statusEl) return;
     try {
@@ -1260,6 +1262,17 @@
         + ' • server IP: ' + (sip || '?')
         + ' • server: ' + (j.hostname || '?')
         + ' • build: ' + (j.build || '?');
+
+      // Gateway trouble indicator (lights up Restart button)
+      try {
+        const lastErr = (j.gateway && j.gateway.lastError && j.gateway.lastError.message) ? String(j.gateway.lastError.message) : '';
+        const gwOk = !!(j.gateway && j.gateway.connected);
+        const bad = (!gwOk) || /ECONNREFUSED|timeout|not connected/i.test(lastErr);
+        if (gwRestartBtn) {
+          gwRestartBtn.classList.toggle('pillDanger', bad);
+          gwRestartBtn.textContent = bad ? 'Restart (GW)' : 'Restart';
+        }
+      } catch {}
 
       // thinking light survives reloads, but should also self-clear
       if (j.inFlight) {
@@ -1321,7 +1334,7 @@
     });
   }
 
-  // Stop/Add buttons
+  // Stop/Add/Restart buttons
   const btnStop = document.getElementById('btnStop');
   const btnAdd = document.getElementById('btnAdd');
   if (btnStop) {
@@ -1348,6 +1361,26 @@
         const prefix = 'ADD CONTEXT (incorporate into the previous request):\n';
         if (!ta.value.startsWith(prefix)) ta.value = prefix + ta.value;
         ta.focus();
+      }
+    });
+  }
+
+  if (gwRestartBtn) {
+    gwRestartBtn.addEventListener('click', async () => {
+      const ok = confirm('Restart the Gateway now?');
+      if (!ok) return;
+      gwRestartBtn.disabled = true;
+      try {
+        // Prefer a real gateway restart if enabled, otherwise fall back to a WS reconnect.
+        const r = await fetch(apiUrl('/api/ops/gateway/restart'), { method:'POST', credentials:'include', cache:'no-store' });
+        if (!r.ok) {
+          await fetch(apiUrl('/api/ops/codex/reconnect'), { method:'POST', credentials:'include', cache:'no-store' });
+        }
+      } catch {
+        try { await fetch(apiUrl('/api/ops/codex/reconnect'), { method:'POST', credentials:'include', cache:'no-store' }); } catch {}
+      } finally {
+        try { await updateStatus(); } catch {}
+        gwRestartBtn.disabled = false;
       }
     });
   }

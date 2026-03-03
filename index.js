@@ -953,6 +953,23 @@ app.post('/api/ops/codex/reconnect', (req, res) => {
   res.json({ ok:true });
 });
 
+// Optional: allow restarting gateway service from UI (explicitly gated)
+const GATEWAY_RESTART_ENABLED = String(process.env.GATEWAY_RESTART_ENABLED || '').trim() === '1';
+app.post('/api/ops/gateway/restart', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  if (!GATEWAY_RESTART_ENABLED) return res.status(404).json({ ok:false, error:'not_enabled' });
+  try {
+    execFileSync('clawdbot', ['gateway', 'restart'], { stdio:['ignore','pipe','pipe'], timeout: 25_000 });
+    logWork('ops.gateway.restart', {});
+    return res.json({ ok:true });
+  } catch (e) {
+    logWork('ops.gateway.restart.error', { error: String(e) });
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 app.get('/clawdpub/sop', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const txt = readSopSnippet(200000);
@@ -4853,8 +4870,10 @@ app.get('/pm', (req, res) => {
     .box *::-webkit-scrollbar-track, #cm_todos::-webkit-scrollbar-track{ background: rgba(0,0,0,0.18); border-radius: 10px; }
     .pillbtn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 999px; padding:8px 10px; cursor:pointer; font-size:12px}
     .pillbtn:hover{border-color: rgba(34,198,198,.65)}
-    .pillDanger{ border-color: rgba(255,97,97,.45); background: rgba(255,97,97,.10); }
-    .pillDanger:hover{ border-color: rgba(255,97,97,.70); background: rgba(255,97,97,.14); }
+
+    /* danger styling shared across pills + buttons */
+    .pillDanger{ border-color: rgba(255,97,97,.45) !important; background: rgba(255,97,97,.10) !important; color: rgba(231,231,231,.92) !important; }
+    .pillDanger:hover{ border-color: rgba(255,97,97,.70) !important; background: rgba(255,97,97,.14) !important; }
 
     .todo{display:grid; grid-template-columns: auto 1fr auto; gap:8px; align-items:center; padding:8px 10px; border:1px solid rgba(255,255,255,.10); border-radius:12px; background: rgba(255,255,255,.03); margin-top:8px}
     .todo input[type=text]{width:100%; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.10); background:#0d1426; color:var(--text)}
@@ -6194,6 +6213,7 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
             <button id="btnAdd" type="button" style="background:transparent; border:1px solid rgba(80,255,160,0.8);">Add</button>
             <div class="pill" id="thinking">Idle</div>
             <button id="wlToggle" type="button" class="wlbtn" title="Collapse">▾</button>
+            <button id="gwRestart" type="button" class="wlbtn" title="Restart Gateway (if enabled)">Restart</button>
           </div>
         </div>
         <div id="wlBody">

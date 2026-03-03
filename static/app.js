@@ -1255,7 +1255,11 @@
         return;
       }
       dbg('');
-      statusEl.textContent = 'Talking to ' + AGENT_NAME + ' • your IP: ' + (j.clientIp || '?') + ' • server: ' + (j.hostname || '?') + ' • build: ' + (j.build || '?');
+      const sip = j.serverPublicIp || '';
+      statusEl.textContent = 'Talking to ' + AGENT_NAME
+        + ' • server IP: ' + (sip || '?')
+        + ' • server: ' + (j.hostname || '?')
+        + ' • build: ' + (j.build || '?');
 
       // thinking light survives reloads, but should also self-clear
       if (j.inFlight) {

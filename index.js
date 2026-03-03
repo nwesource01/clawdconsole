@@ -760,9 +760,53 @@ app.get('/demo/api/del', (req, res) => {
   res.json({ ok: true, demo: true, state: DEMO_DEL });
 });
 
+// best-effort public IP detection (DigitalOcean metadata first; env override supported)
+let serverPublicIpCache = { ip: null, ts: 0 };
+function getServerPublicIpCached(){
+  const envIp = String(process.env.PUBLIC_IP || '').trim();
+  if (envIp) return envIp;
+  const now = Date.now();
+  if (serverPublicIpCache.ip && (now - serverPublicIpCache.ts) < 6 * 60 * 60 * 1000) return serverPublicIpCache.ip;
+  return serverPublicIpCache.ip || null;
+}
+async function refreshServerPublicIp(){
+  const envIp = String(process.env.PUBLIC_IP || '').trim();
+  if (envIp) {
+    serverPublicIpCache = { ip: envIp, ts: Date.now() };
+    return envIp;
+  }
+  // DigitalOcean metadata service (no external network)
+  try {
+    const http = require('http');
+    const url = 'http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address';
+    const ip = await new Promise((resolve, reject) => {
+      const r = http.get(url, { timeout: 1200 }, (resp) => {
+        let buf = '';
+        resp.setEncoding('utf8');
+        resp.on('data', (d) => buf += d);
+        resp.on('end', () => resolve(String(buf||'').trim()));
+      });
+      r.on('error', reject);
+      r.on('timeout', () => { try { r.destroy(new Error('timeout')); } catch {} });
+    });
+    if (ip && /^[0-9.]{7,15}$/.test(ip)) {
+      serverPublicIpCache = { ip, ts: Date.now() };
+      return ip;
+    }
+  } catch {}
+  return null;
+}
+
 app.get('/api/status', (req, res) => {
   const forwardedFor = (req.headers['x-forwarded-for'] || '').toString();
   const clientIp = forwardedFor.split(',')[0].trim() || req.socket.remoteAddress || null;
+  const serverPublicIp = getServerPublicIpCached();
+
+  // refresh in background if missing/stale
+  if (!serverPublicIp || (Date.now() - serverPublicIpCache.ts) > (6 * 60 * 60 * 1000)) {
+    refreshServerPublicIp().catch(() => {});
+  }
+
   res.json({
     ok: true,
     service: 'claw-console',
@@ -772,6 +816,7 @@ app.get('/api/status', (req, res) => {
     hostname: require('os').hostname(),
     serverBind: '127.0.0.1',
     clientIp,
+    serverPublicIp,
     gateway: {
       connected: !!(gw && gw.connected),
       url: GATEWAY_WS_URL,

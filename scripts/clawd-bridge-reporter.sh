@@ -32,14 +32,14 @@ if [[ ! -f "$STATE_FILE" ]]; then
   printf '{"lastSig":"","lastPost":""}\n' >"$STATE_FILE"
 fi
 
-lastSig="$(python3 - <<'PY'
-import json
-p = open("'$STATE_FILE'","r",encoding="utf-8").read()
+lastSig="$(STATE_FILE="$STATE_FILE" python3 - <<'PY'
+import json, os
+p = os.environ.get("STATE_FILE")
 try:
-  j=json.loads(p)
-except:
+  j=json.load(open(p,"r",encoding="utf-8"))
+except Exception:
   j={}
-print(j.get('lastSig',''))
+print(j.get("lastSig", ""))
 PY
 )"
 
@@ -87,11 +87,11 @@ if [[ "$sig" == "$lastSig" ]]; then
 fi
 
 # Post to bridge
-payload=$(python3 - <<PY
-import json
+payload=$(REPORT_HOST_LABEL="$REPORT_HOST_LABEL" SUMMARY="$summary" BODY="$body" python3 - <<'PY'
+import json, os
 print(json.dumps({
-  "summary": f"{REPORT_HOST_LABEL}: {summary}",
-  "text": body,
+  "summary": f"{os.environ.get('REPORT_HOST_LABEL','host')}: {os.environ.get('SUMMARY','OK')}",
+  "text": os.environ.get('BODY',''),
 }))
 PY
 )
@@ -102,14 +102,14 @@ curl -sS \
   -d "$payload" \
   "$BRIDGE_INBOX_URL" >/dev/null
 
-python3 - <<'PY'
-import json, time
-p = "$STATE_FILE"
+STATE_FILE="$STATE_FILE" SIG="$sig" NOW_ISO="$now_iso" python3 - <<'PY'
+import json, os
+p = os.environ.get("STATE_FILE")
 try:
   j=json.load(open(p,'r',encoding='utf-8'))
-except:
+except Exception:
   j={}
-j['lastSig'] = "$sig"
-j['lastPost'] = "$now_iso"
+j['lastSig'] = os.environ.get('SIG','')
+j['lastPost'] = os.environ.get('NOW_ISO','')
 json.dump(j, open(p,'w',encoding='utf-8'))
 PY

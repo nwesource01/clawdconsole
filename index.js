@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-03.70';
+const BUILD = '2026-03-03.72';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -270,6 +270,20 @@ function saveCodeWs(state){
   return next;
 }
 
+function inferGitForRoot(root){
+  try {
+    if (!root) return null;
+    if (!fs.existsSync(path.join(root, '.git'))) return null;
+    const execFileSync = require('child_process').execFileSync;
+    const remote = String(execFileSync('git', ['config','--get','remote.origin.url'], { cwd: root, stdio:['ignore','pipe','ignore'] }) || '').trim();
+    const branch = String(execFileSync('git', ['rev-parse','--abbrev-ref','HEAD'], { cwd: root, stdio:['ignore','pipe','ignore'] }) || '').trim();
+    if (!remote) return null;
+    return { remote, branch: (branch && branch !== 'HEAD') ? branch : '' };
+  } catch {
+    return null;
+  }
+}
+
 function listCodeWorkspaces(){
   const st = loadCodeWs();
   const wss = Array.isArray(st.workspaces) ? st.workspaces : [];
@@ -280,11 +294,13 @@ function listCodeWorkspaces(){
     if (!w || !w.id || !w.root) continue;
     if (seen.has(w.id)) continue;
     seen.add(w.id);
+    const git = w.git ? { remote: String(w.git.remote||''), branch: String(w.git.branch||'') } : null;
+    const inferred = git && git.remote ? git : inferGitForRoot(String(w.root));
     out.push({
       id: String(w.id),
       title: String(w.title || w.id),
       root: String(w.root),
-      git: w.git ? { remote: String(w.git.remote||''), branch: String(w.git.branch||'') } : null,
+      git: inferred && inferred.remote ? { remote: String(inferred.remote||''), branch: String(inferred.branch||'') } : null,
     });
   }
   return out;
@@ -1546,8 +1562,18 @@ app.post('/api/code/git/connect', (req, res) => {
     return res.status(400).json({ ok:false, error:'only_github_supported' });
   }
 
+  // Prefer GitHub CLI auth (already set up on this host). Token env is optional fallback.
+  const execFileSync = require('child_process').execFileSync;
+  let ghOk = false;
+  try {
+    execFileSync('gh', ['auth','status','-h','github.com'], { stdio:['ignore','pipe','pipe'] });
+    ghOk = true;
+  } catch { ghOk = false; }
+
   const token = String(process.env.CODE_GIT_TOKEN || process.env.GITHUB_TOKEN || '').trim();
-  if (!token) return res.status(400).json({ ok:false, error:'missing_token', hint:'Set CODE_GIT_TOKEN in /etc/clawdio-console.env' });
+  if (!ghOk && !token) {
+    return res.status(400).json({ ok:false, error:'missing_auth', hint:'Login gh (preferred) or set CODE_GIT_TOKEN in /etc/clawdio-console.env' });
+  }
 
   const wss = listCodeWorkspaces();
   const ws = wss.find(w => w && w.id === wsId);
@@ -1560,37 +1586,41 @@ app.post('/api/code/git/connect', (req, res) => {
     const names = fs.readdirSync(ws.root).filter(n => n && n !== '.DS_Store');
     const hasGit = fs.existsSync(path.join(ws.root, '.git'));
 
-    const execFileSync = require('child_process').execFileSync;
-
-    function sanitize(u){
-      return String(u||'').replace(token, '***');
+    function parseRepo(u){
+      const s = String(u||'').trim();
+      let m;
+      if ((m = s.match(/^https:\/\/(www\.)?github\.com\/([^\s\/]+)\/([^\s\/]+?)(?:\.git)?\/?$/i))) {
+        return m[2] + '/' + m[3];
+      }
+      if ((m = s.match(/^git@github\.com:([^\s\/]+)\/([^\s\/]+?)(?:\.git)?$/i))) {
+        return m[1] + '/' + m[2];
+      }
+      return '';
     }
 
-    // Build clone URL with token (never store token)
-    let cloneUrl = remoteUrl;
-    if (/^git@github\.com:/i.test(remoteUrl)) {
-      // convert to https
-      const m = remoteUrl.match(/^git@github\.com:(.+?)(\.git)?$/i);
-      const pathPart = m ? m[1] : '';
-      cloneUrl = 'https://github.com/' + pathPart + '.git';
-    }
-    if (/^https:\/\//i.test(cloneUrl)) {
-      cloneUrl = cloneUrl.replace(/^https:\/\//i, 'https://x-access-token:' + encodeURIComponent(token) + '@');
-    }
+    const repo = parseRepo(remoteUrl);
+    if (!repo) return res.status(400).json({ ok:false, error:'bad_repo_url' });
 
     if (!hasGit) {
       if (names.length) return res.status(409).json({ ok:false, error:'workspace_not_empty' });
-      execFileSync('git', ['clone', cloneUrl, '.'], { cwd: ws.root, stdio:'pipe' });
+      if (ghOk) {
+        const args = ['repo','clone', repo, ws.root];
+        if (branch) args.push('--', '--branch', branch);
+        execFileSync('gh', args, { stdio:'pipe' });
+      } else {
+        // fallback: token-injected https clone
+        const cloneUrl = ('https://x-access-token:' + encodeURIComponent(token) + '@github.com/' + repo + '.git');
+        execFileSync('git', ['clone', cloneUrl, ws.root], { stdio:'pipe' });
+      }
     } else {
-      // repo exists: ensure origin remote set
+      // repo exists: ensure origin remote set and fetch
       try { execFileSync('git', ['remote','remove','origin'], { cwd: ws.root, stdio:'pipe' }); } catch {}
       execFileSync('git', ['remote','add','origin', remoteUrl], { cwd: ws.root, stdio:'pipe' });
       execFileSync('git', ['fetch','--all','--prune'], { cwd: ws.root, stdio:'pipe' });
-    }
-
-    if (branch) {
-      try { execFileSync('git', ['checkout', branch], { cwd: ws.root, stdio:'pipe' }); } catch {
-        execFileSync('git', ['checkout','-b', branch, 'origin/' + branch], { cwd: ws.root, stdio:'pipe' });
+      if (branch) {
+        try { execFileSync('git', ['checkout', branch], { cwd: ws.root, stdio:'pipe' }); } catch {
+          execFileSync('git', ['checkout','-b', branch, 'origin/' + branch], { cwd: ws.root, stdio:'pipe' });
+        }
       }
     }
 
@@ -2228,11 +2258,13 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
 
     /* Header workspace selector: use the "empty space" between title and menu.
        Keep it closer to the title (not centered), and wrap under the title when narrow. */
-    .hdrRow{ display:flex; gap:10px; align-items:center; min-width:0; flex-wrap:wrap; }
-    .hdrRow .hdrTitle{ flex:0 1 auto; min-width: 240px; }
-    .hdrWs{ display:flex; gap:8px; align-items:center; justify-content:flex-start; flex: 0 1 auto; margin-left: clamp(50px, 6vw, 240px); }
+    .hdrRow{ display:flex; gap:12px; align-items:flex-start; min-width:0; }
+    .hdrRow .hdrTitle{ flex:1; min-width: 360px; }
+    /* selectors stack under each other in their own block, offset from title */
+    .hdrSelStack{ display:flex; flex-direction:column; gap:6px; align-items:flex-start; margin-left: clamp(50px, 6vw, 240px); flex:0 0 auto; }
+    .hdrWs{ display:flex; gap:8px; align-items:center; justify-content:flex-start; flex-wrap:wrap; }
     .hdrWs .muted{ font-size:12px; }
-    .hdrWsSel{ padding:6px 8px; height: 34px; width: 200px; max-width: 220px; }
+    .hdrWsSel{ padding:6px 8px; height: 34px; width: 220px; max-width: 260px; }
     body[data-wide="1"] .top{ grid-template-columns: auto 1fr; }
     body[data-wide="1"] .topC{ justify-content:flex-end; margin-top: 0; min-width:0; }
 
@@ -2262,20 +2294,23 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
         ${(activePath === '/apps/code') ? (`<div class=\"hdrRow\">
           <div class=\"hdrTitle\">
             <h1 style=\"margin:0;\">${title} <span class=\"muted\" style=\"font-weight:700; font-size:12px; color: rgba(232,238,252,.48);\">build ${BUILD}</span></h1>
+            <div class=\"muted\" style=\"margin-top:4px;\">${subtitle || ''}</div>
           </div>
-          <div class=\"hdrWs\">
-            <span class=\"muted\" style=\"font-size:12px;\">Workspace</span>
-            <select id=\"hdrWsSel\" class=\"hdrWsSel\"></select>
-            <button class=\"pill\" id=\"hdrWsAdd\" type=\"button\">Add</button>
-          </div>
-          <div class=\"hdrWs\" style=\"margin-left: clamp(50px, 6vw, 240px);\">
-            <span class=\"muted\" style=\"font-size:12px;\">Git</span>
-            <select id=\"hdrGitSel\" class=\"hdrWsSel\"><option value=\"\">None</option></select>
-            <button class=\"pill\" id=\"hdrGitConnect\" type=\"button\">Connect</button>
-            <button class=\"pill\" id=\"hdrGitDisc\" type=\"button\">Disconnect</button>
+          <div class=\"hdrSelStack\">
+            <div class=\"hdrWs\">
+              <span class=\"muted\" style=\"font-size:12px;\">Workspace</span>
+              <select id=\"hdrWsSel\" class=\"hdrWsSel\"></select>
+              <button class=\"pill\" id=\"hdrWsAdd\" type=\"button\">Add</button>
+            </div>
+            <div class=\"hdrWs\">
+              <span class=\"muted\" style=\"font-size:12px;\">Git</span>
+              <select id=\"hdrGitSel\" class=\"hdrWsSel\"><option value=\"\">None</option></select>
+              <button class=\"pill\" id=\"hdrGitConnect\" type=\"button\">Connect</button>
+              <button class=\"pill\" id=\"hdrGitDisc\" type=\"button\">Disconnect</button>
+            </div>
           </div>
         </div>`) : (`<h1>${title}</h1>`)}
-        <div class="muted" style="margin-top:4px;">${subtitle || ''}</div>
+        <div style="display:none"></div>
       </div>
       <div class="topC">${appsMenuHtml(activePath || '')}</div>
     </div>

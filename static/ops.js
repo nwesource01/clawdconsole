@@ -136,12 +136,14 @@
   const tabC = $('opsTabC');
   const tabClawd = $('opsTabClawd');
   const tabClawdwell = $('opsTabClawdwell');
+  const tabBridge = $('opsTabBridge');
   const tabMsg = $('opsTabMsg');
   const viewQ = $('opsTabQuestionnaire');
   const viewG = $('opsTabGateway');
   const viewC = $('opsTabCodex');
   const viewClawd = $('opsTabClawdView');
   const viewClawdwell = $('opsTabClawdwellView');
+  const viewBridge = $('opsTabBridgeView');
 
   function setTabMsg(t){ if (tabMsg) tabMsg.textContent = t || ''; }
   function showTab(which){
@@ -150,6 +152,7 @@
     if (viewC) viewC.style.display = (which === 'c') ? '' : 'none';
     if (viewClawd) viewClawd.style.display = (which === 'clawd') ? '' : 'none';
     if (viewClawdwell) viewClawdwell.style.display = (which === 'clawdwell') ? '' : 'none';
+    if (viewBridge) viewBridge.style.display = (which === 'bridge') ? '' : 'none';
   }
 
   if (tabQ) tabQ.addEventListener('click', () => showTab('q'));
@@ -157,6 +160,7 @@
   if (tabC) tabC.addEventListener('click', () => showTab('c'));
   if (tabClawd) tabClawd.addEventListener('click', () => showTab('clawd'));
   if (tabClawdwell) tabClawdwell.addEventListener('click', () => showTab('clawdwell'));
+  if (tabBridge) tabBridge.addEventListener('click', () => { showTab('bridge'); loadBridge(); });
 
   // default
   showTab('q');
@@ -164,6 +168,7 @@
   // initial loads
   loadBrand();
   loadClawdwellNotes();
+  // Bridge is loaded on demand when tab is opened
 
   // --- Clawdwell notes ---
   const cwTa = $('cwNotes');
@@ -206,6 +211,93 @@
 
   if (cwSave) cwSave.addEventListener('click', saveClawdwellNotes);
   if (cwReload) cwReload.addEventListener('click', loadClawdwellNotes);
+
+  // --- ClawdBridge ---
+  const brRefresh = $('bridgeRefresh');
+  const brDir = $('bridgeDir');
+  const brSummary = $('bridgeSummary');
+  const brText = $('bridgeText');
+  const brPost = $('bridgePost');
+  const brMsg = $('bridgeMsg');
+  const brList = $('bridgeList');
+
+  const setBrMsg = (t) => { try { if (brMsg) brMsg.textContent = t || ''; } catch {} };
+  const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function renderBridge(items){
+    if (!brList) return;
+    const arr = Array.isArray(items) ? items.slice().reverse() : [];
+    if (!arr.length) {
+      brList.innerHTML = '<div class="muted">No messages yet.</div>';
+      return;
+    }
+
+    brList.innerHTML = arr.map(it => {
+      const id = esc(it.id||'');
+      const dir = esc(it.dir||'');
+      const ts = esc((it.ts||'').replace('T',' ').slice(0,19));
+      const summary = esc(it.summary || (String(it.text||'').split(/\r?\n/)[0] || '').slice(0, 140));
+      const full = esc(String(it.text||''));
+      return '<div class="card" style="background: rgba(255,255,255,0.03); padding:10px; margin-top:10px;">'
+        + '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">'
+        +   '<div><b>' + (dir === 'outbox' ? 'OUT' : 'IN') + '</b> <span class="muted">' + ts + '</span></div>'
+        +   '<button class="pill" type="button" data-bridge-toggle="' + id + '">Details</button>'
+        + '</div>'
+        + '<div style="margin-top:6px;">' + summary + '</div>'
+        + '<pre id="br_' + id + '" style="display:none; margin-top:10px; white-space:pre-wrap; border:1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.12); border-radius:12px; padding:10px;">' + full + '</pre>'
+        + '</div>';
+    }).join('');
+
+    Array.from(brList.querySelectorAll('button[data-bridge-toggle]')).forEach(b => {
+      b.addEventListener('click', () => {
+        const id = b.getAttribute('data-bridge-toggle') || '';
+        const pre = document.getElementById('br_' + id);
+        if (!pre) return;
+        const on = pre.style.display !== 'none';
+        pre.style.display = on ? 'none' : '';
+        b.textContent = on ? 'Details' : 'Hide';
+      });
+    });
+  }
+
+  async function loadBridge(){
+    setBrMsg('Loading…');
+    try {
+      const res = await fetch('/api/ops/bridge/list?limit=120', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      renderBridge(j.items || []);
+      setBrMsg('');
+    } catch (e) {
+      setBrMsg('Load failed: ' + String(e));
+    }
+  }
+
+  async function postBridge(){
+    setBrMsg('Posting…');
+    try {
+      const res = await fetch('/api/ops/bridge/post', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        body: JSON.stringify({
+          dir: brDir ? brDir.value : 'outbox',
+          summary: brSummary ? brSummary.value : '',
+          text: brText ? brText.value : '',
+        })
+      });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+      setBrMsg('Posted.');
+      setTimeout(() => setBrMsg(''), 900);
+      await loadBridge();
+    } catch (e) {
+      setBrMsg('Post failed: ' + String(e));
+    }
+  }
+
+  if (brRefresh) brRefresh.addEventListener('click', loadBridge);
+  if (brPost) brPost.addEventListener('click', postBridge);
 
   // --- Brand / assistant name ---
   const bName = $('brandAssistantName');

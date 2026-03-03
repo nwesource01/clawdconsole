@@ -1954,7 +1954,38 @@ function writeTextFile(fp, txt){
 
 const BRIDGE_INBOX_FILE = path.join(DATA_DIR, 'bridge-inbox.md');
 const BRIDGE_OUTBOX_FILE = path.join(DATA_DIR, 'bridge-outbox.md');
+const BRIDGE_LOG_FILE = path.join(DATA_DIR, 'bridge-messages.jsonl');
 
+function appendBridgeMessage(dir, text, summary = '', meta = {}){
+  const obj = {
+    id: 'br_' + Date.now().toString(16) + '_' + Math.random().toString(16).slice(2),
+    ts: new Date().toISOString(),
+    dir: (dir === 'outbox') ? 'outbox' : 'inbox',
+    summary: String(summary || '').trim().slice(0, 140),
+    text: String(text || ''),
+    meta: (meta && typeof meta === 'object') ? meta : {},
+  };
+  try { appendJsonl(BRIDGE_LOG_FILE, obj); } catch {}
+  return obj;
+}
+
+function readBridgeMessages(limit = 200){
+  try {
+    const txt = fs.existsSync(BRIDGE_LOG_FILE) ? fs.readFileSync(BRIDGE_LOG_FILE, 'utf8') : '';
+    const lines = txt.split('\n').filter(Boolean);
+    const tail = lines.slice(-Math.max(1, Math.min(2000, Number(limit)||200)));
+    const out = [];
+    for (const ln of tail) {
+      let o; try { o = JSON.parse(ln); } catch { o = null; }
+      if (o && typeof o === 'object') out.push(o);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+// Token-gated endpoints for cross-box posting/polling
 app.get('/api/ops/bridge/inbox', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   if (!bridgeOk(req)) return res.status(403).json({ ok:false, error:'forbidden' });
@@ -1964,9 +1995,11 @@ app.post('/api/ops/bridge/inbox', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   if (!bridgeOk(req)) return res.status(403).json({ ok:false, error:'forbidden' });
   const text = String(req.body?.text || '');
+  const summary = String(req.body?.summary || '').trim();
   writeTextFile(BRIDGE_INBOX_FILE, text);
+  const ev = appendBridgeMessage('inbox', text, summary, { via:'token' });
   logWork('ops.bridge.inbox.saved', { bytes: Buffer.byteLength(text,'utf8') });
-  return res.json({ ok:true, path: BRIDGE_INBOX_FILE });
+  return res.json({ ok:true, path: BRIDGE_INBOX_FILE, event: ev });
 });
 
 app.get('/api/ops/bridge/outbox', (req, res) => {
@@ -1978,9 +2011,35 @@ app.post('/api/ops/bridge/outbox', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   if (!bridgeOk(req)) return res.status(403).json({ ok:false, error:'forbidden' });
   const text = String(req.body?.text || '');
+  const summary = String(req.body?.summary || '').trim();
   writeTextFile(BRIDGE_OUTBOX_FILE, text);
+  const ev = appendBridgeMessage('outbox', text, summary, { via:'token' });
   logWork('ops.bridge.outbox.saved', { bytes: Buffer.byteLength(text,'utf8') });
-  return res.json({ ok:true, path: BRIDGE_OUTBOX_FILE });
+  return res.json({ ok:true, path: BRIDGE_OUTBOX_FILE, event: ev });
+});
+
+// UI (same-box) endpoints: no token required (still behind Console auth)
+app.get('/api/ops/bridge/list', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const limit = Math.max(1, Math.min(500, Number(req.query.limit || 120)));
+  const items = readBridgeMessages(limit);
+  return res.json({ ok:true, path: BRIDGE_LOG_FILE, items });
+});
+
+app.post('/api/ops/bridge/post', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const dir = String(req.body?.dir || 'outbox');
+  const text = String(req.body?.text || '');
+  const summary = String(req.body?.summary || '').trim();
+  if (!text.trim()) return res.status(400).json({ ok:false, error:'Missing text' });
+
+  if (dir === 'inbox') {
+    writeTextFile(BRIDGE_INBOX_FILE, text);
+  } else {
+    writeTextFile(BRIDGE_OUTBOX_FILE, text);
+  }
+  const ev = appendBridgeMessage(dir, text, summary, { via:'ui' });
+  return res.json({ ok:true, event: ev });
 });
 
 // Backwards-compat: keep the single clawdwell-notes endpoint around (UI uses it), file-backed.
@@ -3077,6 +3136,7 @@ function renderModulePage(key){
           <button class="pill" id="opsTabC" type="button">Codex</button>
           <button class="pill" id="opsTabClawd" type="button">Clawd</button>
           <button class="pill" id="opsTabClawdwell" type="button">Clawdwell</button>
+          <button class="pill" id="opsTabBridge" type="button">ClawdBridge</button>
           <span class="muted" id="opsTabMsg"></span>
         </div>
 
@@ -3208,6 +3268,38 @@ function renderModulePage(key){
             </div>
           </div>
         </div><!-- /opsTabClawdwellView -->
+
+        <div id="opsTabBridgeView" style="display:none;">
+          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+            <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+              <div>
+                <div style="font-weight:900;">ClawdBridge</div>
+                <div class="muted" style="margin-top:4px;">Append-only message log for Clawdwell ↔ Clawdio coordination.</div>
+              </div>
+              <div class="row" style="gap:10px; flex-wrap:wrap;">
+                <button class="pill" id="bridgeRefresh" type="button">Refresh</button>
+              </div>
+            </div>
+
+            <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+              <select id="bridgeDir" class="inp" style="width: 220px;">
+                <option value="inbox">INBOX (from Clawdwell)</option>
+                <option value="outbox">OUTBOX (to Clawdwell)</option>
+              </select>
+              <input id="bridgeSummary" class="inp" placeholder="Summary (optional)" style="flex:1; min-width: 220px;" />
+              <button class="pill" id="bridgePost" type="button">Post</button>
+              <span class="muted" id="bridgeMsg"></span>
+            </div>
+
+            <div style="margin-top:10px;">
+              <textarea id="bridgeText" placeholder="# Message\n\nPaste diffs, findings, and decisions here…" style="width:100%; min-height:180px;"></textarea>
+              <div class="muted" style="margin-top:8px;">Stored in: <code>${DATA_DIR}/bridge-messages.jsonl</code> (append-only)</div>
+            </div>
+
+            <div style="margin-top:12px; font-weight:900;">Recent</div>
+            <div id="bridgeList" style="margin-top:8px; max-height: 55vh; overflow:auto; padding-right:6px;"></div>
+          </div>
+        </div><!-- /opsTabBridgeView -->
 
       </div>
       <script src="/static/ops.js"></script>

@@ -3821,6 +3821,15 @@ function renderModulePage(key){
         if (cbA) cbA.addEventListener('change', saveAutorun);
         if (btnStop) btnStop.addEventListener('click', stopAutorun);
 
+        // Live refresh via SSE (no manual refresh needed)
+        try {
+          const es = new EventSource('/api/queue/stream');
+          es.addEventListener('pm', () => load());
+          es.addEventListener('queue', () => load());
+          es.addEventListener('hello', () => {});
+          es.onerror = () => { /* ignore; browser will retry */ };
+        } catch {}
+
         load();
       })();
       </script>
@@ -4052,10 +4061,43 @@ function readQueueState(){
   };
   return readJson(QUEUE_STATE_FILE, fallback);
 }
+// --- Queue live stream (SSE) ---
+// Used by /apps/queue to live-refresh without manual reload.
+const queueSseClients = new Set();
+function queueSseBroadcast(event, data){
+  const payload = { event: String(event||'update'), ts: new Date().toISOString(), data: (data && typeof data === 'object') ? data : { value: data } };
+  const line = 'event: ' + payload.event + '\n' + 'data: ' + JSON.stringify(payload) + '\n\n';
+  for (const res of Array.from(queueSseClients)) {
+    try { res.write(line); } catch { try { queueSseClients.delete(res); } catch {} }
+  }
+}
+
+app.get('/api/queue/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders && res.flushHeaders();
+
+  // hello
+  try { res.write('event: hello\n' + 'data: ' + JSON.stringify({ ts: new Date().toISOString() }) + '\n\n'); } catch {}
+  queueSseClients.add(res);
+
+  const ping = setInterval(() => {
+    try { res.write(': ping\n\n'); } catch {}
+  }, 15000);
+
+  req.on('close', () => {
+    try { clearInterval(ping); } catch {}
+    try { queueSseClients.delete(res); } catch {}
+  });
+});
+
 function writeQueueState(s){
   const out = (s && typeof s === 'object') ? s : readQueueState();
   out.updatedAt = new Date().toISOString();
   writeJson(QUEUE_STATE_FILE, out);
+  // notify queue watchers
+  queueSseBroadcast('queue', { updatedAt: out.updatedAt, selectedColumnId: out.selectedColumnId, autorunEnabled: out.autorunEnabled, currentCardId: out.currentCardId, pendingRunAt: out.pendingRunAt });
   return out;
 }
 
@@ -4112,6 +4154,8 @@ function writePM(pm){
   const out = pm && Array.isArray(pm.columns) ? pm : readPM();
   out.updatedAt = new Date().toISOString();
   writeJson(PM_FILE, out);
+  // notify queue watchers (PM changed)
+  try { queueSseBroadcast('pm', { updatedAt: out.updatedAt, cols: Array.isArray(out.columns) ? out.columns.length : 0 }); } catch {}
   return out;
 }
 
@@ -4258,7 +4302,8 @@ function scheduleQueueAutorun(ms){
       writeQueueState(state2);
 
       // send message into Console as if user requested next task
-      acceptMessage({ text: queueKickoffMessage(next), attachments: [] });
+      // Mark as automated so ClawdList doesn't ingest it.
+      acceptMessage({ text: queueKickoffMessage(next), attachments: [], meta: { source:'queue', noClawdList:true } });
       logWork('queue.autorun.kickoff', { cardId: String(next.id||''), title: String(next.title||''), colId: String(col?.id||'') });
     } catch (e) {
       logWork('queue.autorun.error', { error: String(e) });
@@ -5006,12 +5051,16 @@ function connectGateway() {
   });
 }
 
-function acceptMessage({ text, attachments }) {
+function acceptMessage({ text, attachments, meta }) {
   const msg = makeMsg({ text, attachments });
+  // lightweight meta for internal sources (not stored in message schema by default)
+  const m = (meta && typeof meta === 'object') ? meta : {};
   appendJsonl(MSG_FILE, msg);
 
   // Dynamic Execution List extraction: if user message contains a 3+ item list.
-  const items = extractChecklist(msg.text);
+  // IMPORTANT: skip automation-originated messages (e.g. Queue kickoff) so ClawdList doesn't explode.
+  const isAutomated = !!m.noClawdList || /\bQUEUE\s+AUTORUN\b/i.test(String(msg.text||''));
+  const items = isAutomated ? null : extractChecklist(msg.text);
   if (items) {
     const state = loadDEState();
     const de = {

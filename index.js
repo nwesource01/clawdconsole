@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-03.72';
+const BUILD = '2026-03-03.74';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -23,14 +23,38 @@ const TELEMETRY_DAILY_URL = process.env.TELEMETRY_DAILY_URL || (TELEMETRY_BASE_U
 const TELEMETRY_INTERVAL_HOURS = Math.max(1, Number(process.env.TELEMETRY_INTERVAL_HOURS || 24));
 
 // Clawdbot Gateway (for agent bridge)
-const GATEWAY_WS_URL = process.env.GATEWAY_WS_URL || 'ws://127.0.0.1:18789';
-const CONSOLE_SESSION_KEY = process.env.CONSOLE_SESSION_KEY || 'claw-console';
+const GATEWAY_WS_URL_DEFAULT = process.env.GATEWAY_WS_URL || 'ws://127.0.0.1:18789';
+const CONSOLE_SESSION_KEY_DEFAULT = process.env.CONSOLE_SESSION_KEY || 'claw-console';
+
 const DATA_DIR = process.env.DATA_DIR || '/home/master/clawd/console-data';
+
+// file-backed gateway override config (so different installs/accounts can swap integrations)
+const CODEX_CFG_FILE = path.join(DATA_DIR, 'codex-config.json');
+let codexCfg = readJson(CODEX_CFG_FILE, null);
+let GATEWAY_WS_URL = (codexCfg && codexCfg.gatewayWsUrl) ? String(codexCfg.gatewayWsUrl) : GATEWAY_WS_URL_DEFAULT;
+let CONSOLE_SESSION_KEY = (codexCfg && codexCfg.consoleSessionKey) ? String(codexCfg.consoleSessionKey) : CONSOLE_SESSION_KEY_DEFAULT;
+let gwLastError = null;
+let gwLastEvent = null;
+
+function recordGatewayEvent(kind, payload){
+  const ev = { ts: new Date().toISOString(), kind: String(kind||''), payload };
+  gwLastEvent = ev;
+  gwEvents.push(ev);
+  while (gwEvents.length > GW_EVENTS_MAX) gwEvents.shift();
+  try { appendJsonl(GATEWAY_EVENTS_FILE, ev); } catch {}
+  // best-effort live stream to consoles
+  try { broadcast({ type: 'gateway_event', event: ev }); } catch {}
+}
+
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const MSG_FILE = path.join(DATA_DIR, 'messages.jsonl');
 const WORK_FILE = path.join(DATA_DIR, 'worklog.jsonl');
 // Minimal ongoing transcript (tiny JSONL; appended on every user + bot msg)
 const TRANSCRIPT_FILE = path.join(DATA_DIR, 'transcript.jsonl');
+// Raw gateway events (for debugging Codex / gateway behavior)
+const GATEWAY_EVENTS_FILE = path.join(DATA_DIR, 'gateway-events.jsonl');
+const gwEvents = []; // ring buffer in memory
+const GW_EVENTS_MAX = 250;
 // Scheduled reports log
 const SCHED_FILE = path.join(DATA_DIR, 'scheduled.jsonl');
 
@@ -731,12 +755,83 @@ app.get('/api/status', (req, res) => {
     hostname: require('os').hostname(),
     serverBind: '127.0.0.1',
     clientIp,
+    gateway: {
+      connected: !!(gw && gw.connected),
+      url: GATEWAY_WS_URL,
+      sessionKey: CONSOLE_SESSION_KEY,
+      lastError: gwLastError,
+      lastEvent: gwLastEvent,
+    },
   });
 });
 
 app.get('/api/run', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true, state: runState });
+});
+
+app.get('/api/gateway/events', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const limit = Math.max(1, Math.min(500, Number(req.query.limit || 200)));
+  const tail = gwEvents.slice(-limit);
+  res.json({ ok:true, events: tail });
+});
+
+app.get('/api/ops/codex', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const cfg = readJson(CODEX_CFG_FILE, null) || {};
+  res.json({
+    ok:true,
+    config: cfg,
+    effective: {
+      gatewayWsUrl: GATEWAY_WS_URL,
+      consoleSessionKey: CONSOLE_SESSION_KEY,
+    },
+    gateway: {
+      connected: !!(gw && gw.connected),
+      lastError: gwLastError,
+      lastEvent: gwLastEvent,
+    }
+  });
+});
+
+app.post('/api/ops/codex', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+
+  const gatewayWsUrl = String(req.body?.gatewayWsUrl || '').trim();
+  const consoleSessionKey = String(req.body?.consoleSessionKey || '').trim();
+
+  const cfg = readJson(CODEX_CFG_FILE, null) || {};
+  if (gatewayWsUrl) cfg.gatewayWsUrl = gatewayWsUrl;
+  if (consoleSessionKey) cfg.consoleSessionKey = consoleSessionKey;
+  cfg.updatedAt = new Date().toISOString();
+
+  const ok = writeJson(CODEX_CFG_FILE, cfg);
+  if (!ok) return res.status(500).json({ ok:false, error:'write_failed' });
+
+  // apply immediately
+  CODExCfg = cfg;
+  GATEWAY_WS_URL = (cfg && cfg.gatewayWsUrl) ? String(cfg.gatewayWsUrl) : GATEWAY_WS_URL_DEFAULT;
+  CONSOLE_SESSION_KEY = (cfg && cfg.consoleSessionKey) ? String(cfg.consoleSessionKey) : CONSOLE_SESSION_KEY_DEFAULT;
+
+  // reconnect
+  try { gw.ws && gw.ws.close && gw.ws.close(); } catch {}
+  setTimeout(connectGateway, 50);
+
+  logWork('ops.codex.saved', { gatewayWsUrl: GATEWAY_WS_URL, consoleSessionKey: CONSOLE_SESSION_KEY });
+  res.json({ ok:true, effective: { gatewayWsUrl: GATEWAY_WS_URL, consoleSessionKey: CONSOLE_SESSION_KEY } });
+});
+
+app.post('/api/ops/codex/reconnect', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  try { gw.ws && gw.ws.close && gw.ws.close(); } catch {}
+  setTimeout(connectGateway, 50);
+  logWork('ops.codex.reconnect', {});
+  res.json({ ok:true });
 });
 
 app.get('/clawdpub/sop', (req, res) => {
@@ -2786,6 +2881,41 @@ function renderModulePage(key){
         </div>
 
         <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="font-weight:900; margin-bottom:8px;">Codex / Gateway integration</div>
+          <div class="muted" style="margin-bottom:10px;">This is where we verify we are receiving <i>all</i> gateway/Codex events and can swap integration details for the next install/account.</div>
+
+          <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
+            <div>
+              <div class="muted" style="margin-bottom:6px;">Gateway WS URL</div>
+              <input id="codexGatewayUrl" class="inp" placeholder="ws://127.0.0.1:18789" style="width:100%;" />
+              <div class="muted" style="margin-top:10px; margin-bottom:6px;">Console sessionKey</div>
+              <input id="codexSessionKey" class="inp" placeholder="claw-console" style="width:100%;" />
+              <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap;">
+                <button class="pill" id="codexSave" type="button">Save integration</button>
+                <button class="pill" id="codexReconnect" type="button">Reconnect gateway</button>
+                <span class="muted" id="codexMsg"></span>
+              </div>
+              <div class="muted" style="margin-top:10px;">Saved to: <code>${DATA_DIR}/codex-config.json</code></div>
+            </div>
+
+            <div>
+              <div style="font-weight:900; margin-bottom:8px;">Status</div>
+              <div id="codexStatus" class="muted">Loading…</div>
+              <div style="margin-top:10px; font-weight:900;">Last error</div>
+              <pre id="codexLastError" style="white-space:pre-wrap; word-break:break-word; margin:8px 0 0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.12); max-height: 160px; overflow:auto;"></pre>
+            </div>
+          </div>
+
+          <div style="margin-top:12px; font-weight:900;">Recent raw gateway events</div>
+          <div class="muted" style="margin:6px 0 10px;">If Codex returns an out-of-band message (like usage limit), it should appear here even if it doesn't become a chat message.</div>
+          <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
+            <button class="pill" id="codexEventsRefresh" type="button">Refresh events</button>
+            <label class="muted" style="display:flex; align-items:center; gap:8px;">Limit <input id="codexEventsLimit" class="inp" value="120" style="width:80px;" /></label>
+          </div>
+          <pre id="codexEvents" style="white-space:pre-wrap; word-break:break-word; margin:10px 0 0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.12); max-height: 40vh; overflow:auto;"></pre>
+        </div>
+
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
           <div style="font-weight:900; margin-bottom:8px;">Repeated questions (best-effort)</div>
           <div class="muted" style="margin-bottom:8px;">Scans transcript assistant messages for repeated question lines so we can turn them into rules or defaults.</div>
           <div id="opsRepeated" style="max-height: 50vh; overflow:auto; padding-right:6px;"></div>
@@ -4234,7 +4364,13 @@ function consoleBotSay(text) {
 gw.pending = new Map(); // id -> {resolve,reject,method}
 
 function gwSendReq(method, params) {
-  if (!gw.ws || gw.ws.readyState !== WebSocket.OPEN) throw new Error('gateway ws not connected');
+  if (!gw.ws || gw.ws.readyState !== WebSocket.OPEN) {
+    const eobj = { message: 'gateway ws not connected' };
+    gwLastError = { ts: new Date().toISOString(), message: eobj.message, raw: eobj };
+    const err = new Error(eobj.message);
+    err.raw = eobj;
+    throw err;
+  }
   const id = crypto.randomUUID();
   gw.ws.send(JSON.stringify({ type: 'req', id, method, params }));
   return new Promise((resolve, reject) => {
@@ -4243,7 +4379,11 @@ function gwSendReq(method, params) {
       const p = gw.pending.get(id);
       if (!p) return;
       gw.pending.delete(id);
-      reject(new Error('gateway timeout: ' + method));
+      const eobj = { message: 'gateway timeout: ' + method };
+      gwLastError = { ts: new Date().toISOString(), message: eobj.message, raw: eobj };
+      const err = new Error(eobj.message);
+      err.raw = eobj;
+      reject(err);
     }, 60_000);
   });
 }
@@ -4256,7 +4396,7 @@ function connectGateway() {
   }
 
   const url = GATEWAY_WS_URL.replace(/^http/, 'ws');
-  logWork('gateway.connecting', { url });
+  logWork('gateway.connecting', { url, sessionKey: CONSOLE_SESSION_KEY });
 
   const ws = new WebSocket(url);
   gw.ws = ws;
@@ -4268,15 +4408,27 @@ function connectGateway() {
   });
 
   ws.on('message', (data) => {
-    const msg = safeJsonParse(data.toString('utf8'));
-    if (!msg) return;
+    const raw = data.toString('utf8');
+    const msg = safeJsonParse(raw);
+    if (!msg) {
+      recordGatewayEvent('parse_error', { raw: raw.slice(0, 8000) });
+      return;
+    }
+    recordGatewayEvent('recv', msg);
 
     if (msg.type === 'res' && typeof msg.id === 'string') {
       const p = gw.pending.get(msg.id);
       if (p) {
         gw.pending.delete(msg.id);
         if (msg.ok) p.resolve(msg.payload);
-        else p.reject(new Error(msg.error?.message || 'gateway error'));
+        else {
+          const eobj = msg.error || { message: 'gateway error' };
+          gwLastError = { ts: new Date().toISOString(), message: String(eobj.message || 'gateway error'), raw: eobj };
+          recordGatewayEvent('res_error', { method: p.method, error: eobj });
+          const err = new Error(String(eobj.message || 'gateway error'));
+          err.raw = eobj;
+          p.reject(err);
+        }
       }
       // continue processing below for connect
     }
@@ -4337,6 +4489,7 @@ function connectGateway() {
   });
 
   ws.on('error', (e) => {
+    gwLastError = { ts: new Date().toISOString(), message: String(e) };
     logWork('gateway.ws.error', { error: String(e) });
   });
 }
@@ -4411,6 +4564,8 @@ function acceptMessage({ text, attachments }) {
         logWork('gateway.reply.timeout', { runId });
         setInFlight(false);
       } catch (e) {
+        const detail = (e && e.raw) ? e.raw : (e && e.message) ? e.message : String(e);
+        consoleBotSay('Codex/Gateway error:\n' + (typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2)));
         logWork('gateway.chat.send.error', { error: String(e) });
         setInFlight(false);
       }

@@ -1425,6 +1425,10 @@
       if (j.type === 'run' && j.state) {
         if (j.state.inFlight) setThinking('Thinking…');
       }
+      if (j.type === 'gateway_event' && j.event) {
+        // Only show in console log; Ops page can fetch the full list.
+        try { console.log('gateway_event', j.event); } catch {}
+      }
     });
 
     ws.addEventListener('close', (ev) => {

@@ -532,9 +532,10 @@
 
   if (chatSend) chatSend.addEventListener('click', sendChat);
   if (chatJump) chatJump.addEventListener('click', scrollChatBottom);
+  // Enter-to-send in ClawdCode chat column. Shift+Enter inserts newline.
   if (chatInput) {
     chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendChat();
       }

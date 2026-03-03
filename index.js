@@ -3016,7 +3016,7 @@ function renderModulePage(key){
           .ccPanelBody.tight { padding:10px; overflow:hidden; min-height:0; }
           .ccEditor { width:100%; max-width:100%; box-sizing:border-box; height:100%; min-height:0; flex:1; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
           .ccSmall { font-size: 12px; }
-          .ccIframe { width:100%; height: 100%; min-height: 56vh; border:0; border-radius:12px; background:#0b1020; }
+          .ccIframe { width:100%; height: 100%; min-height: 0; border:0; border-radius:12px; background:#0b1020; flex:1; }
           .ccMono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
           .ccGrow { flex:1; min-height:0; }
         </style>
@@ -3072,14 +3072,14 @@ function renderModulePage(key){
                 <button class="pill" id="codeExpApp" type="button">Expand</button>
               </div>
             </div>
-            <div class="ccPanelBody" style="padding-top:8px;">
+            <div class="ccPanelBody" style="padding-top:8px; display:flex; flex-direction:column; gap:10px; flex:1; min-height:0;">
               <div class="muted ccSmall">Server-side preview (proxied). This loads the app running on the Console host, not your laptop.</div>
-              <div class="row" style="margin-top:8px; gap:10px; align-items:center; flex-wrap:wrap;">
+              <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap;">
                 <input id="appUrl" class="ccMono" value="/proxy/5000/" style="flex:1; min-width: 260px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text);" />
                 <button class="pill" id="appGo" type="button">Go</button>
                 <span class="muted ccSmall" id="appMsg"></span>
               </div>
-              <div style="margin-top:10px;">
+              <div style="flex:1; min-height:0;">
                 <iframe id="appFrame" class="ccIframe" src="/proxy/5000/"></iframe>
               </div>
             </div>

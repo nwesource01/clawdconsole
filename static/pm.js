@@ -428,7 +428,9 @@
     if (!host) return;
     host.innerHTML = '';
 
-    for (const col of (pm.columns || [])){
+    const colsArr = (pm.columns || []);
+    for (let colIdx = 0; colIdx < colsArr.length; colIdx++){
+      const col = colsArr[colIdx];
       const el = document.createElement('div');
       el.className = 'col';
 
@@ -456,6 +458,16 @@
           + '</div>';
       }).join('');
 
+      const addColHtml = (colIdx === colsArr.length - 1) ? (
+        '<div class="card" style="opacity:.9; border-style:dashed; cursor:default;">'
+        + '<div class="cardRow" style="justify-content:space-between; gap:10px; align-items:center;">'
+        +   '<b>Add a column</b>'
+        +   '<button class="addBtn" type="button" data-addcol="1">+ Column</button>'
+        + '</div>'
+        + '<p class="muted" style="margin-top:6px;">Creates a new column to the right.</p>'
+        + '</div>'
+      ) : '';
+
       el.innerHTML = ''
         + '<div class="colHead">'
         +   '<b>' + esc(col.title) + '</b>'
@@ -468,7 +480,7 @@
         +     '<button class="addBtn" type="button" data-add="' + esc(col.id) + '">+ Card</button>'
         +   '</div>'
         + '</div>'
-        + '<div class="cards">' + cardsHtml + '</div>';
+        + '<div class="cards">' + cardsHtml + addColHtml + '</div>';
 
       host.appendChild(el);
     }
@@ -488,6 +500,9 @@
     });
     Array.from(document.querySelectorAll('button[data-add]')).forEach(b => {
       b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); addCard(b.getAttribute('data-add')); });
+    });
+    Array.from(document.querySelectorAll('button[data-addcol]')).forEach(b => {
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); addColumn(); });
     });
 
     // card actions
@@ -581,17 +596,11 @@
 
   // Initial render from boot model; then refresh in background
   try { render(); setPmStatus('rendered (boot model)'); } catch { setPmStatus('render failed'); }
-  alignMenuToLastColumn();
 
   const btn = document.getElementById('pmRefresh');
-  if (btn) btn.addEventListener('click', () => { load().finally(() => alignMenuToLastColumn()); });
+  if (btn) btn.addEventListener('click', () => { load(); });
 
-  const addColBtn = document.getElementById('pmAddCol');
-  if (addColBtn) addColBtn.addEventListener('click', () => { addColumn(); });
+  // + Column button is rendered inline under the last column.
 
-  window.addEventListener('resize', () => alignMenuToLastColumn());
-  const bw = document.getElementById('pmBoardWrap');
-  if (bw) bw.addEventListener('scroll', () => alignMenuToLastColumn());
-
-  load().finally(() => alignMenuToLastColumn());
+  load();
 })();

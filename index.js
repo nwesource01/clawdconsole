@@ -4448,11 +4448,10 @@ app.get('/pm', (req, res) => {
         <div class="muted small">Cards are task-groups. Click a card to generate + manage to-dos.</div>
         <div class="muted small" id="pm_js_status" style="margin-top:6px;">JS: (loading…)</div>
       </div>
-      <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; flex:1; min-width: 260px;">
+      <div class="row" style="gap:10px; flex-wrap:wrap; align-items:flex-start; justify-content:flex-end; flex:1; min-width: 260px;">
         <button class="btn" id="pmRefresh" type="button">Refresh</button>
         <div id="pmMenuWrap" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end;">
           ${appsMenuHtml('/pm')}
-          <button class="pillbtn" id="pmAddCol" type="button">+ Column</button>
         </div>
       </div>
     </div>

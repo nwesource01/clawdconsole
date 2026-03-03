@@ -458,13 +458,9 @@
           + '</div>';
       }).join('');
 
-      const addColHtml = (colIdx === colsArr.length - 1) ? (
-        '<div class="card" style="opacity:.9; border-style:dashed; cursor:default;">'
-        + '<div class="cardRow" style="justify-content:space-between; gap:10px; align-items:center;">'
-        +   '<b>Add a column</b>'
-        +   '<button class="addBtn" type="button" data-addcol="1">+ Column</button>'
-        + '</div>'
-        + '<p class="muted" style="margin-top:6px;">Creates a new column to the right.</p>'
+      const addColFooter = (colIdx === colsArr.length - 1) ? (
+        '<div class="colFooter" style="margin-top:10px; padding:10px; border:1px dashed rgba(255,255,255,0.14); border-radius:14px; background: rgba(255,255,255,0.02); display:flex; justify-content:center;">'
+        + '<button class="addBtn" type="button" data-addcol="1">+ Column</button>'
         + '</div>'
       ) : '';
 
@@ -480,7 +476,8 @@
         +     '<button class="addBtn" type="button" data-add="' + esc(col.id) + '">+ Card</button>'
         +   '</div>'
         + '</div>'
-        + '<div class="cards">' + cardsHtml + addColHtml + '</div>';
+        + '<div class="cards">' + cardsHtml + '</div>'
+        + addColFooter;
 
       host.appendChild(el);
     }

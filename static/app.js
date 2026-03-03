@@ -31,7 +31,11 @@
   let didInitialChatScroll = false;
 
   function dbg(s) {
-    if (debugEl) debugEl.textContent = s || '';
+    if (!debugEl) return;
+    const txt = String(s || '');
+    debugEl.textContent = txt;
+    // Keep layout stable: slot is fixed-height in HTML; just hide text when empty.
+    debugEl.style.visibility = txt ? 'visible' : 'hidden';
   }
 
   async function loadBuild() {
@@ -44,6 +48,16 @@
     if (statusEl) statusEl.textContent = 'JS loaded (' + BUILD + ')…';
     dbg('');
     console.log('Clawd Console JS loaded:', BUILD);
+  }
+
+  async function loadBrand(){
+    try {
+      const res = await fetch(apiUrl('/api/ops/brand'), { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (j && j.ok && j.brand && j.brand.assistantName) {
+        AGENT_NAME = String(j.brand.assistantName);
+      }
+    } catch {}
   }
 
   let pendingAttachments = [];
@@ -92,6 +106,13 @@
 
   const repoList = document.getElementById('repoList');
   const repoRefresh = document.getElementById('repoRefresh');
+  const repoTabCommits = document.getElementById('repoTabCommits');
+  const repoTabInstall = document.getElementById('repoTabInstall');
+  const repoViewCommits = document.getElementById('repoViewCommits');
+  const repoViewInstall = document.getElementById('repoViewInstall');
+  const repoInstallGuide = document.getElementById('repoInstallGuide');
+  const repoTarLink = document.getElementById('repoTarLink');
+  const repoTarHint = document.getElementById('repoTarHint');
 
   function setAppTab(which){
     const map = [
@@ -143,13 +164,57 @@
     }
   }
 
+  async function loadRepoInstall(){
+    if (repoInstallGuide) repoInstallGuide.textContent = 'Loading…';
+    try {
+      const res = await fetch(apiUrl('/api/repo/install'), { credentials: 'include', cache: 'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      const guide = String(j.guide || '');
+      if (repoInstallGuide) repoInstallGuide.textContent = guide || '(no guide yet)';
+
+      const tarUrl = j.tarUrl ? String(j.tarUrl) : '';
+      if (repoTarLink) {
+        if (tarUrl) {
+          repoTarLink.href = tarUrl;
+          repoTarLink.style.display = '';
+        } else {
+          repoTarLink.style.display = 'none';
+        }
+      }
+      if (repoTarHint) repoTarHint.style.display = tarUrl ? 'none' : '';
+    } catch (e) {
+      if (repoInstallGuide) repoInstallGuide.textContent = 'Failed to load guide.';
+    }
+  }
+
+  function setRepoSubTab(which){
+    const isCommits = which === 'commits';
+    if (repoViewCommits) repoViewCommits.style.display = isCommits ? '' : 'none';
+    if (repoViewInstall) repoViewInstall.style.display = isCommits ? 'none' : '';
+    if (repoTabCommits) repoTabCommits.style.borderColor = isCommits ? 'rgba(34,198,198,.55)' : 'rgba(231,231,231,0.12)';
+    if (repoTabInstall) repoTabInstall.style.borderColor = isCommits ? 'rgba(231,231,231,0.12)' : 'rgba(34,198,198,.55)';
+  }
+
   if (tabPM) tabPM.addEventListener('click', () => setAppTab('pm'));
-  if (tabRepo) tabRepo.addEventListener('click', () => { setAppTab('repo'); loadRepoCommits(); });
+  if (tabRepo) tabRepo.addEventListener('click', () => {
+    setAppTab('repo');
+    // default view
+    setRepoSubTab('commits');
+    loadRepoCommits();
+  });
   if (tabSec) tabSec.addEventListener('click', () => setAppTab('sec'));
   if (tabOps) tabOps.addEventListener('click', () => setAppTab('ops'));
   if (tabPub) tabPub.addEventListener('click', () => setAppTab('pub'));
   if (tabBuild) tabBuild.addEventListener('click', () => setAppTab('build'));
-  if (repoRefresh) repoRefresh.addEventListener('click', loadRepoCommits);
+  if (repoRefresh) repoRefresh.addEventListener('click', () => {
+    // refresh whichever view is active
+    if (repoViewInstall && repoViewInstall.style.display !== 'none') loadRepoInstall();
+    else loadRepoCommits();
+  });
+
+  if (repoTabCommits) repoTabCommits.addEventListener('click', () => { setRepoSubTab('commits'); loadRepoCommits(); });
+  if (repoTabInstall) repoTabInstall.addEventListener('click', () => { setRepoSubTab('install'); loadRepoInstall(); });
 
   // default
   setAppTab('pm');
@@ -754,7 +819,7 @@
   }
 
   const USER_NAME = 'Charles';
-  const AGENT_NAME = 'Clawdio';
+  let AGENT_NAME = 'Clawdio';
 
   function fmtTs(iso) {
     try {
@@ -1187,7 +1252,7 @@
         return;
       }
       dbg('');
-      statusEl.textContent = 'Talking to Clawdio • your IP: ' + (j.clientIp || '?') + ' • server: ' + (j.hostname || '?') + ' • build: ' + (j.build || '?');
+      statusEl.textContent = 'Talking to ' + AGENT_NAME + ' • your IP: ' + (j.clientIp || '?') + ' • server: ' + (j.hostname || '?') + ' • build: ' + (j.build || '?');
 
       // thinking light survives reloads, but should also self-clear
       if (j.inFlight) {
@@ -1432,13 +1497,23 @@
     });
 
     ws.addEventListener('close', (ev) => {
-      dbg('ws closed: ' + ev.code);
+      const code = ev && typeof ev.code === 'number' ? ev.code : 0;
+      dbg('ws closed: ' + code);
+
+      // 4401 = not authorized (session/cookie invalid). Don't spin reconnect loops.
+      if (code === 4401) {
+        dbg('ws closed: 4401 unauthorized. Refresh the page and log in again.');
+        try { resignLeader(); } catch {}
+        return;
+      }
+
       // 4429 = server cap hit. Don't spin reconnect loops.
-      if (ev && ev.code === 4429) {
+      if (code === 4429) {
         dbg('ws closed: too many consoles open (cap). This tab is in follower mode.');
         resignLeader();
         return;
       }
+
       // If we are still leader, try to reconnect. If not, just idle.
       if (isLeader) setTimeout(connectWs, 1500);
     });
@@ -1670,7 +1745,7 @@
   initRulesAccordion();
 
   setThinking('Idle');
-  loadBuild().then(updateStatus);
+  Promise.all([loadBuild(), loadBrand()]).then(updateStatus);
   refresh();
   refreshWorklog();
   refreshDE();

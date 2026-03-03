@@ -383,7 +383,20 @@ app.use((req, res, next) => {
   // set session cookie so fetch() works without Authorization header
   const token = newToken();
   sessions.set(token, { exp: Date.now() + SESS_TTL_MS, unlocks: {} });
-  res.setHeader('Set-Cookie', `${SESS_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${Math.floor(SESS_TTL_MS/1000)}; HttpOnly; Secure; SameSite=Strict`);
+
+  // Secure cookies on plain HTTP will be dropped by browsers, causing repeated auth prompts.
+  // Only mark Secure when we're actually on HTTPS (or behind a TLS proxy that sets X-Forwarded-Proto).
+  const xfProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  const isHttps = (req.secure === true) || xfProto === 'https';
+  const cookieParts = [
+    `${SESS_COOKIE}=${encodeURIComponent(token)}`,
+    'Path=/',
+    `Max-Age=${Math.floor(SESS_TTL_MS/1000)}`,
+    'HttpOnly',
+    (isHttps ? 'Secure' : null),
+    'SameSite=Strict'
+  ].filter(Boolean);
+  res.setHeader('Set-Cookie', cookieParts.join('; '));
 
   return next();
 });
@@ -897,8 +910,12 @@ app.get('/clawdpub/sop', (req, res) => {
   res.type('text/plain; charset=utf-8').send(txt);
 });
 
+const ADMINONLY_ENABLED = String(process.env.ADMINONLY_ENABLED || '').trim() === '1';
+
 app.get('/adminonly', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
+  if (!ADMINONLY_ENABLED) return res.status(404).type('text/plain').send('Not found');
+
   res.type('text/html; charset=utf-8').send(`<!doctype html>
 <html>
 <head>
@@ -1361,6 +1378,18 @@ app.get('/api/repo/commits', async (req, res) => {
     });
 
     res.json({ ok: true, repoDir, commits });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+app.get('/api/repo/install', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const guidePath = path.join(__dirname, '..', 'docs', 'SETUP-QUESTIONS.md');
+    const guide = fs.existsSync(guidePath) ? fs.readFileSync(guidePath, 'utf8') : '';
+    const tarUrl = (process.env.INSTALL_TAR_URL || '').trim();
+    res.json({ ok: true, tarUrl: tarUrl || null, guide: guide || '' });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
   }
@@ -1855,8 +1884,79 @@ app.post('/api/code/breakglass', (req, res) => {
   }
 });
 
-// --- ClawdOps (operator profile + repeated questions) ---
+// --- ClawdOps (operator profile + repeated questions + brand) ---
 const OPS_PROFILE_FILE = path.join(DATA_DIR, 'ops-profile.md');
+
+// Brand / assistant name (UI only)
+const BRAND_FILE = path.join(DATA_DIR, 'brand.json');
+function readBrand(){
+  try {
+    const j = readJson(BRAND_FILE, null);
+    const assistantName = (j && typeof j.assistantName === 'string' && j.assistantName.trim()) ? j.assistantName.trim().slice(0, 48) : 'Clawdio';
+    return { assistantName };
+  } catch {
+    return { assistantName: 'Clawdio' };
+  }
+}
+function writeBrand(patch){
+  const cur = readBrand();
+  const next = { ...cur };
+  if (patch && typeof patch.assistantName === 'string') {
+    const v = patch.assistantName.trim().slice(0, 48);
+    if (v) next.assistantName = v;
+  }
+  try {
+    writeJson(BRAND_FILE, next);
+    return next;
+  } catch {
+    return null;
+  }
+}
+
+app.get('/api/ops/brand', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    return res.json({ ok:true, brand: readBrand() });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+app.post('/api/ops/brand', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const assistantName = String(req.body?.assistantName || '');
+    const out = writeBrand({ assistantName });
+    if (!out) return res.status(500).json({ ok:false, error:'write_failed' });
+    logWork('ops.brand.saved', { assistantName: out.assistantName });
+    return res.json({ ok:true, brand: out });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+// Clawdwell first-run notes (file-backed; safe from git pulls)
+const CLAWDWELL_NOTES_FILE = path.join(DATA_DIR, 'clawdwell-notes.md');
+app.get('/api/ops/clawdwell-notes', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const text = fs.existsSync(CLAWDWELL_NOTES_FILE) ? fs.readFileSync(CLAWDWELL_NOTES_FILE, 'utf8') : '';
+    return res.json({ ok:true, text });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+app.post('/api/ops/clawdwell-notes', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const text = String(req.body?.text || '');
+    fs.writeFileSync(CLAWDWELL_NOTES_FILE, text, 'utf8');
+    logWork('ops.clawdwell_notes.saved', { bytes: Buffer.byteLength(text, 'utf8') });
+    return res.json({ ok:true });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 app.get('/api/ops/profile', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
@@ -2926,6 +3026,8 @@ function renderModulePage(key){
           <button class="pill" id="opsTabQ" type="button">Questionnaire</button>
           <button class="pill" id="opsTabG" type="button">Gateway</button>
           <button class="pill" id="opsTabC" type="button">Codex</button>
+          <button class="pill" id="opsTabClawd" type="button">Clawd</button>
+          <button class="pill" id="opsTabClawdwell" type="button">Clawdwell</button>
           <span class="muted" id="opsTabMsg"></span>
         </div>
 
@@ -3014,6 +3116,49 @@ function renderModulePage(key){
             </div>
           </div>
         </div><!-- /opsTabCodex -->
+
+        <div id="opsTabClawdView" style="display:none;">
+          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Clawd</div>
+            <div class="muted" style="margin-bottom:10px;">UI branding only. This does not rename services/hosts; it just changes how the Console refers to the assistant.</div>
+
+            <div class="twoCol">
+              <div>
+                <div class="muted" style="margin-bottom:6px;">Assistant name</div>
+                <input id="brandAssistantName" class="inp" placeholder="Clawdwell" style="width:100%; max-width: 420px;" />
+                <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+                  <button class="pill" id="brandSave" type="button">Save</button>
+                  <button class="pill" id="brandReload" type="button">Reload</button>
+                  <span class="muted" id="brandMsg"></span>
+                </div>
+                <div class="muted" style="margin-top:10px;">Saved to: <code>${DATA_DIR}/brand.json</code></div>
+              </div>
+              <div>
+                <div style="font-weight:900; margin-bottom:8px;">Current</div>
+                <div id="brandCurrent" class="muted">Loading…</div>
+                <div class="muted" style="margin-top:10px;">Tip: after changing the name, refresh open tabs to see it everywhere.</div>
+              </div>
+            </div>
+          </div>
+        </div><!-- /opsTabClawdView -->
+
+        <div id="opsTabClawdwellView" style="display:none;">
+          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Clawdwell Notes</div>
+            <div class="muted" style="margin-bottom:10px;">Running log for the first-run experience (aim: first 100 steps). File-backed in DATA_DIR so it survives code updates.</div>
+
+            <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+              <button class="pill" id="cwSave" type="button">Save</button>
+              <button class="pill" id="cwReload" type="button">Reload</button>
+              <span class="muted" id="cwMsg"></span>
+            </div>
+
+            <div style="margin-top:12px;">
+              <textarea id="cwNotes" placeholder="# Clawdwell first-run log\n\n- Step 1: ..." style="width:100%; min-height:360px;"></textarea>
+              <div class="muted" style="margin-top:8px;">Saved to: <code>${DATA_DIR}/clawdwell-notes.md</code></div>
+            </div>
+          </div>
+        </div><!-- /opsTabClawdwellView -->
 
       </div>
       <script src="/static/ops.js"></script>
@@ -3966,16 +4111,19 @@ app.get('/pm', (req, res) => {
     @media (max-width: 780px){ .col{flex-basis: 280px;} }
     .colHead{padding:12px 12px; border-bottom:1px solid rgba(255,255,255,.08); display:flex; justify-content:space-between; align-items:center}
     .colHead b{font-size:14px}
-    .colActions{display:flex; gap:8px; align-items:center}
-    .mini2{border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); color: rgba(231,231,231,.86); border-radius: 10px; padding:6px 8px; cursor:pointer; font-size:12px}
-    .mini2:hover{background: rgba(255,255,255,.08)}
-    .addBtn{border:1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.04); color: rgba(231,231,231,.85); border-radius: 999px; padding:6px 10px; cursor:pointer; font-size:12px}
-    .addBtn:hover{background: rgba(255,255,255,.07)}
+    .colActions{display:flex; gap:2px; align-items:center}
+    /* Column header buttons (borderless + tight) */
+    .mini2{border:none; background: rgba(255,255,255,.05); color: rgba(231,231,231,.86); border-radius: 10px; padding:3px 5px; cursor:pointer; font-size:11px; line-height:1}
+    .mini2:hover{background: rgba(255,255,255,.09)}
+    .miniDanger{ background: rgba(255,97,97,.10); }
+    .miniDanger:hover{ background: rgba(255,97,97,.14); }
+    .addBtn{border:none; background: rgba(255,255,255,.05); color: rgba(231,231,231,.85); border-radius: 999px; padding:3px 7px; cursor:pointer; font-size:11px; line-height:1}
+    .addBtn:hover{background: rgba(255,255,255,.09)}
 
     .cardRow{display:flex; justify-content:space-between; gap:8px; align-items:flex-start}
-    .cardBtns{display:flex; gap:6px; align-items:center; opacity:.85}
-    .cardBtns button{border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); color: rgba(231,231,231,.86); border-radius: 10px; padding:4px 6px; cursor:pointer; font-size:12px}
-    .cardBtns button:hover{background: rgba(255,255,255,.08)}
+    .cardBtns{display:flex; gap:2px; align-items:center; opacity:.85}
+    .cardBtns button{border:none; background: rgba(255,255,255,.05); color: rgba(231,231,231,.86); border-radius: 10px; padding:3px 5px; cursor:pointer; font-size:11px; line-height:1}
+    .cardBtns button:hover{background: rgba(255,255,255,.09)}
 
     .cards{padding:12px; display:flex; flex-direction:column; gap:10px; min-height: 120px}
     .card{border:1px solid rgba(255,255,255,.12); border-radius:12px; background: rgba(17,24,42,.88); padding:10px; position:relative; overflow:hidden}
@@ -4012,6 +4160,8 @@ app.get('/pm', (req, res) => {
     .box *::-webkit-scrollbar-track, #cm_todos::-webkit-scrollbar-track{ background: rgba(0,0,0,0.18); border-radius: 10px; }
     .pillbtn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 999px; padding:8px 10px; cursor:pointer; font-size:12px}
     .pillbtn:hover{border-color: rgba(34,198,198,.65)}
+    .pillDanger{ border-color: rgba(255,97,97,.45); background: rgba(255,97,97,.10); }
+    .pillDanger:hover{ border-color: rgba(255,97,97,.70); background: rgba(255,97,97,.14); }
 
     .todo{display:grid; grid-template-columns: auto 1fr auto; gap:8px; align-items:center; padding:8px 10px; border:1px solid rgba(255,255,255,.10); border-radius:12px; background: rgba(255,255,255,.03); margin-top:8px}
     .todo input[type=text]{width:100%; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.10); background:#0d1426; color:var(--text)}
@@ -4131,6 +4281,7 @@ app.get('/pm', (req, res) => {
             <button class="pillbtn" id="cm_movedn" type="button">Move ↓</button>
           </div>
           <div class="rowbtn" style="gap:10px;">
+            <button class="pillbtn pillDanger" id="cm_trash" type="button" title="Delete card">🗑 Delete</button>
             <button class="pillbtn" id="cm_done" type="button">Mark Done (Archive)</button>
             <button class="pillbtn" id="cm_save" type="button">Save</button>
           </div>
@@ -5029,15 +5180,37 @@ app.get('/', (req, res) => {
         </div>
 
         <div id="panelRepo" style="display:none; flex-direction:column; gap: 10px;">
-          <div class="row" style="justify-content:space-between; align-items:center;">
-            <div class="muted">ClawdRepo - commits (this project)</div>
-            <div class="row" style="gap:8px;">
+          <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap;">
+            <div class="muted">ClawdRepo</div>
+            <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+              <button class="pill" id="repoTabCommits" type="button" style="cursor:pointer;">Commits</button>
+              <button class="pill" id="repoTabInstall" type="button" style="cursor:pointer;">Install</button>
+              <span style="width:12px;"></span>
               <a class="pill" id="repoOpen" href="https://github.com/nwesource01/clawdconsole" target="_blank" rel="noopener" style="cursor:pointer; text-decoration:none;">GitHub</a>
               <button class="pill" id="repoRefresh" type="button" style="cursor:pointer;">Refresh</button>
             </div>
           </div>
           <div class="muted">Local repo: <code>${__dirname}</code></div>
-          <div id="repoList" style="margin-top:6px; background: rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px; max-height: 360px; overflow:auto;"></div>
+
+          <div id="repoViewCommits">
+            <div class="muted" style="margin-top:2px;">Recent commits (this project).</div>
+            <div id="repoList" style="margin-top:6px; background: rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px; max-height: 360px; overflow:auto;"></div>
+          </div>
+
+          <div id="repoViewInstall" style="display:none;">
+            <div class="muted" style="margin-top:2px;">Install bundle + quickstart docs.</div>
+            <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:8px;">
+              <div>
+                <div><b>Bundle (tar)</b></div>
+                <div class="muted small">Link to the distributable install bundle.</div>
+              </div>
+              <a id="repoTarLink" class="pill" href="#" target="_blank" rel="noopener" style="text-decoration:none; display:none;">Download tar →</a>
+            </div>
+            <div id="repoTarHint" class="muted small" style="margin-top:6px;">(No tar link configured yet.)</div>
+
+            <div style="margin-top:12px; font-weight:900;">User guide</div>
+            <div id="repoInstallGuide" style="margin-top:6px; white-space:pre-wrap; background: rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px; max-height: 420px; overflow:auto;"></div>
+          </div>
         </div>
 
         <div id="panelSec" style="display:none; flex-direction:column; gap: 10px;">
@@ -5267,12 +5440,12 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
             <button id="btnReviewWeek" type="button" class="qbtn">Review Week</button>
             <button id="btnRepeatLast" type="button" class="qbtn">Repeat Last</button>
             <button id="btnAddBtn" type="button" class="qbtn">Add a Button</button>
-            <a id="btnAdmin" class="qbtn" href="/adminonly" target="_blank" rel="noopener" title="Admin" style="display:inline-flex; align-items:center; justify-content:center; gap:8px; text-decoration:none;">⚙️</a>
+<!-- adminonly disabled by default -->
           </div>
         </div>
 
         <!-- preview moved to ClawdSnap -->
-        <div class="muted" id="debug" style="margin-top: 10px;"></div>
+        <div class="muted" id="debug" style="margin-top: 10px; min-height:18px; height:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>
       </div>
     </div>
 
@@ -5550,8 +5723,9 @@ function startTelemetry(){
   logWork('telemetry.opt_in', { base: TELEMETRY_BASE_URL, installUrl: TELEMETRY_INSTALL_URL, dailyUrl: TELEMETRY_DAILY_URL });
 }
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Clawd Console listening on http://127.0.0.1:${PORT}`);
+const BIND = process.env.BIND || process.env.HOST || '127.0.0.1';
+server.listen(PORT, BIND, () => {
+  console.log(`Clawd Console listening on http://${BIND}:${PORT}`);
   // Start gateway bridge
   connectGateway();
   // Start opt-in telemetry pinger

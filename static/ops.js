@@ -134,24 +134,121 @@
   const tabQ = $('opsTabQ');
   const tabG = $('opsTabG');
   const tabC = $('opsTabC');
+  const tabClawd = $('opsTabClawd');
+  const tabClawdwell = $('opsTabClawdwell');
   const tabMsg = $('opsTabMsg');
   const viewQ = $('opsTabQuestionnaire');
   const viewG = $('opsTabGateway');
   const viewC = $('opsTabCodex');
+  const viewClawd = $('opsTabClawdView');
+  const viewClawdwell = $('opsTabClawdwellView');
 
   function setTabMsg(t){ if (tabMsg) tabMsg.textContent = t || ''; }
   function showTab(which){
     if (viewQ) viewQ.style.display = (which === 'q') ? '' : 'none';
     if (viewG) viewG.style.display = (which === 'g') ? '' : 'none';
     if (viewC) viewC.style.display = (which === 'c') ? '' : 'none';
+    if (viewClawd) viewClawd.style.display = (which === 'clawd') ? '' : 'none';
+    if (viewClawdwell) viewClawdwell.style.display = (which === 'clawdwell') ? '' : 'none';
   }
 
   if (tabQ) tabQ.addEventListener('click', () => showTab('q'));
   if (tabG) tabG.addEventListener('click', () => showTab('g'));
   if (tabC) tabC.addEventListener('click', () => showTab('c'));
+  if (tabClawd) tabClawd.addEventListener('click', () => showTab('clawd'));
+  if (tabClawdwell) tabClawdwell.addEventListener('click', () => showTab('clawdwell'));
 
   // default
   showTab('q');
+
+  // initial loads
+  loadBrand();
+  loadClawdwellNotes();
+
+  // --- Clawdwell notes ---
+  const cwTa = $('cwNotes');
+  const cwSave = $('cwSave');
+  const cwReload = $('cwReload');
+  const cwMsg = $('cwMsg');
+  const setCwMsg = (t) => { try { if (cwMsg) cwMsg.textContent = t || ''; } catch {} };
+
+  async function loadClawdwellNotes(){
+    setCwMsg('Loading…');
+    try {
+      const res = await fetch('/api/ops/clawdwell-notes', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      if (cwTa) cwTa.value = String(j.text || '');
+      setCwMsg('Loaded.');
+      setTimeout(() => setCwMsg(''), 900);
+    } catch (e) {
+      setCwMsg('Load failed: ' + String(e));
+    }
+  }
+
+  async function saveClawdwellNotes(){
+    setCwMsg('Saving…');
+    try {
+      const res = await fetch('/api/ops/clawdwell-notes', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        body: JSON.stringify({ text: cwTa ? cwTa.value : '' })
+      });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      setCwMsg('Saved.');
+      setTimeout(() => setCwMsg(''), 900);
+    } catch (e) {
+      setCwMsg('Save failed: ' + String(e));
+    }
+  }
+
+  if (cwSave) cwSave.addEventListener('click', saveClawdwellNotes);
+  if (cwReload) cwReload.addEventListener('click', loadClawdwellNotes);
+
+  // --- Brand / assistant name ---
+  const bName = $('brandAssistantName');
+  const bSave = $('brandSave');
+  const bReload = $('brandReload');
+  const bMsg = $('brandMsg');
+  const bCur = $('brandCurrent');
+  function setBMsg(t){ if (bMsg) bMsg.textContent = t || ''; }
+
+  async function loadBrand(){
+    try {
+      const res = await fetch('/api/ops/brand', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      const name = String(j.brand && j.brand.assistantName ? j.brand.assistantName : '');
+      if (bName) bName.value = name;
+      if (bCur) bCur.textContent = name ? ('assistantName=' + name) : '(unset)';
+    } catch (e) {
+      if (bCur) bCur.textContent = 'Failed to load: ' + String(e);
+    }
+  }
+
+  async function saveBrand(){
+    setBMsg('Saving…');
+    try {
+      const res = await fetch('/api/ops/brand', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        body: JSON.stringify({ assistantName: bName ? bName.value : '' })
+      });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      setBMsg('Saved.');
+      setTimeout(() => setBMsg(''), 900);
+      await loadBrand();
+    } catch (e) {
+      setBMsg('Save failed: ' + String(e));
+    }
+  }
+
+  if (bSave) bSave.addEventListener('click', saveBrand);
+  if (bReload) bReload.addEventListener('click', loadBrand);
 
   // --- Gateway integration panel ---
   const cUrl = $('codexGatewayUrl');

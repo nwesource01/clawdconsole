@@ -36,6 +36,7 @@
   const cmClose = $('cm_close');
   const cmSave = $('cm_save');
   const cmDone = $('cm_done');
+  const cmTrash = $('cm_trash');
   const cmGen = $('cm_generate');
   const cmAdd = $('cm_addtodo');
   const cmTodos = $('cm_todos');
@@ -201,6 +202,24 @@
     return done;
   }
 
+  async function deleteCard(){
+    const fc = findCard();
+    if (!fc) return;
+    const { col, card } = fc;
+
+    const title = String(card.title || card.id || 'this card');
+    const ok = confirm('Delete card "' + title + '"? This cannot be undone.');
+    if (!ok) return;
+
+    col.cards = Array.isArray(col.cards) ? col.cards : [];
+    col.cards = col.cards.filter(x => x && x.id !== card.id);
+
+    await persist();
+    render();
+    closeModal();
+    setPmStatus('deleted card');
+  }
+
   async function markDoneArchive(){
     const fc = findCard();
     if (!fc) return;
@@ -347,6 +366,22 @@
     render();
   }
 
+  async function deleteColumn(colId){
+    const cols = (PM && PM.columns) ? PM.columns : [];
+    const i = cols.findIndex(c => c && c.id === colId);
+    if (i < 0) return;
+    const col = cols[i];
+    const n = Array.isArray(col.cards) ? col.cards.length : 0;
+
+    const name = String(col.title || col.id || 'this column');
+    const ok = confirm('Delete column "' + name + '" and all ' + n + ' card(s)? This cannot be undone.');
+    if (!ok) return;
+
+    cols.splice(i, 1);
+    await persist();
+    render();
+  }
+
   async function moveCardInline(colId, cardId, dir){
     const col = (PM && PM.columns || []).find(c => c && c.id === colId);
     if (!col) return;
@@ -403,6 +438,7 @@
         +     '<button class="mini2" type="button" data-col-left="' + esc(col.id) + '" title="Move column left">◀</button>'
         +     '<button class="mini2" type="button" data-col-right="' + esc(col.id) + '" title="Move column right">▶</button>'
         +     '<button class="mini2" type="button" data-col-rename="' + esc(col.id) + '" title="Rename column">✎</button>'
+        +     '<button class="mini2 miniDanger" type="button" data-col-trash="' + esc(col.id) + '" title="Delete column">🗑</button>'
         +     '<span class="muted small">' + cards.length + '</span>'
         +     '<button class="addBtn" type="button" data-add="' + esc(col.id) + '">+ Card</button>'
         +   '</div>'
@@ -421,6 +457,9 @@
     });
     Array.from(document.querySelectorAll('button[data-col-rename]')).forEach(b => {
       b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); renameColumn(b.getAttribute('data-col-rename')); });
+    });
+    Array.from(document.querySelectorAll('button[data-col-trash]')).forEach(b => {
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); deleteColumn(b.getAttribute('data-col-trash')); });
     });
     Array.from(document.querySelectorAll('button[data-add]')).forEach(b => {
       b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); addCard(b.getAttribute('data-add')); });
@@ -463,6 +502,7 @@
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
   if (cmSave) cmSave.addEventListener('click', saveCardEdits);
+  if (cmTrash) cmTrash.addEventListener('click', deleteCard);
   if (cmDone) cmDone.addEventListener('click', markDoneArchive);
   if (cmAdd) cmAdd.addEventListener('click', addTodo);
   if (cmGen) cmGen.addEventListener('click', generateTodos);

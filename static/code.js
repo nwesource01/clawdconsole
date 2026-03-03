@@ -476,7 +476,7 @@
     chatLog.innerHTML = arr.map(m => {
       const role = String(m.r || m.role || '');
       const isA = role === 'assistant';
-      const who = isA ? 'Clawdio' : 'You';
+      const who = isA ? (window.AGENT_NAME || 'Assistant') : 'You';
       const ts = esc(m.ts || '');
       const text = esc(m.text || '');
       const id = esc(m.id || '');

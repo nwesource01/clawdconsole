@@ -11,6 +11,7 @@
     if (buildEl) buildEl.textContent = BUILD;
   }
   loadBuild();
+  loadBrand();
 
   const listEl = document.getElementById('t_list');
   const qEl = document.getElementById('t_q');
@@ -23,7 +24,19 @@
   const hasListBtn = document.getElementById('hasListBtn');
 
   const USER_NAME = 'Charles';
-  const AGENT_NAME = 'Clawdio';
+  let AGENT_NAME = 'Clawdio';
+
+  async function loadBrand(){
+    try {
+      const res = await fetch('/api/ops/brand', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (j && j.ok && j.brand && j.brand.assistantName) {
+        AGENT_NAME = String(j.brand.assistantName);
+        const btn = document.getElementById('roleAgent');
+        if (btn) btn.textContent = AGENT_NAME;
+      }
+    } catch {}
+  }
 
   let q = '';
   let role = '';

@@ -264,16 +264,28 @@ function slugifyWsTitle(s){
 }
 
 function loadCodeWs(){
+  const adminWs = { id:'admin', title:'Admin (ClawdRoot)', root: '/home/master/clawd', git: null };
   try {
     if (!fs.existsSync(CODE_WS_FILE)) throw new Error('missing');
     const j = JSON.parse(fs.readFileSync(CODE_WS_FILE, 'utf8'));
     if (!j || !Array.isArray(j.workspaces)) throw new Error('bad');
+
+    // migrate: ensure Admin workspace exists for full architecture browsing
+    const hasAdmin = j.workspaces.some(w => w && String(w.id||'') === 'admin');
+    if (!hasAdmin) {
+      j.workspaces.push(adminWs);
+      try {
+        fs.mkdirSync(path.dirname(CODE_WS_FILE), { recursive:true });
+        fs.writeFileSync(CODE_WS_FILE, JSON.stringify(j, null, 2), 'utf8');
+      } catch {}
+    }
     return j;
   } catch {
     // seed
     const seeded = {
       workspaces: [
         { id:'console', title:'Console', root: path.resolve(__dirname), git: null },
+        adminWs,
       ],
     };
     try {

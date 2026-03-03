@@ -1387,6 +1387,75 @@ app.get('/api/repo/commits', async (req, res) => {
   }
 });
 
+function countJsonlSince(fp, sinceMs){
+  try {
+    if (!fs.existsSync(fp)) return 0;
+    const txt = fs.readFileSync(fp, 'utf8');
+    const lines = txt.split(/\r?\n/).filter(Boolean);
+    let n = 0;
+    for (const ln of lines){
+      let o; try { o = JSON.parse(ln); } catch { o = null; }
+      if (!o) continue;
+      const ts = Date.parse(o.ts || o.t || o.time || '');
+      if (Number.isFinite(ts) && ts >= sinceMs) n++;
+    }
+    return n;
+  } catch {
+    return 0;
+  }
+}
+
+app.get('/api/repo/metrics', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const repoDir = __dirname;
+  const sinceMs = Date.now() - (24 * 60 * 60 * 1000);
+
+  try {
+    // commits last 24h
+    const commits24h = await new Promise((resolve) => {
+      const args = ['-C', repoDir, 'rev-list', '--count', '--since=24 hours ago', 'HEAD'];
+      execFile('git', args, { timeout: 5000 }, (err, stdout) => {
+        if (err) return resolve(null);
+        const n = Number(String(stdout||'').trim());
+        resolve(Number.isFinite(n) ? n : null);
+      });
+    });
+
+    const worklog24h = countJsonlSince(path.join(DATA_DIR, 'worklog.jsonl'), sinceMs);
+    const bridge24h = countJsonlSince(path.join(DATA_DIR, 'bridge-messages.jsonl'), sinceMs);
+    const msg24h = countJsonlSince(path.join(DATA_DIR, 'messages.jsonl'), sinceMs);
+
+    // queue completions (best-effort: worklog event starts with queue. and includes completed)
+    let queueDone24h = 0;
+    try {
+      const fp = path.join(DATA_DIR, 'worklog.jsonl');
+      if (fs.existsSync(fp)) {
+        const txt = fs.readFileSync(fp,'utf8');
+        const lines = txt.split(/\r?\n/).filter(Boolean);
+        for (const ln of lines){
+          let o; try { o = JSON.parse(ln); } catch { o = null; }
+          if (!o) continue;
+          const ts = Date.parse(o.ts || '');
+          if (!Number.isFinite(ts) || ts < sinceMs) continue;
+          const ev = String(o.event||'');
+          if (ev === 'queue.cardCompleted' || ev === 'pm.cardPatch') {
+            // include pm.cardPatch only when queueStatus is done
+            if (ev === 'pm.cardPatch') {
+              const qs = String(o.data && o.data.queueStatus || '');
+              if (qs !== 'done') continue;
+            }
+            queueDone24h++;
+          }
+        }
+      }
+    } catch {}
+
+    res.json({ ok:true, build: BUILD, sinceMs, commits24h, worklog24h, bridge24h, messages24h: msg24h, queueDone24h });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 app.get('/api/repo/install', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
@@ -3078,13 +3147,23 @@ function renderModulePage(key){
       </div>
       <script src="/static/code.js?v=${BUILD}"></script>
     ` },
-    repo: { title:'ClawdRepo', subtitle:'Commits for this project + useful repo links.', body:`
+    repo: { title:'ClawdRepo', subtitle:'Changelog + commits for this project + useful repo links.', body:`
       <div class="subcard" style="line-height:1.55;">
         <div class="muted">Local repo: <code>${__dirname}</code></div>
         <div class="muted" style="margin-top:6px;">GitHub: <a href="https://github.com/nwesource01/clawdconsole" target="_blank" rel="noopener">nwesource01/clawdconsole</a></div>
-        <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
+
+        <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
           <button class="pill" id="repoRefreshBtn" type="button" style="cursor:pointer;">Refresh</button>
+          <span class="muted" id="repoMsg"></span>
         </div>
+
+        <div class="grid" id="repoCards" style="margin-top:12px; grid-template-columns: repeat(5, minmax(0,1fr)); align-items:stretch;"></div>
+
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="font-weight:900; margin-bottom:8px;">Changelog (last 24h vibes)</div>
+          <div id="repoChangelog" class="muted">Loading…</div>
+        </div>
+
         <div id="repoCommits" class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);"></div>
       </div>
 
@@ -3092,35 +3171,97 @@ function renderModulePage(key){
       (async () => {
         const box = document.getElementById('repoCommits');
         const btn = document.getElementById('repoRefreshBtn');
+        const msgEl = document.getElementById('repoMsg');
+        const cardsEl = document.getElementById('repoCards');
+        const chEl = document.getElementById('repoChangelog');
 
-        async function load(){
+        function esc(s){
+          return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        function setMsg(t){ if (msgEl) msgEl.textContent = t || ''; }
+
+        function card(label, value){
+          return '<div class="card" style="background: rgba(255,255,255,0.03); padding:10px;">'
+            + '<div class="muted" style="font-size:12px;">' + esc(label) + '</div>'
+            + '<div style="font-weight:900; font-size:18px; margin-top:4px;">' + esc(value) + '</div>'
+            + '</div>';
+        }
+
+        async function loadCommits(){
           if (!box) return;
-          box.innerHTML = '<div class="muted">Loading…</div>';
+          box.innerHTML = '<div class="muted">Loading commits…</div>';
           try {
             const res = await fetch('/api/repo/commits?limit=80', { credentials:'include', cache:'no-store' });
             const j = await res.json();
             const commits = (j && j.ok && Array.isArray(j.commits)) ? j.commits : [];
             if (!commits.length) { box.innerHTML = '<div class="muted">No commits found.</div>'; return; }
-            box.innerHTML = commits.map(c => {
+            box.innerHTML = '<div style="font-weight:900; padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08);">Recent commits</div>' + commits.map(c => {
               const short = String(c.hash||'').slice(0,7);
               const msg = String(c.subject||'');
               const when = String(c.date||'');
-              const refs = c.refs ? ('<span class="muted">(' + String(c.refs) + ')</span>') : '';
+              const refs = c.refs ? ('<span class="muted">(' + esc(String(c.refs)) + ')</span>') : '';
               return '<div style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">' +
                 '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">' +
-                  '<div><code>' + short + '</code> ' + refs + '</div>' +
-                  '<div class="muted">' + when + '</div>' +
+                  '<div><code>' + esc(short) + '</code> ' + refs + '</div>' +
+                  '<div class="muted">' + esc(when) + '</div>' +
                 '</div>' +
-                '<div style="margin-top:6px;">' + msg + '</div>' +
+                '<div style="margin-top:6px;">' + esc(msg) + '</div>' +
               '</div>';
             }).join('');
-          } catch {
+          } catch (e) {
             box.innerHTML = '<div class="muted">Failed to load commits.</div>';
           }
         }
 
-        if (btn) btn.addEventListener('click', load);
-        load();
+        async function loadCards(){
+          if (!cardsEl) return;
+          try {
+            const res = await fetch('/api/repo/metrics', { credentials:'include', cache:'no-store' });
+            const j = await res.json();
+            if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+            cardsEl.innerHTML = [
+              card('Build', j.build || ''),
+              card('Commits (24h)', String(j.commits24h ?? '—')),
+              card('Bridge msgs (24h)', String(j.bridge24h ?? '—')),
+              card('Queue done (24h)', String(j.queueDone24h ?? '—')),
+              card('Worklog events (24h)', String(j.worklog24h ?? '—')),
+            ].join('');
+          } catch {
+            cardsEl.innerHTML = '';
+          }
+        }
+
+        async function loadChangelog(){
+          if (!chEl) return;
+          chEl.textContent = 'Loading…';
+          try {
+            const res = await fetch('/api/changelog?limit=15', { credentials:'include', cache:'no-store' });
+            const j = await res.json();
+            const items = (j && j.ok && Array.isArray(j.items)) ? j.items : [];
+            if (!items.length) { chEl.innerHTML = '<div class="muted">(no entries)</div>'; return; }
+            chEl.innerHTML = items.slice(0, 10).map(it => {
+              const title = esc(it.title || 'Changelog');
+              const ts = esc(String(it.ts||'').slice(0,19).replace('T',' '));
+              const body = esc(it.body || '');
+              return '<details style="border-top:1px solid rgba(255,255,255,0.08); padding:10px 8px;">'
+                + '<summary style="cursor:pointer;"><b>' + title + '</b> <span class="muted">' + ts + '</span></summary>'
+                + '<pre style="white-space:pre-wrap; margin:10px 0 0;">' + body + '</pre>'
+                + '</details>';
+            }).join('');
+          } catch {
+            chEl.innerHTML = '<div class="muted">Failed to load changelog.</div>';
+          }
+        }
+
+        async function refreshAll(){
+          setMsg('');
+          setMsg('Refreshing…');
+          await Promise.all([loadCards(), loadChangelog(), loadCommits()]);
+          setMsg('');
+        }
+
+        if (btn) btn.addEventListener('click', refreshAll);
+        refreshAll();
       })();
       </script>
     ` },

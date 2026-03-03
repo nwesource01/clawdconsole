@@ -358,6 +358,10 @@ app.use((req, res, next) => {
   // allow telemetry collector endpoints without auth (hosted collector)
   if (req.path.startsWith('/api/telemetry/v1/')) return next();
 
+  // allow token-gated cross-box bridge posts without BasicAuth/session
+  // (the route handler enforces BRIDGE_TOKEN via X-Clawd-Bridge-Token)
+  if (req.path === '/api/ops/bridge/inbox' || req.path === '/api/ops/bridge/outbox') return next();
+
   // 1) session cookie
   const cookies = parseCookies(req);
   const tok = cookies[SESS_COOKIE];

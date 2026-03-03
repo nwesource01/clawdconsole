@@ -30,9 +30,12 @@
   let lastUserText = '';
   let didInitialChatScroll = false;
 
+  let lastDbg = null;
   function dbg(s) {
     if (!debugEl) return;
     const txt = String(s || '');
+    if (txt === lastDbg) return;
+    lastDbg = txt;
     debugEl.textContent = txt;
     // Keep layout stable: slot is fixed-height in HTML; just hide text when empty.
     debugEl.style.visibility = txt ? 'visible' : 'hidden';

@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-03.76';
+const BUILD = '2026-03-03.77';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -775,6 +775,63 @@ app.get('/api/gateway/events', (req, res) => {
   const limit = Math.max(1, Math.min(500, Number(req.query.limit || 200)));
   const tail = gwEvents.slice(-limit);
   res.json({ ok:true, events: tail });
+});
+
+app.get('/api/ops/codex/profiles', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const authPath = '/root/.clawdbot/agents/main/agent/auth-profiles.json';
+    const store = readJson(authPath, null) || {};
+    const profilesObj = (store && store.profiles && typeof store.profiles === 'object') ? store.profiles : {};
+    const profiles = Object.keys(profilesObj).map((id) => {
+      const p = profilesObj[id] || {};
+      const provider = String(p.provider || p.providerKey || '').trim();
+      let email = '';
+      try {
+        // decode JWT payload (not verifying signature; UI only)
+        const access = String(p.access || '').split('.')[1] || '';
+        const json = access ? JSON.parse(Buffer.from(access.replace(/-/g,'+').replace(/_/g,'/'), 'base64').toString('utf8')) : null;
+        email = String(json?.['https://api.openai.com/profile']?.email || json?.email || '').trim();
+      } catch {}
+      return {
+        id,
+        type: String(p.type || ''),
+        provider,
+        expires: (typeof p.expires === 'number') ? p.expires : null,
+        email: email || null,
+        accountId: p.accountId ? String(p.accountId) : null,
+      };
+    });
+
+    // best-effort read current session override
+    let current = { key: CONSOLE_SESSION_KEY, authProfileOverride: null };
+    try {
+      const payload = await gwSendReq('sessions.list', { limit: 400, includeGlobal: true, includeUnknown: true });
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      const hit = items.find(it => it && (it.key === CONSOLE_SESSION_KEY || it.key === ('main:' + CONSOLE_SESSION_KEY) || it.key?.endsWith(':' + CONSOLE_SESSION_KEY)));
+      if (hit && hit.sessionEntry) {
+        current.authProfileOverride = hit.sessionEntry.authProfileOverride || null;
+      }
+    } catch {}
+
+    res.json({ ok:true, profiles, current, lastGood: store.lastGood || null });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.post('/api/ops/codex/profile', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  try {
+    const profileId = String(req.body?.profileId || '').trim();
+    await gwSendReq('sessions.patch', { key: CONSOLE_SESSION_KEY, authProfileOverride: profileId || '' });
+    logWork('ops.codex.profile.set', { sessionKey: CONSOLE_SESSION_KEY, profileId: profileId || '' });
+    res.json({ ok:true });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
 });
 
 app.get('/api/ops/codex', (req, res) => {
@@ -2863,8 +2920,16 @@ function renderModulePage(key){
       </div>
       <script src="/static/sec.js"></script>
     ` },
-    ops: { title:'ClawdOps', subtitle:'Operator profile + repeated-questions detector.', body:`
+    ops: { title:'ClawdOps', subtitle:'Questionnaire + Gateway + Codex.', body:`
       <div class="subcard" style="line-height:1.55;">
+        <div class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+          <button class="pill" id="opsTabQ" type="button">Questionnaire</button>
+          <button class="pill" id="opsTabG" type="button">Gateway</button>
+          <button class="pill" id="opsTabC" type="button">Codex</button>
+          <span class="muted" id="opsTabMsg"></span>
+        </div>
+
+        <div id="opsTabQuestionnaire">
         <div class="muted">Markdown notes about you + your environment. File-backed in DATA_DIR, and can be committed to workspace memory for long-term use.</div>
 
         <div class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap; align-items:center;">
@@ -2881,7 +2946,16 @@ function renderModulePage(key){
         </div>
 
         <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
-          <div style="font-weight:900; margin-bottom:8px;">Codex / Gateway integration</div>
+          <div style="font-weight:900; margin-bottom:8px;">Repeated questions (best-effort)</div>
+          <div class="muted" style="margin-bottom:8px;">Scans transcript assistant messages for repeated question lines so we can turn them into rules or defaults.</div>
+          <div id="opsRepeated" style="max-height: 50vh; overflow:auto; padding-right:6px;"></div>
+        </div>
+
+        </div><!-- /opsTabQuestionnaire -->
+        <div id="opsTabGateway" style="display:none;">
+
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="font-weight:900; margin-bottom:8px;">Gateway Integration</div>
           <div class="muted" style="margin-bottom:10px;">This is where we verify we are receiving <i>all</i> gateway/Codex events and can swap integration details for the next install/account.</div>
 
           <div class="twoCol">
@@ -2915,11 +2989,32 @@ function renderModulePage(key){
           <pre id="codexEvents" style="white-space:pre-wrap; word-break:break-word; margin:10px 0 0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.12); max-height: 40vh; overflow:auto;"></pre>
         </div>
 
-        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
-          <div style="font-weight:900; margin-bottom:8px;">Repeated questions (best-effort)</div>
-          <div class="muted" style="margin-bottom:8px;">Scans transcript assistant messages for repeated question lines so we can turn them into rules or defaults.</div>
-          <div id="opsRepeated" style="max-height: 50vh; overflow:auto; padding-right:6px;"></div>
-        </div>
+        </div><!-- /opsTabGateway -->
+
+        <div id="opsTabCodex" style="display:none;">
+          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Codex Auth Profile</div>
+            <div class="muted" style="margin-bottom:10px;">Switches which Codex OAuth identity is used for the <code>${CONSOLE_SESSION_KEY}</code> session (via <code>sessions.patch</code> authProfileOverride).</div>
+
+            <div class="twoCol">
+              <div>
+                <div class="muted" style="margin-bottom:6px;">Profile</div>
+                <select id="codexProfileSel" class="inp" style="width:100%; max-width: 640px;"></select>
+                <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap;">
+                  <button class="pill" id="codexProfileApply" type="button">Apply</button>
+                  <button class="pill" id="codexProfileClear" type="button">Clear override</button>
+                  <span class="muted" id="codexProfileMsg"></span>
+                </div>
+                <div class="muted" style="margin-top:10px;">Profiles read from: <code>/root/.clawdbot/agents/main/agent/auth-profiles.json</code></div>
+              </div>
+              <div>
+                <div style="font-weight:900; margin-bottom:8px;">Current</div>
+                <div id="codexProfileCurrent" class="muted">Loading…</div>
+              </div>
+            </div>
+          </div>
+        </div><!-- /opsTabCodex -->
+
       </div>
       <script src="/static/ops.js"></script>
     ` },

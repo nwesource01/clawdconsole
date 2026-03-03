@@ -130,7 +130,30 @@
   if (btnTemplate) btnTemplate.addEventListener('click', insertTemplate);
   if (btnRepeat) btnRepeat.addEventListener('click', loadRepeated);
 
-  // --- Codex / Gateway integration panel ---
+  // --- tabs ---
+  const tabQ = $('opsTabQ');
+  const tabG = $('opsTabG');
+  const tabC = $('opsTabC');
+  const tabMsg = $('opsTabMsg');
+  const viewQ = $('opsTabQuestionnaire');
+  const viewG = $('opsTabGateway');
+  const viewC = $('opsTabCodex');
+
+  function setTabMsg(t){ if (tabMsg) tabMsg.textContent = t || ''; }
+  function showTab(which){
+    if (viewQ) viewQ.style.display = (which === 'q') ? '' : 'none';
+    if (viewG) viewG.style.display = (which === 'g') ? '' : 'none';
+    if (viewC) viewC.style.display = (which === 'c') ? '' : 'none';
+  }
+
+  if (tabQ) tabQ.addEventListener('click', () => showTab('q'));
+  if (tabG) tabG.addEventListener('click', () => showTab('g'));
+  if (tabC) tabC.addEventListener('click', () => showTab('c'));
+
+  // default
+  showTab('q');
+
+  // --- Gateway integration panel ---
   const cUrl = $('codexGatewayUrl');
   const cKey = $('codexSessionKey');
   const cMsg = $('codexMsg');
@@ -142,10 +165,18 @@
   const cEvBtn = $('codexEventsRefresh');
   const cEvLimit = $('codexEventsLimit');
 
+  // Codex tab controls
+  const pSel = $('codexProfileSel');
+  const pApply = $('codexProfileApply');
+  const pClear = $('codexProfileClear');
+  const pMsg = $('codexProfileMsg');
+  const pCur = $('codexProfileCurrent');
+
   function setCMsg(t){ if (cMsg) cMsg.textContent = t || ''; }
+  function setPMsg(t){ if (pMsg) pMsg.textContent = t || ''; }
   function fmt(x){ try { return JSON.stringify(x, null, 2); } catch { return String(x); } }
 
-  async function loadCodex(){
+  async function loadGateway(){
     try {
       const res = await fetch('/api/ops/codex', { credentials:'include', cache:'no-store' });
       const j = await res.json();
@@ -163,7 +194,7 @@
     }
   }
 
-  async function saveCodex(){
+  async function saveGateway(){
     setCMsg('Saving…');
     try {
       const res = await fetch('/api/ops/codex', {
@@ -179,13 +210,13 @@
       if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
       setCMsg('Saved. Reconnecting…');
       setTimeout(() => setCMsg(''), 1200);
-      await loadCodex();
+      await loadGateway();
     } catch (e) {
       setCMsg('Save failed: ' + String(e));
     }
   }
 
-  async function reconnectCodex(){
+  async function reconnectGateway(){
     setCMsg('Reconnecting…');
     try {
       const res = await fetch('/api/ops/codex/reconnect', { method:'POST', credentials:'include' });
@@ -193,7 +224,7 @@
       if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
       setCMsg('Reconnect triggered.');
       setTimeout(() => setCMsg(''), 900);
-      setTimeout(loadCodex, 400);
+      setTimeout(loadGateway, 400);
     } catch (e) {
       setCMsg('Reconnect failed: ' + String(e));
     }
@@ -211,11 +242,70 @@
     }
   }
 
-  if (cSave) cSave.addEventListener('click', saveCodex);
-  if (cRec) cRec.addEventListener('click', reconnectCodex);
+  async function loadProfiles(){
+    setPMsg('Loading…');
+    try {
+      const res = await fetch('/api/ops/codex/profiles', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      const profiles = Array.isArray(j.profiles) ? j.profiles : [];
+      const curId = j.current && j.current.authProfileOverride ? String(j.current.authProfileOverride) : '';
+
+      if (pSel) {
+        pSel.innerHTML = '<option value="">(default)</option>' + profiles
+          .filter(p => p && p.id)
+          .map(p => {
+            const label = (p.email ? (p.email + ' • ') : '') + (p.provider || '') + ' • ' + p.id;
+            const sel = (p.id === curId) ? ' selected' : '';
+            return '<option value="' + String(p.id).replace(/"/g,'&quot;') + '"' + sel + '>' + label.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</option>';
+          }).join('');
+      }
+
+      if (pCur) {
+        const curLine = curId ? ('override=' + curId) : 'override=(none)';
+        const lastGood = j.lastGood && j.lastGood['openai-codex'] ? ('lastGood(openai-codex)=' + j.lastGood['openai-codex']) : '';
+        pCur.textContent = [curLine, lastGood].filter(Boolean).join(' • ') || curLine;
+      }
+
+      setPMsg('');
+    } catch (e) {
+      setPMsg('Load failed: ' + String(e));
+    }
+  }
+
+  async function applyProfile(){
+    setPMsg('Applying…');
+    try {
+      const id = pSel ? String(pSel.value || '').trim() : '';
+      const res = await fetch('/api/ops/codex/profile', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        body: JSON.stringify({ profileId: id })
+      });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      setPMsg('Applied.');
+      setTimeout(() => setPMsg(''), 900);
+      await loadProfiles();
+    } catch (e) {
+      setPMsg('Apply failed: ' + String(e));
+    }
+  }
+
+  async function clearProfile(){
+    if (pSel) pSel.value = '';
+    return applyProfile();
+  }
+
+  if (cSave) cSave.addEventListener('click', saveGateway);
+  if (cRec) cRec.addEventListener('click', reconnectGateway);
   if (cEvBtn) cEvBtn.addEventListener('click', loadEvents);
+  if (pApply) pApply.addEventListener('click', applyProfile);
+  if (pClear) pClear.addEventListener('click', clearProfile);
 
   load();
-  loadCodex();
+  loadGateway();
   loadEvents();
+  loadProfiles();
 })();

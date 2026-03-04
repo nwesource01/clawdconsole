@@ -2931,6 +2931,103 @@ app.get('/apps', (req, res) => {
   }));
 });
 
+// --- Apps Menu Lab (4 concepts, one per corner) ---
+app.get('/apps/menu-lab', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Apps Menu Lab</title>
+  <link rel="stylesheet" href="/static/apps-menu-lab.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>Apps Menu Lab</h1>
+        <div class="sub">Four menu styles, one per corner. Tell me something like: <b>Menu 1 with animation 4</b>. These are visual concepts only (not wired into /apps yet).</div>
+      </div>
+      <div class="pills">
+        <a class="pill" href="/apps">Back to /apps</a>
+        <a class="pill" href="/">Console</a>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- Corner 1 -->
+      <section class="q m1" data-menu="1" aria-label="Menu 1">
+        <div class="qInner">
+          <div>
+            <div class="tag">Corner 1 • Menu 1</div>
+            <div class="title">Magnetic Grid</div>
+            <div class="desc">Hover tilt + cursor-tracking glow. Fast, premium feel. Works great as a fullscreen app launcher grid.</div>
+          </div>
+          <div class="row">
+            <div class="corner">Animation: hover tilt + glow</div>
+            <button class="demoBtn" type="button" data-copy="Menu 1">Copy label</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Corner 2 -->
+      <section class="q m2" data-menu="2" aria-label="Menu 2">
+        <div class="rail" aria-hidden="true"></div>
+        <div class="qInner">
+          <div>
+            <div class="tag">Corner 2 • Menu 2</div>
+            <div class="title">Slide-Rail</div>
+            <div class="desc">A subtle rail slides in on hover (or focus). Feels like a “drawer” without a full sidebar.</div>
+          </div>
+          <div class="row">
+            <div class="corner">Animation: slide-in rail</div>
+            <button class="demoBtn" type="button" data-copy="Menu 2">Copy label</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Corner 3 -->
+      <section class="q m3" data-menu="3" aria-label="Menu 3">
+        <div class="ring" aria-hidden="true"></div>
+        <div class="qInner">
+          <div>
+            <div class="tag">Corner 3 • Menu 3</div>
+            <div class="title">Focus Ripple</div>
+            <div class="desc">A single ripple on hover. Minimal motion, still feels alive. Great for enterprise “tasteful” vibes.</div>
+          </div>
+          <div class="row">
+            <div class="corner">Animation: ripple ring</div>
+            <button class="demoBtn" type="button" data-copy="Menu 3">Copy label</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Corner 4 -->
+      <section class="q m4" data-menu="4" aria-label="Menu 4">
+        <div class="pop" aria-hidden="true"></div>
+        <div class="qInner">
+          <div>
+            <div class="tag">Corner 4 • Menu 4</div>
+            <div class="title">Spring Pop</div>
+            <div class="desc">Quick springy pop + gradient bubble. Feels playful, still clean. Very “app launcher” friendly.</div>
+          </div>
+          <div class="row">
+            <div class="corner">Animation: spring-pop</div>
+            <button class="demoBtn" type="button" data-copy="Menu 4">Copy label</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/static/apps-menu-lab.js"></script>
+</body>
+</html>`;
+
+  res.type('text/html; charset=utf-8').send(html);
+});
+
 function renderModulePage(key){
   const map = {
     script: { title:'ClawdScript', subtitle:'Transcript browser (embedded).', body:`

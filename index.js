@@ -2249,6 +2249,17 @@ if (String(process.env.AUTO_STATE_HOURLY || '').trim() === '1') {
   }, 60 * 60 * 1000);
 }
 
+const CLAWD_RULES_FILE = '/home/master/clawd/memory/clawd-rules.md';
+app.get('/api/ops/rules', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const text = fs.existsSync(CLAWD_RULES_FILE) ? fs.readFileSync(CLAWD_RULES_FILE, 'utf8') : '';
+    res.json({ ok:true, text });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 app.post('/api/ops/restart', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
@@ -5854,104 +5865,11 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         </div>
 
         <div id="rulesBody" style="margin-top:10px;">
-          <div class="muted" style="margin-bottom: 10px;">Operator heaven: small rules that prevent repeat questions.</div>
-
-        <div style="display:flex; flex-direction:column; gap: 10px;">
-          <div class="ruleItem">
-            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">Formatting: use code blocks for commands</div>
-              <div class="ruleChevron">▸</div>
-            </div>
-            <div class="ruleBody">When I give shell commands, I will put them in fenced code blocks (triple backticks) so the Console renders a copyable command block. This prevents accidental "paste a URL into bash" mistakes and makes commands one-click copy.</div>
+          <div class="muted" style="margin-bottom: 10px;">Operator heaven: small rules that prevent repeat questions. (Pulled from <code>ClawdRules.md</code>)</div>
+          <div id="rulesList" style="display:flex; flex-direction:column; gap:10px;">
+            <div class="muted">Loading rules…</div>
           </div>
-
-          <div class="ruleItem">
-            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">URLs: don't bold links</div>
-              <div class="ruleChevron">▸</div>
-            </div>
-            <div class="ruleBody">When sharing URLs, keep <b>**</b> out of the link (don't wrap links in bold). It can break clickability and looks spammy.</div>
-          </div>
-
-          <div class="ruleItem">
-            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">UI: fields must never overlap</div>
-              <div class="ruleChevron">▸</div>
-            </div>
-            <div class="ruleBody">ClawdRule: build UIs so fields can never overlap. Use responsive grids that collapse (2→1 column), flex-wrap, min-width:0 on flex children, and max-width:100% on inputs. Overlap is treated as a bug.</div>
-          </div>
-
-          <div class="ruleItem">
-            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">Workflow: don’t ask for “yes/no” on numbered choices</div>
-              <div class="ruleChevron">▸</div>
-            </div>
-            <div class="ruleBody">When I present numbered options, stop there. Do not suggest extra alternatives or ask open-ended follow-ups. Charles will reply with the number.</div>
-          </div>
-
-          <div class="ruleItem">
-            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">URLs: add "open in a new tab/window"</div>
-              <div class="ruleChevron">▸</div>
-            </div>
-            <div class="ruleBody">When I share a URL with you, I'll explicitly say: <code>open in a new tab/window</code> so it's obvious it's safe to click and won't derail your current context.</div>
-          </div>
-
-          <div class="ruleItem">
-            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">URLs: plain links only (no parentheses / styling)</div>
-              <div class="ruleChevron">▸</div>
-            </div>
-            <div class="ruleBody">Post URLs as plain text, one per line. Do NOT wrap URLs in parentheses/brackets/angle brackets/quotes, and do NOT bold/italicize them. This avoids dead links and makes chat auto-hyperlink reliably.</div>
-          </div>
-
-          <div class="ruleItem">
-            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">Versioning: call out refresh/test-required changes</div>
-              <div class="ruleChevron">▸</div>
-            </div>
-            <div class="ruleBody">If I make a change that requires you to refresh the UI and/or re-test a flow, I will explicitly say so and mention the new build/version to look for.</div>
-          </div>
-
-          <div class="ruleItem">
-            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">Buttons: Plan vs Send vs Iterate</div>
-              <div class="ruleChevron">▸</div>
-            </div>
-            <div class="ruleBody">
-              <div><b>Plan</b> (blue): sends your text prefixed with <code>PLAN MODE</code>. Use when you want a plan/checklist before action.</div>
-              <div style="margin-top:8px;"><b>Send</b> (green): sends your text as-is. Normal message.</div>
-              <div style="margin-top:8px;"><b>Iterate</b> (teal): sends an <code>ITERATIVE MODE (AUTHORIZED)</code> wrapper that explicitly grants permission to loop plan → implement → test → revise until done (or you stop it).</div>
-            </div>
-          </div>
-
-          <div class="ruleItem">
-            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">Iterative Mode: permission to loop until done (or stopped)</div>
-              <div class="ruleChevron">▸</div>
-            </div>
-            <div class="ruleBody"><b>Iterative Mode</b> means you authorize me to do everything I can inside this environment to accomplish the goal: plan → implement → test → revise in a loop. I will keep changes small and test after each change. I stop when (a) the success criteria is met and a test passes/high score is achieved, (b) I hit a hard blocker and need your input, or (c) you say <code>stop</code> / hit Stop.</div>
-          </div>
-
-          <div class="ruleItem">
-            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">Layout: prefer grid/flow layouts that can't overlap</div>
-              <div class="ruleChevron">▸</div>
-            </div>
-            <div class="ruleBody">When building Console UI, prefer normal document flow + CSS <code>grid</code> (or flex with <code>align-items:flex-start</code>) so controls can't overlap each other. Avoid absolute positioning for form layouts; add responsive breakpoints instead.</div>
-          </div>
-
-          <div class="ruleItem">
-            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">Restore requests: confirm what "restore" means</div>
-              <div class="ruleChevron">▸</div>
-            </div>
-            <div class="ruleBody">If you ask me to <b>restore</b> something, I will first confirm whether you mean: (a) restore to the <b>latest git commit</b>, (b) restore to a specific <b>build/version</b>, or (c) restore only a specific feature/UI section - before I run any revert/restore commands.</div>
-          </div>
-
-        </div>
-
-        <div class="muted" style="margin-top:10px;">We'll keep adding to this list.</div>
+          <div class="muted" style="margin-top:10px;">Add rules by saying: <code>rule - ...</code></div>
         </div> <!-- /rulesBody -->
       </div>
 

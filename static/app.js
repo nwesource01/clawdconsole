@@ -1841,7 +1841,66 @@
     }
   }
 
-  initRulesAccordion();
+  async function loadClawdRules(){
+    const list = document.getElementById('rulesList');
+    if (!list) return;
+    list.innerHTML = '<div class="muted">Loading rules…</div>';
+    try {
+      const res = await fetch('/api/ops/rules', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      const md = String(j.text || '').replace(/\r\n/g, '\n');
+
+      // Parse Markdown sections: each "## Title" becomes a card.
+      const lines = md.split('\n');
+      const cards = [];
+      let cur = null;
+      for (const ln of lines){
+        const m = ln.match(/^##\s+(.*)$/);
+        if (m) {
+          if (cur) cards.push(cur);
+          cur = { title: (m[1]||'').trim(), body: [] };
+          continue;
+        }
+        if (!cur) continue;
+        cur.body.push(ln);
+      }
+      if (cur) cards.push(cur);
+
+      function esc(s){
+        return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      }
+
+      const html = cards.map(c => {
+        const raw = (c.body || []).join('\n').trim();
+        const outLines = raw
+          .split('\n')
+          .map(x => x.trimEnd())
+          .filter(x => x.trim() !== '' && !/^Rationale:/i.test(x.trim()));
+
+        const body = outLines.map(x => {
+          // bullet lines: "- foo" -> "• foo"
+          const mm = x.match(/^[-*]\s+(.*)$/);
+          return mm ? ('• ' + mm[1]) : x;
+        }).join('\n');
+
+        return '<div class="ruleItem">'
+          + '<div class="ruleHead" role="button" tabindex="0" aria-expanded="false">'
+          +   '<div class="ruleTitle">' + esc(c.title) + '</div>'
+          +   '<div class="ruleChevron">▸</div>'
+          + '</div>'
+          + '<div class="ruleBody" style="white-space:pre-wrap;">' + esc(body) + '</div>'
+          + '</div>';
+      }).join('');
+
+      list.innerHTML = html || '<div class="muted">(no rules yet)</div>';
+      initRulesAccordion();
+    } catch (e) {
+      list.innerHTML = '<div class="muted">Rules load failed: ' + String(e) + '</div>';
+    }
+  }
+
+  loadClawdRules();
 
   setThinking('Idle');
   Promise.all([loadBuild(), loadBrand()]).then(updateStatus);

@@ -345,11 +345,12 @@
 
   function classifyWorklog(e) {
     const ev = String(e && e.event ? e.event : '');
-    if (/error|fail|exception/i.test(ev)) return 'errors';
-    if (ev.startsWith('gateway.')) return 'gateway';
+    if (ev.startsWith('act.') || ev.startsWith('action.')) return 'act';
+    if (/error|fail|exception/i.test(ev)) return 'err';
+    if (ev.startsWith('gateway.')) return 'gate';
     if (ev.startsWith('ws.')) return 'ws';
-    if (ev.startsWith('message.')) return 'messages';
-    if (ev.startsWith('upload.')) return 'uploads';
+    if (ev.startsWith('message.')) return 'msg';
+    if (ev.startsWith('upload.')) return 'upl';
     if (ev.startsWith('de') || ev.includes('del') || ev.includes('dynamic')) return 'de';
     return 'other';
   }

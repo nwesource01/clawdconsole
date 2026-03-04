@@ -1222,7 +1222,9 @@ app.post('/api/ops/bundle/build', express.json({ limit:'50kb' }), (req, res) => 
   if (!name) return res.status(400).json({ ok:false, error:'bad_name' });
   try {
     const r = buildConsoleBundle({ name, domainDefault });
-    logWork('bundle.built', { name, filename: r.filename });
+    logAction('bundle.build', { name });
+    logWork('bundle.built', { name, filename: r.filename, url: r.url });
+    logAction('bundle.built', { name, filename: r.filename });
     res.json({ ok:true, bundle: r });
   } catch (e) {
     res.status(500).json({ ok:false, error:'build_failed', message: String(e) });
@@ -6117,6 +6119,12 @@ function logWork(event, data) {
   return entry;
 }
 
+function logAction(verb, details){
+  const v = String(verb || '').trim() || 'do';
+  const d = (details && typeof details === 'object') ? details : { detail: String(details || '') };
+  return logWork('act.' + v, d);
+}
+
 // --- Token-only Bridge (cross-box notes) ---
 // Bridge auth token can come from env OR a file-backed value (so pairing can be done from UI without sudo).
 const BRIDGE_TOKEN_ENV = String(process.env.BRIDGE_TOKEN || '').trim();
@@ -7396,11 +7404,12 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
           <div class="row" style="gap:12px; align-items:center;">
             <h2 style="margin:0">ClawdWork</h2>
             <div id="wlFilters" class="row" style="gap:6px; margin-left: 50px;">
-              <button type="button" class="wlbtn" data-filter="errors">errors</button>
-              <button type="button" class="wlbtn" data-filter="gateway">gateway</button>
+              <button type="button" class="wlbtn" data-filter="err">err</button>
+              <button type="button" class="wlbtn" data-filter="gate">gate</button>
               <button type="button" class="wlbtn" data-filter="ws">ws</button>
-              <button type="button" class="wlbtn" data-filter="messages">messages</button>
-              <button type="button" class="wlbtn" data-filter="uploads">uploads</button>
+              <button type="button" class="wlbtn" data-filter="msg">msg</button>
+              <button type="button" class="wlbtn" data-filter="upl">upl</button>
+              <button type="button" class="wlbtn" data-filter="act">act</button>
               <button type="button" class="wlbtn" data-filter="de">del</button>
             </div>
           </div>

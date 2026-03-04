@@ -6443,13 +6443,22 @@ app.get('/', (req, res) => {
     .md_copy{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 999px; padding:6px 10px; cursor:pointer; font-size:12px}
     .md_copy:hover{border-color: rgba(34,198,198,.65)}
 
-    #composer { display:flex; gap: 10px; align-items: flex-start; }
-    #quickbar{ margin-top: 6px !important; margin-bottom: 0 !important; padding-bottom: 0 !important; }
-    #quickButtons{ margin: 0 !important; padding: 0 !important; }
+    /* Composer: grid so left (textarea+quick buttons) and right (actions) never overlap */
+    #composer { display:grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items:start; }
+    .composerLeft{ min-width:0; display:flex; flex-direction:column; gap:10px; }
+    .composerActions{ display:flex; flex-direction:column; gap:8px; align-items:stretch; justify-content:flex-start; }
+
+    #quickbar{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-start; align-items:center; margin:0; }
+    #quickButtons{ margin:0; padding:0; gap:10px; }
     #debug{ margin-top: 4px !important; }
-    /* Composer textarea matches button stack height (tuned to pixel-perfect match) */
-    #msg { width: 100%; height: 133px; min-height: 133px; max-height: 133px; overflow:auto; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
-    #send { height: 44px; white-space: nowrap; }
+
+    /* Composer textarea: make it as low as possible by matching action stack height */
+    #msg { width: 100%; height: 168px; min-height: 168px; max-height: 168px; overflow:auto; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
+
+    /* Action buttons: tighter + uniform */
+    #mic,#plan,#send,#iterate{ height: 36px; padding: 6px 10px; font-size: 13px; white-space: nowrap; }
+    #mic{ font-size: 16px; padding: 6px 0; width: 56px; }
+    #micStatus{ font-size:12px; min-height: 16px; }
     /* #pasteHint removed (replaced by ClawdSnap) */
     .preview { display:flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
     .thumb { border: 1px solid var(--border); border-radius: 10px; padding: 6px; background: #0d1426; }
@@ -6706,25 +6715,28 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         <div id="chatlog"></div>
 
         <div id="composer" style="margin-top: 12px;">
-          <textarea id="msg" placeholder="Type a message. Paste images/screenshots here (Ctrl+V) ..."></textarea>
-          <div style="display:flex; flex-direction:column; gap:8px; align-items: stretch;">
-            <button id="mic" type="button" title="Hold to talk">🎙 Hold</button>
+          <div class="composerLeft">
+            <textarea id="msg" placeholder="Type a message. Paste images/screenshots here (Ctrl+V) ..."></textarea>
+
+            <div id="quickbar">
+              <div class="row" id="quickButtons">
+                <button id="btnCatchUp" type="button" class="qbtn">Catch Up</button>
+                <button id="btnGitCommit" type="button" class="qbtn">GitCommit</button>
+                <button id="btnReviewRecent" type="button" class="qbtn">Review Recent</button>
+                <button id="btnReviewWeek" type="button" class="qbtn">Review Week</button>
+                <button id="btnRepeatLast" type="button" class="qbtn">Repeat Last</button>
+                <button id="btnAddBtn" type="button" class="qbtn">Add a Button</button>
+  <!-- adminonly disabled by default -->
+              </div>
+            </div>
+          </div>
+
+          <div class="composerActions">
+            <button id="mic" type="button" title="Hold to talk">🎙</button>
             <button id="plan" type="button">Plan</button>
             <button id="send" type="button">Send</button>
             <button id="iterate" type="button">Iterate</button>
-            <div class="muted" id="micStatus" style="font-size:12px; min-height:16px;"></div>
-          </div>
-        </div>
-
-        <div id="quickbar" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; justify-content:flex-start; align-items:center;">
-          <div class="row" id="quickButtons" style="gap: 10px;">
-            <button id="btnCatchUp" type="button" class="qbtn">Catch Up</button>
-            <button id="btnGitCommit" type="button" class="qbtn">GitCommit</button>
-            <button id="btnReviewRecent" type="button" class="qbtn">Review Recent</button>
-            <button id="btnReviewWeek" type="button" class="qbtn">Review Week</button>
-            <button id="btnRepeatLast" type="button" class="qbtn">Repeat Last</button>
-            <button id="btnAddBtn" type="button" class="qbtn">Add a Button</button>
-<!-- adminonly disabled by default -->
+            <div class="muted" id="micStatus"></div>
           </div>
         </div>
 

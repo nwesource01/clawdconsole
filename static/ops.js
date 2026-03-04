@@ -157,6 +157,7 @@
   const tabQ = $('opsTabQ');
   const tabG = $('opsTabG');
   const tabC = $('opsTabC');
+  const tabTogether = $('opsTabTogether');
   const tabClawd = $('opsTabClawd');
   const tabClawdwell = $('opsTabClawdwell');
   const tabBridge = $('opsTabBridge');
@@ -166,17 +167,31 @@
   const viewQ = $('opsTabQuestionnaire');
   const viewG = $('opsTabGateway');
   const viewC = $('opsTabCodex');
+  const viewTogether = $('opsTabTogetherView');
   const viewClawd = $('opsTabClawdView');
   const viewClawdwell = $('opsTabClawdwellView');
   const viewBridge = $('opsTabBridgeView');
   const viewRes = $('opsTabResView');
   const viewUpd = $('opsTabUpdView');
 
+  // Together.ai panel
+  const tgBase = $('togetherBaseUrl');
+  const tgModel = $('togetherModel');
+  const tgKey = $('togetherApiKey');
+  const tgSave = $('togetherSave');
+  const tgClear = $('togetherClear');
+  const tgMsg = $('togetherMsg');
+  const tgPrompt = $('togetherPrompt');
+  const tgTest = $('togetherTest');
+  const tgTestMsg = $('togetherTestMsg');
+  const tgOut = $('togetherOut');
+
   function setTabMsg(t){ if (tabMsg) tabMsg.textContent = t || ''; }
   function showTab(which){
     if (viewQ) viewQ.style.display = (which === 'q') ? '' : 'none';
     if (viewG) viewG.style.display = (which === 'g') ? '' : 'none';
     if (viewC) viewC.style.display = (which === 'c') ? '' : 'none';
+    if (viewTogether) viewTogether.style.display = (which === 'together') ? '' : 'none';
     if (viewClawd) viewClawd.style.display = (which === 'clawd') ? '' : 'none';
     if (viewClawdwell) viewClawdwell.style.display = (which === 'clawdwell') ? '' : 'none';
     if (viewBridge) viewBridge.style.display = (which === 'bridge') ? '' : 'none';
@@ -187,6 +202,10 @@
   if (tabQ) tabQ.addEventListener('click', () => showTab('q'));
   if (tabG) tabG.addEventListener('click', () => showTab('g'));
   if (tabC) tabC.addEventListener('click', () => showTab('c'));
+  if (tabTogether) tabTogether.addEventListener('click', () => {
+    showTab('together');
+    loadTogether();
+  });
   if (tabClawd) tabClawd.addEventListener('click', () => showTab('clawd'));
   if (tabClawdwell) tabClawdwell.addEventListener('click', () => showTab('clawdwell'));
   if (tabBridge) tabBridge.addEventListener('click', () => {
@@ -205,6 +224,111 @@
 
   // default
   showTab('q');
+
+  function setTgMsg(t){ if (tgMsg) tgMsg.textContent = t || ''; }
+  function setTgTestMsg(t){ if (tgTestMsg) tgTestMsg.textContent = t || ''; }
+  function safeJson(x){ try { return JSON.stringify(x, null, 2); } catch { return String(x); } }
+
+  async function loadTogether(){
+    if (!tgBase && !tgModel) return;
+    setTgMsg('Loading…');
+    try {
+      const res = await fetch('/api/ops/together', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      const cfg = j.config || {};
+      if (tgBase) tgBase.value = String(cfg.baseUrl || 'https://api.together.xyz');
+      if (tgModel) tgModel.value = String(cfg.model || 'Qwen/Qwen2.5-Coder-32B-Instruct');
+      // never populate key field from server
+      if (tgKey) tgKey.value = '';
+      setTgMsg('Loaded' + (cfg.hasKey ? ' (key set)' : ' (no key)') + '.');
+      setTimeout(() => setTgMsg(''), 1200);
+    } catch (e) {
+      setTgMsg('Load failed: ' + String(e));
+    }
+  }
+
+  async function saveTogether(){
+    setTgMsg('Saving…');
+    try {
+      const body = {
+        baseUrl: tgBase ? tgBase.value : '',
+        model: tgModel ? tgModel.value : '',
+      };
+      const key = tgKey ? String(tgKey.value || '') : '';
+      if (key) body.apiKey = key;
+
+      const res = await fetch('/api/ops/together', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        body: JSON.stringify(body),
+      });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+      setTgMsg('Saved.' + (j.config && j.config.hasKey ? ' (key set)' : ' (no key)'));
+      if (tgKey) tgKey.value = '';
+      setTimeout(() => setTgMsg(''), 1200);
+    } catch (e) {
+      setTgMsg('Save failed: ' + String(e));
+    }
+  }
+
+  async function clearTogetherKey(){
+    setTgMsg('Clearing…');
+    try {
+      const res = await fetch('/api/ops/together', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        body: JSON.stringify({ clearKey: '1' }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      setTgMsg('Cleared.');
+      if (tgKey) tgKey.value = '';
+      setTimeout(() => setTgMsg(''), 1200);
+    } catch (e) {
+      setTgMsg('Clear failed: ' + String(e));
+    }
+  }
+
+  async function testTogether(){
+    setTgTestMsg('Running…');
+    if (tgOut) tgOut.textContent = '';
+    try {
+      const body = {
+        baseUrl: tgBase ? tgBase.value : '',
+        model: tgModel ? tgModel.value : '',
+        prompt: tgPrompt ? tgPrompt.value : '',
+      };
+      const key = tgKey ? String(tgKey.value || '') : '';
+      if (key) body.apiKey = key;
+
+      const res = await fetch('/api/ops/together/test', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        body: JSON.stringify(body),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j || !j.ok) {
+        const err = j ? safeJson(j) : ('http ' + res.status);
+        if (tgOut) tgOut.textContent = err;
+        setTgTestMsg('Failed.');
+        return;
+      }
+      if (tgOut) tgOut.textContent = (j.output ? String(j.output) : safeJson(j));
+      setTgTestMsg('OK • ' + String(j.ms || '-') + 'ms');
+    } catch (e) {
+      if (tgOut) tgOut.textContent = 'Error: ' + String(e);
+      setTgTestMsg('Failed.');
+    }
+  }
+
+  if (tgSave) tgSave.addEventListener('click', saveTogether);
+  if (tgClear) tgClear.addEventListener('click', clearTogetherKey);
+  if (tgTest) tgTest.addEventListener('click', testTogether);
 
   async function refreshHydration(){
     if (!hydWrap || !hydIcon) return;

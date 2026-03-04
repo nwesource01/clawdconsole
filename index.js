@@ -13,7 +13,7 @@ const dns = require('dns');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-03.77';
+const BUILD = '2026-03-03.78';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -35,6 +35,24 @@ let GATEWAY_WS_URL = (codexCfg && codexCfg.gatewayWsUrl) ? String(codexCfg.gatew
 let CONSOLE_SESSION_KEY = (codexCfg && codexCfg.consoleSessionKey) ? String(codexCfg.consoleSessionKey) : CONSOLE_SESSION_KEY_DEFAULT;
 let gwLastError = null;
 let gwLastEvent = null;
+
+// Together.ai (OpenAI-compatible) config (Qwen/Llama/etc)
+const TOGETHER_CFG_FILE = path.join(DATA_DIR, 'together-config.json');
+function readTogetherCfg(){
+  const j = readJson(TOGETHER_CFG_FILE, null) || {};
+  return {
+    baseUrl: String(j.baseUrl || 'https://api.together.xyz').trim() || 'https://api.together.xyz',
+    model: String(j.model || 'Qwen/Qwen2.5-Coder-32B-Instruct').trim() || 'Qwen/Qwen2.5-Coder-32B-Instruct',
+    apiKey: (typeof j.apiKey === 'string') ? j.apiKey : '',
+    updatedAt: j.updatedAt || null,
+  };
+}
+function writeTogetherCfg(patch){
+  const cur = readTogetherCfg();
+  const next = { ...cur, ...patch, updatedAt: new Date().toISOString() };
+  const ok = writeJson(TOGETHER_CFG_FILE, next);
+  return ok ? next : null;
+}
 
 function recordGatewayEvent(kind, payload){
   const ev = { ts: new Date().toISOString(), kind: String(kind||''), payload };
@@ -67,6 +85,138 @@ const TELEMETRY_FILE = path.join(DATA_DIR, 'telemetry.jsonl');
 
 // Custom quick buttons (server-side persistence)
 const BUTTONS_FILE = path.join(DATA_DIR, 'buttons.json');
+
+// Branding: shared Apps menu (CSS stored in data dir so updates propagate without redeploy)
+const BRANDING_MENU_FILE = path.join(DATA_DIR, 'branding-menu.json');
+const BRANDING_MENU_DEFAULT = {
+  cssOverrides: "/* Add CSS overrides here. Example:\n.appsMenuBtn{ border-radius:12px; }\n*/\n",
+  updatedAt: null,
+};
+function readBrandingMenu(){
+  try {
+    if (!fs.existsSync(BRANDING_MENU_FILE)) return { ...BRANDING_MENU_DEFAULT };
+    const j = JSON.parse(fs.readFileSync(BRANDING_MENU_FILE, 'utf8'));
+    return {
+      cssOverrides: (typeof j.cssOverrides === 'string') ? j.cssOverrides : BRANDING_MENU_DEFAULT.cssOverrides,
+      updatedAt: j.updatedAt || null,
+    };
+  } catch {
+    return { ...BRANDING_MENU_DEFAULT };
+  }
+}
+function writeBrandingMenu(patch){
+  const cur = readBrandingMenu();
+  const next = {
+    ...cur,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(BRANDING_MENU_FILE, JSON.stringify(next, null, 2));
+  return next;
+}
+
+const APPS_MENU_BASE_CSS = `
+  .appsMenuWrap{ position:relative; display:inline-flex; align-items:center; justify-content:flex-end; }
+  .appsMenuBtn{
+    cursor:pointer; user-select:none;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.22);
+    background: rgba(0,0,0,.18);
+    padding: 5px 8px;
+    font-weight: 950;
+    font-size: 13px;
+    line-height: 1;
+    color: rgba(231,231,231,.92);
+  }
+  .appsMenuBtnTxt{ border-bottom: 2px solid rgba(34,198,198,.55); padding-bottom: 2px; }
+  .appsMenuBtn:hover{ background: rgba(0,0,0,.26); border-color: rgba(34,198,198,.40); }
+  .appsMenuBtn:hover .appsMenuBtnTxt{ border-bottom-color: rgba(34,198,198,.85); }
+
+  .appsMenuBtnChev{ opacity:.8; transition: transform 160ms ease; }
+  .appsMenuWrap.open .appsMenuBtnChev{ transform: rotate(180deg); }
+
+  .appsMenuDrop{
+    position:absolute;
+    right:0;
+    top: calc(100% + 10px);
+    width: min(560px, 92vw);
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: #0a0f1e;
+    box-shadow: 0 18px 60px rgba(0,0,0,.55);
+    overflow:hidden;
+
+    transform: translateY(-6px) scale(.985);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 170ms ease, transform 170ms ease;
+    z-index: 30;
+  }
+  .appsMenuWrap.open .appsMenuDrop{ opacity: 1; transform: translateY(0) scale(1); pointer-events:auto; }
+
+  .appsMenuDropHead{ display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,0.10); }
+  .appsAll{ color: rgba(232,238,252,.92); font-weight:900; text-decoration:none; }
+  .appsAll:hover{ text-decoration: underline; }
+
+  .appsGrid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap:10px; padding: 12px 14px 14px 14px; }
+  @media (max-width: 520px){ .appsGrid{ grid-template-columns: 1fr; } }
+
+  .appsLink{
+    display:flex; align-items:center; gap:10px;
+    padding:9px 10px;
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.04);
+    text-decoration:none;
+    color: rgba(232,238,252,.92);
+    transform: translateZ(0);
+    transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+  }
+  .appsLink:hover{ transform: translateY(-1px); background: rgba(255,255,255,0.06); border-color: rgba(34,198,198,.35); }
+  .appsLink[aria-current="page"]{ border-color: rgba(34,198,198,.55); background: rgba(34,198,198,.10); }
+
+  .appsDot{ width:10px; height:10px; border-radius:999px; background: rgba(34,198,198,.75); box-shadow: 0 0 0 4px rgba(34,198,198,.12); flex:0 0 auto; }
+  .appsLbl{ font-weight: 850; letter-spacing: .2px; }
+`;
+
+const APPS_MENU_BASE_JS = `
+(() => {
+  function initOne(wrap){
+    const btn = wrap.querySelector('.appsMenuBtn');
+    const drop = wrap.querySelector('.appsMenuDrop');
+    if (!btn || !drop) return;
+
+    function setOpen(v){
+      wrap.classList.toggle('open', !!v);
+      btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    }
+
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      setOpen(!wrap.classList.contains('open'));
+    });
+
+    btn.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      window.location.href = '/apps';
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!wrap.classList.contains('open')) return;
+      const t = e.target;
+      if (t && wrap.contains(t)) return;
+      setOpen(false);
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    });
+  }
+
+  document.querySelectorAll('.appsMenuWrap').forEach(initOne);
+})();
+`;
 
 const AUTH_USER = process.env.AUTH_USER || 'nwesource';
 const AUTH_PASS = process.env.AUTH_PASS || '';
@@ -565,6 +715,7 @@ app.get('/name', (req, res) => {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ClawdName</title>
+  <link rel="stylesheet" href="/static/apps-menu.css" />
   <style>
     :root{ --bg:#0b0f1a; --card:#11182a; --text:#e7e7e7; --muted: rgba(231,231,231,.70); --border: rgba(231,231,231,.12); --teal:#22c6c6; }
     body{margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background: var(--bg); color: var(--text)}
@@ -647,7 +798,7 @@ app.get('/name', (req, res) => {
   </div>
 
 <script src="/static/name.js"></script>
-<script>${APPS_MENU_JS}</script>
+<script src="/static/apps-menu.js"></script>
 </body>
 </html>`);
 });
@@ -892,6 +1043,86 @@ app.post('/api/ops/codex/reconnect', (req, res) => {
   res.json({ ok:true });
 });
 
+// --- Together.ai Ops integration (config + test) ---
+app.get('/api/ops/together', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  const cfg = readTogetherCfg();
+  res.json({ ok:true, config: { baseUrl: cfg.baseUrl, model: cfg.model, hasKey: !!cfg.apiKey, updatedAt: cfg.updatedAt || null } });
+});
+
+app.post('/api/ops/together', express.json({ limit: '50kb' }), (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+
+  const baseUrl = String(req.body?.baseUrl || '').trim();
+  const model = String(req.body?.model || '').trim();
+  const apiKey = (typeof req.body?.apiKey === 'string') ? String(req.body.apiKey) : null; // null = don't change
+  const clearKey = String(req.body?.clearKey || '') === '1';
+
+  const patch = {};
+  if (baseUrl) patch.baseUrl = baseUrl.replace(/\/$/, '');
+  if (model) patch.model = model;
+  if (clearKey) patch.apiKey = '';
+  else if (apiKey !== null) patch.apiKey = apiKey.trim();
+
+  const next = writeTogetherCfg(patch);
+  if (!next) return res.status(500).json({ ok:false, error:'write_failed' });
+
+  logWork('ops.together.saved', { baseUrl: next.baseUrl, model: next.model, hasKey: !!next.apiKey });
+  res.json({ ok:true, config: { baseUrl: next.baseUrl, model: next.model, hasKey: !!next.apiKey, updatedAt: next.updatedAt || null } });
+});
+
+app.post('/api/ops/together/test', express.json({ limit: '50kb' }), async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+
+  const cfg = readTogetherCfg();
+  const model = String(req.body?.model || cfg.model || '').trim();
+  const baseUrl = String(req.body?.baseUrl || cfg.baseUrl || '').trim().replace(/\/$/, '');
+  const apiKey = String(req.body?.apiKey || cfg.apiKey || '').trim();
+  const prompt = String(req.body?.prompt || 'Say hello.').slice(0, 4000);
+
+  if (!apiKey) return res.status(400).json({ ok:false, error:'missing_api_key' });
+  if (!model) return res.status(400).json({ ok:false, error:'missing_model' });
+  if (!baseUrl) return res.status(400).json({ ok:false, error:'missing_base_url' });
+
+  const url = baseUrl + '/v1/chat/completions';
+  const started = Date.now();
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        max_tokens: 120,
+      }),
+    });
+
+    const txt = await resp.text();
+    let j = null;
+    try { j = JSON.parse(txt); } catch { j = null; }
+
+    if (!resp.ok) {
+      return res.status(502).json({ ok:false, error:'upstream_http_' + resp.status, ms: Date.now() - started, body: j || txt.slice(0, 1200) });
+    }
+
+    const out = j?.choices?.[0]?.message?.content || j?.choices?.[0]?.text || '';
+    res.json({ ok:true, ms: Date.now() - started, model, baseUrl, output: String(out || '').slice(0, 1600), raw: j ? undefined : txt.slice(0, 1600) });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e), ms: Date.now() - started, url });
+  }
+});
+
 app.get('/clawdpub/sop', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const txt = readSopSnippet(200000);
@@ -918,6 +1149,7 @@ app.get('/adminonly', (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CC Admin</title>
   <meta name="robots" content="noindex" />
+  <link rel="stylesheet" href="/static/apps-menu.css" />
   <style>
     :root {
       --bg: #0b0f1a;
@@ -961,6 +1193,7 @@ app.get('/adminonly', (req, res) => {
       <button id="admTabCRM" class="tabbtn" type="button" style="margin-top:10px;">CRM</button>
       <button id="admTabChangelog" class="tabbtn" type="button" style="margin-top:10px;">Changelog</button>
       <button id="admTabFeatures" class="tabbtn" type="button" style="margin-top:10px;">Features</button>
+      <button id="admTabBranding" class="tabbtn" type="button" style="margin-top:10px;">Branding</button>
       <div class="muted" style="margin-top:10px;">Default tab: Sitemap</div>
     </aside>
 
@@ -1163,13 +1396,75 @@ app.get('/adminonly', (req, res) => {
         </div>
       </div>
 
+      <div id="admPanelBranding" class="card" style="display:none;">
+        <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline; flex-wrap:wrap;">
+          <h1 style="margin:0; font-size:18px;">Branding</h1>
+          <div class="muted">Shared UI primitives</div>
+        </div>
+
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.12);">
+          <div style="font-weight:900;">Menus</div>
+          <div class="muted" style="margin-top:6px;">This controls the shared <b>ClawdApps</b> dropdown style for all apps pages.</div>
+
+          <div style="margin-top:12px; display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:start;">
+            <div>
+              <div class="muted" style="margin-bottom:6px;">CSS overrides</div>
+              <textarea id="brandMenuCss" style="width:100%; min-height:240px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px;"></textarea>
+              <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+                <button id="brandMenuSave" class="tabbtn" type="button" style="width:auto;">Save</button>
+                <button id="brandMenuReset" class="tabbtn" type="button" style="width:auto;">Reset</button>
+                <span class="muted" id="brandMenuSaved"></span>
+              </div>
+            </div>
+
+            <div>
+              <div class="muted" style="margin-bottom:6px;">Preview</div>
+              <div style="border:1px solid rgba(255,255,255,0.10); border-radius:14px; padding:12px; background: rgba(255,255,255,0.03);">
+                <div style="display:flex; justify-content:flex-end;">${appsMenuHtml('/adminonly')}</div>
+                <div class="muted" style="margin-top:12px;">Note: base menu CSS is fixed; this textarea is for overrides only.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="muted" style="margin-top:12px;">More admin tabs coming.</div>
     </main>
   </div>
 
   <script src="/static/adminonly.js"></script>
+  <script src="/static/apps-menu.js"></script>
 </body>
 </html>`);
+});
+
+// Branding menu API (adminonly)
+app.get('/admin/api/branding/menu', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!ADMINONLY_ENABLED) return res.status(404).json({ ok:false, error:'disabled' });
+  const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+  if (host && host !== 'claw.nwesource.com') return res.status(404).json({ ok:false, error:'not_found' });
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  const brand = readBrandingMenu();
+  res.json({ ok:true, branding: brand });
+});
+
+app.post('/admin/api/branding/menu', express.json({ limit: '200kb' }), (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!ADMINONLY_ENABLED) return res.status(404).json({ ok:false, error:'disabled' });
+  const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+  if (host && host !== 'claw.nwesource.com') return res.status(404).json({ ok:false, error:'not_found' });
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+
+  const cssOverrides = (typeof req.body?.cssOverrides === 'string') ? req.body.cssOverrides : '';
+  // Guardrail: keep it reasonably small.
+  if (cssOverrides.length > 50000) return res.status(400).json({ ok:false, error:'too_large' });
+
+  const next = writeBrandingMenu({ cssOverrides });
+  logWork('branding.menu.saved', { bytes: cssOverrides.length });
+  res.json({ ok:true, branding: next });
 });
 
 const ADOPTION_FILE = path.join(DATA_DIR, 'adoption.json');
@@ -2777,9 +3072,9 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${title}</title>
+  <link rel="stylesheet" href="/static/apps-menu.css" />
   <style>
     :root{ --bg:#0b1020; --text:#e8eefc; --muted: rgba(232,238,252,.68); --border: rgba(255,255,255,0.10); --card: rgba(255,255,255,0.04); --card2: rgba(0,0,0,0.14); --accent:#22c6c6; }
-    ${APPS_MENU_CSS}
     body{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--bg); color: var(--text); margin:0; }
     a{ color:#9ad0ff; }
     .wrap{ width:100%; max-width: 1400px; margin:0 auto; padding: 18px; }
@@ -2906,8 +3201,7 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
 
     <div class="footer">Build: <code>${BUILD}</code></div>
   </div>
-    <script>${APPS_MENU_JS}</script>
-  </div>
+  <script src="/static/apps-menu.js"></script>
 </body>
 </html>`;
 }
@@ -3030,7 +3324,7 @@ const APPS_MENU_JS = `
 `;
 
 function appsMenuHtml(activePath){
-  const path = String(activePath || '');
+  const pathNow = String(activePath || '');
   const items = [
     { label: 'ClawdPM', href: '/pm' },
     { label: 'ClawdScript', href: '/apps/script' },
@@ -3046,20 +3340,21 @@ function appsMenuHtml(activePath){
   ];
 
   const links = items.map(it => {
-    const isActive = (path === it.href);
+    const isActive = (pathNow === it.href);
     return '<a class="appsLink" href="' + it.href + '" ' + (isActive ? 'aria-current="page"' : '') + '>'
       + '<span class="appsDot" aria-hidden="true"></span>'
       + '<span class="appsLbl">' + escHtml(it.label) + '</span>'
       + '</a>';
   }).join('');
 
+  // NOTE: no IDs (so it can be embedded multiple times); no .pill class (so per-page pill styles don't leak onto it).
   return ''
-    + '<div class="appsMenuWrap" id="appsMenuWrap">'
-    +   '<button class="pill appsMenuBtn" id="appsMenuBtn" type="button" title="Click to open menu • Double-click to open /apps">'
+    + '<div class="appsMenuWrap">'
+    +   '<button class="appsMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false" title="Click to open menu • Double-click to open /apps">'
     +     '<span class="appsMenuBtnTxt">ClawdApps</span>'
     +     '<span class="appsMenuBtnChev" aria-hidden="true">▾</span>'
     +   '</button>'
-    +   '<div class="appsMenuDrop" id="appsMenuDrop" role="menu" aria-label="ClawdApps menu">'
+    +   '<div class="appsMenuDrop" role="menu" aria-label="ClawdApps menu">'
     +     '<div class="appsMenuDropHead">'
     +       '<a class="appsAll" href="/apps">Open /apps directory</a>'
     +     '</div>'
@@ -3815,6 +4110,7 @@ function renderModulePage(key){
           <button class="pill" id="opsTabQ" type="button">Questionnaire</button>
           <button class="pill" id="opsTabG" type="button">Gateway</button>
           <button class="pill" id="opsTabC" type="button">Codex</button>
+          <button class="pill" id="opsTabTogether" type="button">Together</button>
           <button class="pill" id="opsTabClawd" type="button">Clawd</button>
           <span style="flex:1;"></span>
           <span id="opsHydration" class="muted" title="Auto-state hydration: unknown" style="display:inline-flex; align-items:center; gap:6px; user-select:none;">
@@ -3910,6 +4206,45 @@ function renderModulePage(key){
             </div>
           </div>
         </div><!-- /opsTabCodex -->
+
+        <div id="opsTabTogetherView" style="display:none;">
+          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Together.ai (OpenAI-compatible)</div>
+            <div class="muted" style="margin-bottom:10px;">Ops-only config to validate calls. This stores a Together API key + default model so we can later route requests through it (e.g. Qwen2.5-Coder).</div>
+
+            <div class="twoCol">
+              <div>
+                <div class="muted" style="margin-bottom:6px;">Base URL</div>
+                <input id="togetherBaseUrl" class="inp" placeholder="https://api.together.xyz" style="width:100%; max-width: 640px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />
+
+                <div class="muted" style="margin-top:10px; margin-bottom:6px;">Model</div>
+                <input id="togetherModel" class="inp" placeholder="Qwen/Qwen2.5-Coder-32B-Instruct" style="width:100%; max-width: 640px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />
+
+                <div class="muted" style="margin-top:10px; margin-bottom:6px;">API key</div>
+                <input id="togetherApiKey" class="inp" type="password" placeholder="together_..." style="width:100%; max-width: 640px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />
+
+                <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+                  <button class="pill" id="togetherSave" type="button">Save</button>
+                  <button class="pill" id="togetherClear" type="button">Clear key</button>
+                  <span class="muted" id="togetherMsg"></span>
+                </div>
+
+                <div class="muted" style="margin-top:10px;">Saved to: <code>${DATA_DIR}/together-config.json</code></div>
+              </div>
+
+              <div>
+                <div style="font-weight:900; margin-bottom:8px;">Test</div>
+                <div class="muted" style="margin-bottom:6px;">Prompt</div>
+                <textarea id="togetherPrompt" class="inp" style="width:100%; min-height:120px;">Say hello and confirm you are running on Together.</textarea>
+                <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+                  <button class="pill" id="togetherTest" type="button" style="border-color: rgba(154,208,255,0.55);">Run test</button>
+                  <span class="muted" id="togetherTestMsg"></span>
+                </div>
+                <pre id="togetherOut" style="white-space:pre-wrap; word-break:break-word; margin:10px 0 0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.12); max-height: 40vh; overflow:auto;"></pre>
+              </div>
+            </div>
+          </div>
+        </div><!-- /opsTabTogetherView -->
 
         <div id="opsTabClawdView" style="display:none;">
           <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
@@ -4873,6 +5208,7 @@ app.get('/pm', (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="clawd-build" content="${BUILD}" />
   <title>ClawdPM</title>
+  <link rel="stylesheet" href="/static/apps-menu.css" />
   <style>
     :root { --bg:#0b0f1a; --card:#11182a; --text:#e7e7e7; --muted: rgba(231,231,231,.70); --border: rgba(231,231,231,.12); --teal:#22c6c6; }
     html,body{height:100%}
@@ -5094,7 +5430,7 @@ app.get('/pm', (req, res) => {
     }
   })()}</script>
   <script src="/static/pm.js"></script>
-  <script>${APPS_MENU_JS}</script>
+  <script src="/static/apps-menu.js"></script>
 
 </body>
 </html>`);
@@ -5684,6 +6020,19 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
     res.setHeader('Cache-Control', 'no-store');
   }
 }));
+
+// Shared Apps menu assets (served dynamically so changes propagate immediately).
+app.get('/static/apps-menu.css', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const brand = readBrandingMenu();
+  const css = String(APPS_MENU_BASE_CSS || '') + "\n\n" + String(brand.cssOverrides || '');
+  res.type('text/css; charset=utf-8').send(css);
+});
+
+app.get('/static/apps-menu.js', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('application/javascript; charset=utf-8').send(String(APPS_MENU_BASE_JS || ''));
+});
 
 app.use('/static', express.static(path.join(__dirname, 'static'), {
   index: false,

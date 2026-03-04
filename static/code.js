@@ -27,13 +27,10 @@
   // layout expand
   const ideEl = $('ccIde');
   const btnExpFile = $('codeExpFile');
-  const btnExpApp = $('codeExpApp');
 
   // --- App preview ---
-  const appPreset = $('appPreset');
   const appUrl = $('appUrl');
   const appGo = $('appGo');
-  const appOpen = $('appOpen');
   const appFrame = $('appFrame');
   const appMsg = $('appMsg');
 
@@ -411,11 +408,7 @@
     const on = ideEl.classList.contains('exp-file');
     setExpand(on ? '' : 'file');
   });
-  if (btnExpApp) btnExpApp.addEventListener('click', () => {
-    if (!ideEl) return;
-    const on = ideEl.classList.contains('exp-app');
-    setExpand(on ? '' : 'app');
-  });
+  // App preview expand button removed (more vertical space).
 
   if (wsToggle) wsToggle.addEventListener('click', () => toggleCollapse('ws'));
   if (fileToggle) fileToggle.addEventListener('click', () => toggleCollapse('file'));
@@ -447,13 +440,7 @@
     setAppMsg('Loading…');
   }
 
-  if (appPreset) appPreset.addEventListener('change', () => applyAppUrl(appPreset.value));
   if (appGo) appGo.addEventListener('click', () => applyAppUrl(appUrl && appUrl.value));
-  if (appOpen) appOpen.addEventListener('click', () => {
-    const url = normalizePreviewUrl(appUrl && appUrl.value);
-    if (!url) return;
-    window.open(url, '_blank', 'noopener');
-  });
   if (appFrame) {
     appFrame.addEventListener('load', () => setAppMsg(''));
     appFrame.addEventListener('error', () => setAppMsg('Failed to load.'));

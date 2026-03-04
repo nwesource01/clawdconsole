@@ -6557,7 +6557,7 @@ app.get('/', (req, res) => {
     a { color: var(--accent); }
 
     /* Normalize card title sizes (ClawdApps/Rules/Tools/ReadMe/List/Work/etc) */
-    h2 { font-size: 14px; font-weight: 900; letter-spacing: 0.2px; }
+    h2 { font-size: 16px; font-weight: 900; letter-spacing: 0.2px; }
 
     .scriptBtn{
       display:inline-flex;

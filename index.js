@@ -2764,7 +2764,8 @@ app.post('/api/stt', sttUpload.single('audio'), async (req, res) => {
   if (!req.file) return res.status(400).json({ ok:false, error:'no_audio' });
 
   const inPath = req.file.path;
-  const model = String(process.env.STT_MODEL || 'small');
+  // Default to fastest local model; override with STT_MODEL (e.g. base, small)
+  const model = String(process.env.STT_MODEL || 'tiny.en');
   const py = process.env.STT_PYTHON || '/opt/clawdconsole/stt-venv/bin/python3';
   const script = path.join(__dirname, 'scripts', 'stt.py');
 

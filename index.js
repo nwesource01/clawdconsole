@@ -135,6 +135,40 @@ function recordGatewayEvent(kind, payload){
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const MSG_FILE = path.join(DATA_DIR, 'messages.jsonl');
 const WORK_FILE = path.join(DATA_DIR, 'worklog.jsonl');
+
+// On fresh installs, seed the chat with a short setup note (domain/SSL + bridge).
+try {
+  const st = fs.existsSync(MSG_FILE) ? fs.statSync(MSG_FILE) : null;
+  const empty = !st || st.size < 5;
+  if (empty) {
+    const bridgeTok = String(process.env.BRIDGE_TOKEN || '').trim();
+    const os = require('os');
+    const who = (process.env.HOSTNAME || '').trim() || os.hostname();
+    const note = [
+      `Welcome. I’m running on: ${who}`,
+      '',
+      'Basics:',
+      `- Code: ${__dirname}`,
+      `- Data: ${DATA_DIR}`,
+      '',
+      'Domain + SSL (optional): tell me the domain you want (e.g. clawdius.nwesource.com) and whether you prefer Nginx+certbot. I’ll generate the exact commands for this box.',
+      '',
+      'Bridge (cross-box notes):',
+      bridgeTok ? `- BRIDGE_TOKEN is set on this box (starts with: ${bridgeTok.slice(0,6)}…)` : '- BRIDGE_TOKEN is not set yet (set it in /etc/<name>-console.env).',
+      '  Bridge endpoints are token-only: /api/ops/bridge/inbox and /api/ops/bridge/outbox',
+    ].join('\n');
+
+    const msg = {
+      id: `msg_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`,
+      ts: new Date().toISOString(),
+      role: 'assistant',
+      who: 'console',
+      text: note,
+      attachments: [],
+    };
+    appendJsonl(MSG_FILE, msg);
+  }
+} catch {}
 // Minimal ongoing transcript (tiny JSONL; appended on every user + bot msg)
 const TRANSCRIPT_FILE = path.join(DATA_DIR, 'transcript.jsonl');
 // Raw gateway events (for debugging Codex / gateway behavior)
@@ -6011,6 +6045,26 @@ app.post('/api/ops/bridge/outbox', (req, res) => {
   const ok = writeTextFileSafe(BRIDGE_OUTBOX_FILE, text);
   appendBridgeLog('out', summary, text);
   res.json({ ok: !!ok });
+});
+
+// Console UI (ops) endpoints for bridge log + posting.
+app.get('/api/ops/bridge/list', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const limit = Math.max(1, Math.min(300, Number(req.query.limit || 120)));
+  const items = readLastJsonl(BRIDGE_LOG_FILE, limit);
+  res.json({ ok:true, items });
+});
+
+app.post('/api/ops/bridge/post', express.json({ limit:'200kb' }), (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const dirRaw = String(req.body?.dir || 'outbox').trim().toLowerCase();
+  const dir = (dirRaw === 'in' || dirRaw === 'inbox') ? 'in' : 'out';
+  const summary = (typeof req.body?.summary === 'string') ? String(req.body.summary).trim().slice(0, 240) : '';
+  const text = (typeof req.body?.text === 'string') ? String(req.body.text) : '';
+
+  const ok = writeTextFileSafe(dir === 'in' ? BRIDGE_INBOX_FILE : BRIDGE_OUTBOX_FILE, text);
+  const entry = appendBridgeLog(dir, summary, text);
+  res.json({ ok: !!ok, entry });
 });
 
 // --- Agent bridge (Gateway chat.send) ---

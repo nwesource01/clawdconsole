@@ -567,9 +567,22 @@ app.use((req, res, next) => {
   }
 
   // set session cookie so fetch() works without Authorization header
+  // IMPORTANT: only mark Secure when we're actually on HTTPS (otherwise browser won't store it).
   const token = newToken();
   sessions.set(token, { exp: Date.now() + SESS_TTL_MS, unlocks: {} });
-  res.setHeader('Set-Cookie', `${SESS_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${Math.floor(SESS_TTL_MS/1000)}; HttpOnly; Secure; SameSite=Strict`);
+
+  const xfProto = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
+  const isHttps = !!(req.secure || xfProto === 'https');
+  const cookie = [
+    `${SESS_COOKIE}=${encodeURIComponent(token)}`,
+    'Path=/',
+    `Max-Age=${Math.floor(SESS_TTL_MS/1000)}`,
+    'HttpOnly',
+    isHttps ? 'Secure' : null,
+    'SameSite=Strict',
+  ].filter(Boolean).join('; ');
+
+  res.setHeader('Set-Cookie', cookie);
 
   return next();
 });

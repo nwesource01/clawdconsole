@@ -69,21 +69,22 @@ h1{ margin:0; font-size:20px; letter-spacing:.2px; }
 /* 4 alternatives for the launcher button style (per-corner)
    - Keep lower-left (Menu 3) as the pill per request.
 */
-/* Menu 1: square outline */
+/* Menu 1 (winner): keep rounded-rect outline */
 .menu1 .mBtn{ border-radius: 10px; border:1px solid rgba(255,255,255,.22); background: rgba(0,0,0,.18); }
 .menu1 .mBtn:hover{ background: rgba(0,0,0,.26); border-color: rgba(34,198,198,.40); }
 
-/* Menu 2: solid square, NO border */
-.menu2 .mBtn{ border-radius: 10px; border:0; background: rgba(255,255,255,.10); }
+/* Menu 2: TRUE square (0 radius), solid, NO border */
+.menu2 .mBtn{ border-radius: 0px; border:0; background: rgba(255,255,255,.10); }
 .menu2 .mBtn:hover{ background: rgba(255,255,255,.14); }
 
 /* Menu 3: pill (keep) */
 .menu3 .mBtn{ border-radius:999px; border:1px solid rgba(34,198,198,.55); background: rgba(34,198,198,.10); }
 .menu3 .mBtn:hover{ background: rgba(34,198,198,.16); border-color: rgba(34,198,198,.75); }
 
-/* Menu 4: text-only (no border), with underline accent */
-.menu4 .mBtn{ border-radius: 10px; border:0; background: transparent; padding: 5px 0; }
-.menu4 .mBtn span{ border-bottom: 2px solid rgba(34,198,198,.55); padding-bottom: 3px; }
+/* Menu 4: TRUE square (0 radius), ghost/no-fill with underline accent */
+.menu4 .mBtn{ border-radius: 0px; border:1px solid rgba(255,255,255,.18); background: transparent; padding: 5px 8px; }
+.menu4 .mBtn span{ border-bottom: 2px solid rgba(34,198,198,.55); padding-bottom: 2px; }
+.menu4 .mBtn:hover{ border-color: rgba(34,198,198,.35); background: rgba(255,255,255,.04); }
 .menu4 .mBtn:hover span{ border-bottom-color: rgba(34,198,198,.85); }
 
 .mPanel{

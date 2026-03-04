@@ -6740,7 +6740,7 @@ app.get('/', (req, res) => {
     .err { color: #ff8c8c; }
 
     /* Interface modal */
-    .modalOverlay{ position:fixed; inset:0; background: rgba(0,0,0,0.55); display:none; align-items:center; justify-content:center; z-index: 5000; }
+    .modalOverlay{ position:fixed; inset:0; background: rgba(0,0,0,0.28); display:none; align-items:center; justify-content:center; z-index: 5000; }
     .modalOverlay.open{ display:flex; }
     .modal{ width: min(720px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow:auto; border-radius:16px; border:1px solid rgba(255,255,255,0.14); background: rgba(17,24,42,0.92); backdrop-filter: blur(10px); padding:14px; }
     .modalTitle{ font-weight:900; font-size:16px; }

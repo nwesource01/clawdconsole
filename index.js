@@ -6471,9 +6471,11 @@ app.get('/', (req, res) => {
       --bg1: #0b1020;
       --bg2: #0a132a;
       --bgAccent: rgba(34,198,198,0.10);
+      --bgAccent2: rgba(154,208,255,0.10);
+      --bgAccent3: rgba(255,120,220,0.08);
 
-      --card: #11182a;
-      --card2: #0f1526;
+      --card: rgba(17,24,42,0.78);
+      --card2: rgba(15,21,38,0.72);
       --text: #e7e7e7;
       --muted: rgba(231,231,231,0.7);
       --border: rgba(231,231,231,0.12);
@@ -6500,10 +6502,10 @@ app.get('/', (req, res) => {
       z-index: -1;
       background:
         radial-gradient(1200px 700px at 12% 8%, var(--bgAccent), transparent 60%),
-        radial-gradient(900px 520px at 82% 18%, rgba(154,208,255,0.10), transparent 62%),
-        radial-gradient(800px 520px at 55% 92%, rgba(34,198,198,0.08), transparent 60%);
-      opacity: 0.95;
-      filter: saturate(1.05);
+        radial-gradient(900px 520px at 82% 18%, var(--bgAccent2), transparent 62%),
+        radial-gradient(800px 520px at 55% 92%, var(--bgAccent3), transparent 60%);
+      opacity: 0.90;
+      filter: saturate(1.12) contrast(1.02);
       animation: bgFloat 18s ease-in-out infinite;
       transform: translateZ(0);
     }
@@ -6571,7 +6573,7 @@ app.get('/', (req, res) => {
       .right { grid-column: auto; }
     }
 
-    .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: 0 10px 25px rgba(0,0,0,0.25); }
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: 0 10px 25px rgba(0,0,0,0.25); backdrop-filter: blur(10px); }
 
     /* Sidebar widgets */
     /* Keep Readme + Rules compact (scroll inside) so sidebar bottom aligns with main column */

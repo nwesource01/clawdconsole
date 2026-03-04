@@ -1333,23 +1333,38 @@
     const preset = String(theme?.preset || 'clawd');
     const color = String(theme?.color || '#0b0f1a');
 
-    // presets (background only)
-    let bg0 = '#0b0f1a', bg1 = '#0b1020', bg2 = '#0a132a', accent = 'rgba(34,198,198,0.10)';
+    // presets
+    let bg0 = '#0b0f1a', bg1 = '#0b1020', bg2 = '#0a132a';
+    let accent1 = 'rgba(34,198,198,0.12)';
+    let accent2 = 'rgba(154,208,255,0.10)';
+    let accent3 = 'rgba(255,120,220,0.08)';
 
     if (preset === 'midnight') {
-      bg0 = '#070a12'; bg1 = '#0a1022'; bg2 = '#0e1b3a'; accent = 'rgba(154,208,255,0.10)';
+      bg0 = '#070a12'; bg1 = '#0a1022'; bg2 = '#0e1b3a';
+      accent1 = 'rgba(154,208,255,0.12)'; accent2 = 'rgba(34,198,198,0.08)'; accent3 = 'rgba(255,120,220,0.06)';
     } else if (preset === 'nebula') {
-      bg0 = '#070a14'; bg1 = '#130b2a'; bg2 = '#0a1e2c'; accent = 'rgba(255,120,220,0.10)';
+      bg0 = '#070a14'; bg1 = '#130b2a'; bg2 = '#0a1e2c';
+      accent1 = 'rgba(255,120,220,0.12)'; accent2 = 'rgba(154,208,255,0.08)'; accent3 = 'rgba(34,198,198,0.08)';
     } else if (preset === 'slate') {
-      bg0 = '#0b0f14'; bg1 = '#0e141c'; bg2 = '#121a26'; accent = 'rgba(170,190,255,0.08)';
+      bg0 = '#0b0f14'; bg1 = '#0e141c'; bg2 = '#121a26';
+      accent1 = 'rgba(170,190,255,0.10)'; accent2 = 'rgba(34,198,198,0.06)'; accent3 = 'rgba(255,120,220,0.06)';
     } else if (preset === 'custom') {
       const rgb = hexToRgb(color) || { r:11, g:15, b:26 };
       // Make the chosen color actually show up.
-      // bg0 = base, bg1 = slightly lighter top, bg2 = deeper accent.
       bg0 = rgbToHex(rgb.r, rgb.g, rgb.b);
       bg1 = rgbToHex(mix(rgb.r, 255, 0.12), mix(rgb.g, 255, 0.12), mix(rgb.b, 255, 0.12));
       bg2 = rgbToHex(mix(rgb.r, 0, 0.22), mix(rgb.g, 0, 0.22), mix(rgb.b, 0, 0.22));
-      accent = `rgba(${rgb.r},${rgb.g},${rgb.b},0.38)`;
+      accent1 = `rgba(${rgb.r},${rgb.g},${rgb.b},0.32)`;
+      accent2 = `rgba(${rgb.r},${rgb.g},${rgb.b},0.18)`;
+      accent3 = `rgba(${rgb.r},${rgb.g},${rgb.b},0.10)`;
+    }
+
+    // Color picker should still have a visible effect even on presets:
+    // use it as the primary accent glow unless preset=custom already uses it.
+    const pick = hexToRgb(color);
+    if (pick && preset !== 'custom') {
+      accent1 = `rgba(${pick.r},${pick.g},${pick.b},0.24)`;
+      accent2 = `rgba(${pick.r},${pick.g},${pick.b},0.14)`;
     }
 
     const root = document.documentElement;
@@ -1357,7 +1372,9 @@
     root.style.setProperty('--bg0', bg0);
     root.style.setProperty('--bg1', bg1);
     root.style.setProperty('--bg2', bg2);
-    root.style.setProperty('--bgAccent', accent);
+    root.style.setProperty('--bgAccent', accent1);
+    root.style.setProperty('--bgAccent2', accent2);
+    root.style.setProperty('--bgAccent3', accent3);
   }
 
   async function loadUiTheme(){

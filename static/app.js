@@ -1708,20 +1708,21 @@
     ta.focus();
   });
 
-  // Mic (push-to-talk): records audio locally and transcribes on-box (pastes text into composer)
+  // Mic (toggle): click to start recording, click to stop; transcribes on-box (pastes into composer)
   const micBtn = document.getElementById('mic');
   const micStatus = document.getElementById('micStatus');
   let micStream = null;
   let micRec = null;
   let micChunks = [];
   let micActive = false;
+  let micStopping = false;
 
   function setMicStatus(t){
     if (micStatus) micStatus.textContent = String(t || '');
   }
 
   async function micStart(){
-    if (micActive) return;
+    if (micActive || micStopping) return;
     micActive = true;
     setMicStatus('Recording…');
     try {
@@ -1779,25 +1780,28 @@
           setMicStatus('');
         } finally {
           micActive = false;
-          try { micBtn && (micBtn.textContent = '🎙 Hold'); } catch {}
+          micStopping = false;
+          try { micBtn && (micBtn.textContent = '🎙'); } catch {}
         }
       };
 
       // Use a small timeslice so dataavailable fires regularly; helps avoid "stuck on stop" on some browsers.
       micRec.start(250);
-      try { micBtn && (micBtn.textContent = '● Rec'); } catch {}
+      try { micBtn && (micBtn.textContent = '●'); } catch {}
     } catch (e) {
       micActive = false;
+      micStopping = false;
       setMicStatus('Mic blocked/unavailable.');
       dbg('mic error: ' + String(e));
-      try { micBtn && (micBtn.textContent = '🎙 Hold'); } catch {}
+      try { micBtn && (micBtn.textContent = '🎙'); } catch {}
       try { micStream && micStream.getTracks && micStream.getTracks().forEach(t => t.stop()); } catch {}
       micStream = null;
     }
   }
 
   async function micStop(){
-    if (!micActive) return;
+    if (!micActive || micStopping) return;
+    micStopping = true;
     setMicStatus('Stopping…');
     try {
       if (micRec && micRec.state !== 'inactive') {
@@ -1809,19 +1813,25 @@
         }, 800);
         micRec.stop();
       }
-    } catch {}
+    } catch {
+      micStopping = false;
+    }
   }
 
   if (micBtn) {
-    // mouse
-    micBtn.addEventListener('mousedown', (e) => { e.preventDefault(); micStart(); });
-    micBtn.addEventListener('mouseup', (e) => { e.preventDefault(); micStop(); });
-    micBtn.addEventListener('mouseleave', (e) => { if (micActive) micStop(); });
-
-    // touch
-    micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); micStart(); }, { passive:false });
-    micBtn.addEventListener('touchend', (e) => { e.preventDefault(); micStop(); }, { passive:false });
+    micBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (micActive) micStop();
+      else micStart();
+    });
   }
+
+  // Esc: cancel recording (best-effort)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && micActive) {
+      try { micStop(); } catch {}
+    }
+  });
 
   // Send button: single-click send (the explicit second step)
   if (sendBtn) {

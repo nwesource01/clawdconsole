@@ -1758,8 +1758,9 @@
           let j = null;
           try { j = JSON.parse(txt); } catch {}
           if (!res.ok || !j || !j.ok) {
-            setMicStatus('STT failed.');
-            dbg('stt http ' + res.status + ' ' + (txt || '').slice(0, 120));
+            const d = (j && (j.detail || j.error)) ? String(j.detail || j.error) : ((txt || '').slice(0, 140));
+            setMicStatus('STT failed: ' + (d || ('http ' + res.status)));
+            dbg('stt http ' + res.status + ' ' + (txt || '').slice(0, 240));
             return;
           }
 

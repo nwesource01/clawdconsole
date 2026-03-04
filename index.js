@@ -2777,7 +2777,7 @@ app.post('/api/stt', sttUpload.single('audio'), async (req, res) => {
     const pyPath = (py && fs.existsSync(py)) ? py : 'python3';
 
     const out = await new Promise((resolve, reject) => {
-      execFile(pyPath, [script, '--model', model, inPath], { timeout: 60_000, maxBuffer: 3 * 1024 * 1024 }, (err, stdout, stderr) => {
+      execFile(pyPath, [script, '--model', model, inPath], { timeout: 180_000, maxBuffer: 3 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
           const msg = (stderr && String(stderr).trim()) ? String(stderr).trim() : String(err);
           return reject(new Error(msg));

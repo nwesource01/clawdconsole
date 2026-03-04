@@ -2742,6 +2742,55 @@ app.get('/api/messages', (req, res) => {
   res.json({ ok: true, messages: readLastJsonl(MSG_FILE, limit) });
 });
 
+// --- Secret paste (ephemeral) ---
+let secretBox = { value: null, at: 0 };
+const SECRET_TTL_MS = 10 * 60 * 1000;
+function secretPresent(){
+  return !!(secretBox.value && secretBox.at && (Date.now() - secretBox.at) < SECRET_TTL_MS);
+}
+function secretClear(){
+  secretBox = { value: null, at: 0 };
+}
+
+app.get('/api/ops/secret/status', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ok = secretPresent();
+  res.json({ ok:true, present: ok, ageSec: ok ? Math.floor((Date.now() - secretBox.at)/1000) : null });
+});
+
+app.post('/api/ops/secret/store', express.json({ limit: '50kb' }), (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  const v = String(req.body?.value || '').trim();
+  if (!v) return res.status(400).json({ ok:false, error:'empty' });
+  if (v.length > 8000) return res.status(400).json({ ok:false, error:'too_large' });
+  secretBox = { value: v, at: Date.now() };
+  logWork('secret.stored', { bytes: v.length, ttlMin: Math.round(SECRET_TTL_MS/60000) });
+  res.json({ ok:true, ttlSec: Math.round(SECRET_TTL_MS/1000) });
+});
+
+app.post('/api/ops/secret/clear', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  secretClear();
+  logWork('secret.cleared', {});
+  res.json({ ok:true });
+});
+
+app.post('/api/ops/secret/apply/together', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  if (!secretPresent()) return res.status(400).json({ ok:false, error:'no_secret' });
+  const next = writeTogetherCfg({ apiKey: secretBox.value });
+  secretClear();
+  if (!next) return res.status(500).json({ ok:false, error:'write_failed' });
+  logWork('secret.applied.together', {});
+  res.json({ ok:true });
+});
+
 // --- Speech-to-text (local, on-box) ---
 const STT_TMP_DIR = path.join(DATA_DIR, 'tmp');
 try { fs.mkdirSync(STT_TMP_DIR, { recursive: true }); } catch {}
@@ -6720,7 +6769,19 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         </div>
 
         <div id="toolsBody" style="margin-top:10px;">
-          <div class="muted" style="margin-bottom: 10px; font-weight:700;">Manual Upload</div>
+          <div class="muted" style="margin-bottom: 8px; font-weight:900;">Paste Secret</div>
+          <div class="muted" style="margin-bottom: 10px;">Paste here (concealed). It’s stored briefly and can be applied to a target config without showing it in chat.</div>
+          <form id="secretForm" style="margin-top: 6px;">
+            <input id="secretVal" class="inp" type="password" autocomplete="off" placeholder="paste secret…" style="width:100%;" />
+            <div class="row" style="margin-top: 8px;">
+              <button id="secretStore" type="submit">Store (10 min)</button>
+              <button id="secretApplyTogether" type="button" class="wlbtn" title="Apply to Together API key">Apply → Together</button>
+              <button id="secretClear" type="button" class="wlbtn">Clear</button>
+              <span class="muted" id="secretMsg"></span>
+            </div>
+          </form>
+
+          <div class="muted" style="margin-top: 14px; margin-bottom: 10px; font-weight:700;">Manual Upload</div>
           <form id="upform" style="margin-top: 10px;">
             <input type="file" name="file" required />
             <div class="row" style="margin-top: 8px;">

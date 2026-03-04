@@ -1299,6 +1299,63 @@
     }
   }
 
+  // Paste secret (concealed)
+  const secretForm = document.getElementById('secretForm');
+  const secretVal = document.getElementById('secretVal');
+  const secretMsg = document.getElementById('secretMsg');
+  const secretApplyTogether = document.getElementById('secretApplyTogether');
+  const secretClearBtn = document.getElementById('secretClear');
+
+  function setSecretMsg(t){ if (secretMsg) secretMsg.textContent = String(t || ''); }
+
+  async function secretStore(){
+    const v = String(secretVal && secretVal.value || '').trim();
+    if (!v) { setSecretMsg('Paste a value first.'); return; }
+    setSecretMsg('Storing…');
+    const res = await fetch(apiUrl('/api/ops/secret/store'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      cache: 'no-store',
+      body: JSON.stringify({ value: v }),
+    });
+    const txt = await res.text();
+    let j = null;
+    try { j = JSON.parse(txt); } catch {}
+    if (!res.ok || !j || !j.ok) { setSecretMsg('Store failed.'); dbg('secret store http ' + res.status + ' ' + (txt||'').slice(0,200)); return; }
+    // clear local field immediately
+    if (secretVal) secretVal.value = '';
+    setSecretMsg('Stored (10 min).');
+    setTimeout(() => setSecretMsg(''), 1500);
+  }
+
+  async function secretApplyToTogether(){
+    setSecretMsg('Applying…');
+    const res = await fetch(apiUrl('/api/ops/secret/apply/together'), { method:'POST', credentials:'include', cache:'no-store' });
+    const txt = await res.text();
+    let j = null;
+    try { j = JSON.parse(txt); } catch {}
+    if (!res.ok || !j || !j.ok) { setSecretMsg('Apply failed.'); dbg('secret apply http ' + res.status + ' ' + (txt||'').slice(0,200)); return; }
+    setSecretMsg('Applied to Together.');
+    setTimeout(() => setSecretMsg(''), 1500);
+  }
+
+  async function secretClear(){
+    setSecretMsg('Clearing…');
+    const res = await fetch(apiUrl('/api/ops/secret/clear'), { method:'POST', credentials:'include', cache:'no-store' });
+    const txt = await res.text();
+    let j = null;
+    try { j = JSON.parse(txt); } catch {}
+    if (!res.ok || !j || !j.ok) { setSecretMsg('Clear failed.'); dbg('secret clear http ' + res.status + ' ' + (txt||'').slice(0,200)); return; }
+    if (secretVal) secretVal.value = '';
+    setSecretMsg('Cleared.');
+    setTimeout(() => setSecretMsg(''), 1200);
+  }
+
+  if (secretForm) secretForm.addEventListener('submit', (e) => { e.preventDefault(); secretStore(); });
+  if (secretApplyTogether) secretApplyTogether.addEventListener('click', secretApplyToTogether);
+  if (secretClearBtn) secretClearBtn.addEventListener('click', secretClear);
+
   // Manual upload
   const upform = document.getElementById('upform');
   if (upform) {

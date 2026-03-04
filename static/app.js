@@ -1308,6 +1308,10 @@
   const uiThemeSave = document.getElementById('uiThemeSave');
   const uiThemeReset = document.getElementById('uiThemeReset');
   const uiThemeMsg = document.getElementById('uiThemeMsg');
+  const uiOverlayColor = document.getElementById('uiOverlayColor');
+  const uiOverlayAlpha = document.getElementById('uiOverlayAlpha');
+  const uiOverlayAlphaLabel = document.getElementById('uiOverlayAlphaLabel');
+  const uiAnim = document.getElementById('uiAnim');
 
   function setThemeMsg(t){ if (uiThemeMsg) uiThemeMsg.textContent = String(t||''); }
   function openUiModal(on){ if (!uiModal) return; uiModal.classList.toggle('open', !!on); }
@@ -1332,6 +1336,9 @@
   function applyThemeVars(theme){
     const preset = String(theme?.preset || 'clawd');
     const color = String(theme?.color || '#0b0f1a');
+    const overlayColor = String(theme?.overlayColor || '#000000');
+    const overlayAlpha = Number(theme?.overlayAlpha ?? 0) || 0;
+    const anim = String(theme?.anim || 'normal');
 
     // presets
     let bg0 = '#0b0f1a', bg1 = '#0b1020', bg2 = '#0a132a';
@@ -1375,6 +1382,23 @@
     root.style.setProperty('--bgAccent', accent1);
     root.style.setProperty('--bgAccent2', accent2);
     root.style.setProperty('--bgAccent3', accent3);
+
+    // overlay tint
+    root.style.setProperty('--bgOverlay', overlayColor);
+    root.style.setProperty('--bgOverlayOpacity', String(Math.max(0, Math.min(0.9, overlayAlpha))));
+
+    // animation speed
+    let dur = '18s';
+    if (anim === 'off') dur = '0s';
+    else if (anim === 'slow') dur = '32s';
+    else if (anim === 'fast') dur = '10s';
+    root.style.setProperty('--bgAnimDur', dur);
+    root.style.setProperty('--bgAnimOpacity', '0.92');
+  }
+
+  function syncOverlayLabel(){
+    if (!uiOverlayAlpha || !uiOverlayAlphaLabel) return;
+    uiOverlayAlphaLabel.textContent = Number(uiOverlayAlpha.value || 0).toFixed(2);
   }
 
   async function loadUiTheme(){
@@ -1386,6 +1410,10 @@
       applyThemeVars(t);
       if (uiBgPreset) uiBgPreset.value = String(t.preset || 'clawd');
       if (uiBgColor) uiBgColor.value = String(t.color || '#0b0f1a');
+      if (uiOverlayColor) uiOverlayColor.value = String(t.overlayColor || '#000000');
+      if (uiOverlayAlpha) uiOverlayAlpha.value = String(t.overlayAlpha ?? 0);
+      if (uiAnim) uiAnim.value = String(t.anim || 'normal');
+      syncOverlayLabel();
     } catch (e) {
       dbg('ui theme load failed: ' + String(e));
     }
@@ -1396,16 +1424,20 @@
     try {
       const preset = uiBgPreset ? String(uiBgPreset.value||'') : 'clawd';
       const color = uiBgColor ? String(uiBgColor.value||'') : '#0b0f1a';
+      const overlayColor = uiOverlayColor ? String(uiOverlayColor.value||'') : '#000000';
+      const overlayAlpha = uiOverlayAlpha ? Number(uiOverlayAlpha.value || 0) : 0;
+      const anim = uiAnim ? String(uiAnim.value||'') : 'normal';
+
       const res = await fetch(apiUrl('/api/ops/ui-theme'), {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
         credentials:'include',
         cache:'no-store',
-        body: JSON.stringify({ preset, color }),
+        body: JSON.stringify({ preset, color, overlayColor, overlayAlpha, anim }),
       });
       const j = await res.json();
       if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
-      applyThemeVars(j.theme || { preset, color });
+      applyThemeVars(j.theme || { preset, color, overlayColor, overlayAlpha, anim });
       setThemeMsg('Saved.');
       setTimeout(()=>setThemeMsg(''), 1000);
     } catch (e) {
@@ -1416,6 +1448,10 @@
   async function resetUiTheme(){
     if (uiBgPreset) uiBgPreset.value = 'clawd';
     if (uiBgColor) uiBgColor.value = '#0b0f1a';
+    if (uiOverlayColor) uiOverlayColor.value = '#000000';
+    if (uiOverlayAlpha) uiOverlayAlpha.value = '0';
+    if (uiAnim) uiAnim.value = 'normal';
+    syncOverlayLabel();
     await saveUiTheme();
   }
 
@@ -1425,6 +1461,7 @@
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') openUiModal(false); });
   if (uiThemeSave) uiThemeSave.addEventListener('click', saveUiTheme);
   if (uiThemeReset) uiThemeReset.addEventListener('click', resetUiTheme);
+  if (uiOverlayAlpha) uiOverlayAlpha.addEventListener('input', () => { syncOverlayLabel(); });
   if (uiBgPreset) uiBgPreset.addEventListener('change', () => {
     const v = String(uiBgPreset.value||'');
     if (v !== 'custom') setThemeMsg('');

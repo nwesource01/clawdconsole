@@ -74,7 +74,14 @@ const TOGETHER_CFG_FILE = path.join(DATA_DIR, 'together-config.json');
 
 // UI theme (background) config
 const UI_THEME_FILE = path.join(DATA_DIR, 'ui-theme.json');
-const UI_THEME_DEFAULT = { preset: 'clawd', color: '#0b0f1a', updatedAt: null };
+const UI_THEME_DEFAULT = {
+  preset: 'clawd',
+  color: '#0b0f1a',
+  overlayColor: '#000000',
+  overlayAlpha: 0.0,
+  anim: 'normal', // off|slow|normal|fast
+  updatedAt: null,
+};
 function readUiTheme(){
   try {
     if (!fs.existsSync(UI_THEME_FILE)) return { ...UI_THEME_DEFAULT };
@@ -82,6 +89,9 @@ function readUiTheme(){
     return {
       preset: String(j.preset || UI_THEME_DEFAULT.preset),
       color: String(j.color || UI_THEME_DEFAULT.color),
+      overlayColor: String(j.overlayColor || UI_THEME_DEFAULT.overlayColor),
+      overlayAlpha: (typeof j.overlayAlpha === 'number') ? j.overlayAlpha : UI_THEME_DEFAULT.overlayAlpha,
+      anim: String(j.anim || UI_THEME_DEFAULT.anim),
       updatedAt: j.updatedAt || null,
     };
   } catch {
@@ -1134,14 +1144,22 @@ app.post('/api/ops/ui-theme', express.json({ limit: '50kb' }), (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const preset = String(req.body?.preset || '').trim();
   const color = String(req.body?.color || '').trim();
+  const overlayColor = String(req.body?.overlayColor || '').trim();
+  const overlayAlphaRaw = req.body?.overlayAlpha;
+  const anim = String(req.body?.anim || '').trim();
 
   const patch = {};
   if (preset) patch.preset = preset.slice(0, 40);
   if (color) patch.color = color.slice(0, 32);
+  if (overlayColor) patch.overlayColor = overlayColor.slice(0, 32);
+  if (typeof overlayAlphaRaw === 'number' && Number.isFinite(overlayAlphaRaw)) {
+    patch.overlayAlpha = Math.max(0, Math.min(0.9, overlayAlphaRaw));
+  }
+  if (anim) patch.anim = anim.slice(0, 16);
 
   const next = writeUiTheme(patch);
   if (!next) return res.status(500).json({ ok:false, error:'write_failed' });
-  logWork('ui.theme.saved', { preset: next.preset });
+  logWork('ui.theme.saved', { preset: next.preset, anim: next.anim, overlayAlpha: next.overlayAlpha });
   res.json({ ok:true, theme: next });
 });
 
@@ -6504,15 +6522,30 @@ app.get('/', (req, res) => {
         radial-gradient(1200px 700px at 12% 8%, var(--bgAccent), transparent 60%),
         radial-gradient(900px 520px at 82% 18%, var(--bgAccent2), transparent 62%),
         radial-gradient(800px 520px at 55% 92%, var(--bgAccent3), transparent 60%);
-      opacity: 0.90;
+      opacity: var(--bgAnimOpacity, 0.90);
       filter: saturate(1.12) contrast(1.02);
-      animation: bgFloat 18s ease-in-out infinite;
+      animation: bgFloat var(--bgAnimDur, 18s) ease-in-out infinite;
       transform: translateZ(0);
     }
+    /* Optional overlay tint layer */
+    body::after{
+      content:"";
+      position: fixed;
+      inset: 0;
+      pointer-events:none;
+      z-index: -1;
+      background: var(--bgOverlay, transparent);
+      opacity: var(--bgOverlayOpacity, 0);
+    }
+
     @keyframes bgFloat{
       0%{ transform: translate3d(0,0,0) scale(1); }
       50%{ transform: translate3d(0,-10px,0) scale(1.03); }
       100%{ transform: translate3d(0,0,0) scale(1); }
+    }
+
+    @media (prefers-reduced-motion: reduce){
+      body::before{ animation: none !important; }
     }
 
     /* brand: dark scrollbars everywhere (including textarea/pre) */
@@ -6690,6 +6723,7 @@ app.get('/', (req, res) => {
 
     .statusline { display:flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
     .pill { border: 1px solid var(--border); background: #0d1426; border-radius: 999px; padding: 6px 10px; font-size: 12px; color: var(--muted); }
+    select.inp{ background: rgba(9,14,26,0.85); color: rgba(231,231,231,0.92); }
 
     /* Rules accordion (tight + no bold titles) */
     .ruleItem { border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; background: rgba(255,255,255,0.03); overflow:hidden; }
@@ -6726,7 +6760,7 @@ app.get('/', (req, res) => {
       <div class="modalHr"></div>
 
       <div style="font-weight:900; margin-bottom:8px;">Background</div>
-      <div class="muted" style="margin-bottom:10px;">Pick a preset or choose a base color. Applies under all cards.</div>
+      <div class="muted" style="margin-bottom:10px;">Pick a preset or choose colors. Applies under all cards.</div>
 
       <div class="modalRow">
         <label class="muted" style="min-width:120px;">Preset</label>
@@ -6740,9 +6774,26 @@ app.get('/', (req, res) => {
       </div>
 
       <div class="modalRow" style="margin-top:10px;">
-        <label class="muted" style="min-width:120px;">Base color</label>
+        <label class="muted" style="min-width:120px;">Accent color</label>
         <input id="uiBgColor" type="color" class="inp" value="#0b0f1a" style="width:70px; padding: 4px; height: 36px;" />
-        <span class="muted">(custom preset)</span>
+        <span class="muted">(affects presets + custom)</span>
+      </div>
+
+      <div class="modalRow" style="margin-top:10px;">
+        <label class="muted" style="min-width:120px;">Overlay tint</label>
+        <input id="uiOverlayColor" type="color" class="inp" value="#000000" style="width:70px; padding: 4px; height: 36px;" />
+        <label class="muted" style="display:flex; align-items:center; gap:8px;">Opacity <input id="uiOverlayAlpha" type="range" min="0" max="0.8" step="0.02" value="0" style="width:220px;" /></label>
+        <span class="muted" id="uiOverlayAlphaLabel">0.00</span>
+      </div>
+
+      <div class="modalRow" style="margin-top:10px;">
+        <label class="muted" style="min-width:120px;">Animation</label>
+        <select id="uiAnim" class="inp" style="flex:1; min-width: 240px; max-width: 520px;">
+          <option value="off">Off</option>
+          <option value="slow">Slow</option>
+          <option value="normal">Normal</option>
+          <option value="fast">Fast</option>
+        </select>
       </div>
 
       <div class="modalRow" style="margin-top:14px;">

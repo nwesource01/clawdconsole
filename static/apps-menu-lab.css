@@ -73,6 +73,8 @@ h1{ margin:0; font-size:20px; letter-spacing:.2px; }
   border: 1px solid rgba(255,255,255,0.14);
   background: rgba(10,14,28,.88);
   overflow:hidden;
+  /* keep the panel width aligned to its container (no extra wide dead space) */
+  width: 100%;
 
   opacity:0;
   pointer-events:none;
@@ -83,12 +85,20 @@ h1{ margin:0; font-size:20px; letter-spacing:.2px; }
 .mHead{ padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.10); display:flex; justify-content:space-between; align-items:center; }
 .mHead .hint{ color: rgba(255,255,255,.60); font-size:12px; }
 
-.mGrid{ padding: 12px; display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; }
-@media (max-width: 980px){ .mGrid{ grid-template-columns: 1fr; } }
+.mGrid{
+  padding: 12px;
+  display:grid;
+  /* Responsive: more columns when there is room, but never huge empty buttons */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap:8px;
+}
+@media (max-width: 520px){ .mGrid{ grid-template-columns: 1fr; } }
 
 .mItem{
   display:flex; gap:10px; align-items:center;
-  padding:10px 12px;
+  /* Keep all buttons same size, but tighter */
+  min-height: 38px;
+  padding:8px 10px;
   border-radius: 14px;
   border: 1px solid rgba(255,255,255,0.10);
   background: rgba(255,255,255,0.04);
@@ -97,8 +107,8 @@ h1{ margin:0; font-size:20px; letter-spacing:.2px; }
   transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
 }
 .mItem:hover{ transform: translateY(-1px); background: rgba(255,255,255,0.06); border-color: rgba(34,198,198,.35); }
-.dot{ width:10px; height:10px; border-radius:999px; background: rgba(34,198,198,.75); box-shadow: 0 0 0 4px rgba(34,198,198,.12); flex:0 0 auto; }
-.lbl{ font-weight: 850; letter-spacing:.2px; }
+.dot{ width:8px; height:8px; border-radius:999px; background: rgba(34,198,198,.75); box-shadow: 0 0 0 3px rgba(34,198,198,.12); flex:0 0 auto; }
+.lbl{ font-weight: 850; letter-spacing:.2px; font-size: 13px; }
 
 /* === Menu 1: Magnetic Grid expansion (scale+fade+glow) === */
 .menu1 .mPanel{

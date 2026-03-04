@@ -55,23 +55,35 @@ h1{ margin:0; font-size:20px; letter-spacing:.2px; }
 .headRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; flex-wrap:wrap; }
 
 .mBtn{
-  display:inline-flex; align-items:center; gap:10px;
+  display:inline-flex; align-items:center; gap:8px;
   cursor:pointer; user-select:none;
   border-radius:999px;
   border:1px solid rgba(34,198,198,.40);
   background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08));
   color: rgba(231,231,231,.92);
-  padding:8px 12px;
+  /* tighter button */
+  padding:6px 10px;
   font-weight:900;
+  font-size:13px;
+  line-height:1;
 }
 .mBtn:hover{ border-color: rgba(34,198,198,.70); background: linear-gradient(180deg, rgba(34,198,198,.26), rgba(34,198,198,.10)); }
 .mBtn small{ color: rgba(231,231,231,.72); font-weight:800; }
+
+/* 4 alternatives for the launcher button style */
+.menu1 .mBtn{ /* keep pill */ }
+.menu2 .mBtn{ border-radius: 14px; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.16); }
+.menu2 .mBtn:hover{ border-color: rgba(34,198,198,.40); background: rgba(255,255,255,.09); }
+.menu3 .mBtn{ border-radius: 999px; background: transparent; border-color: rgba(255,255,255,.20); }
+.menu3 .mBtn:hover{ background: rgba(255,255,255,.06); }
+.menu4 .mBtn{ border-radius: 14px; background: rgba(34,198,198,.10); border-color: rgba(34,198,198,.55); }
+.menu4 .mBtn:hover{ background: rgba(34,198,198,.16); border-color: rgba(34,198,198,.75); }
 
 .mPanel{
   margin-top: 12px;
   border-radius: 18px;
   border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(10,14,28,.88);
+  background: #0a0f1e;
   overflow:hidden;
   /* keep the panel width aligned to its container (no extra wide dead space) */
   width: 100%;

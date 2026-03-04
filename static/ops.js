@@ -238,6 +238,8 @@
       if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
       const cfg = j.config || {};
       if (tgBase) tgBase.value = String(cfg.baseUrl || 'https://api.together.xyz');
+      // Normalize common mistake: pasting a dedicated endpoint URL (/models/...).
+      if (tgBase && /api\.together\.(ai|xyz)\/models\//i.test(tgBase.value)) tgBase.value = 'https://api.together.xyz';
       if (tgModel) tgModel.value = String(cfg.model || 'Qwen/Qwen2.5-Coder-32B-Instruct');
       // never populate key field from server
       if (tgKey) tgKey.value = '';

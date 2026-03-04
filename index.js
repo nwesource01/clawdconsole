@@ -1082,7 +1082,12 @@ app.post('/api/ops/together/test', express.json({ limit: '50kb' }), async (req, 
 
   const cfg = readTogetherCfg();
   const model = String(req.body?.model || cfg.model || '').trim();
-  const baseUrl = String(req.body?.baseUrl || cfg.baseUrl || '').trim().replace(/\/$/, '');
+  let baseUrl = String(req.body?.baseUrl || cfg.baseUrl || '').trim().replace(/\/$/, '');
+  // Guardrail: Together has a "Dedicated Endpoints" URL pattern like /models/<org>/<model>.
+  // Serverless chat completions should use the root API base (e.g. https://api.together.xyz).
+  if (/api\.together\.(ai|xyz)\/models\//i.test(baseUrl)) {
+    baseUrl = 'https://api.together.xyz';
+  }
   const apiKey = String(req.body?.apiKey || cfg.apiKey || '').trim();
   const prompt = String(req.body?.prompt || 'Say hello.').slice(0, 4000);
 
@@ -4216,6 +4221,7 @@ function renderModulePage(key){
               <div>
                 <div class="muted" style="margin-bottom:6px;">Base URL</div>
                 <input id="togetherBaseUrl" class="inp" placeholder="https://api.together.xyz" style="width:100%; max-width: 640px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />
+                <div class="muted" style="margin-top:6px;">Serverless uses <code>https://api.together.xyz</code>. Don’t paste a <code>/models/…</code> dedicated-endpoint URL.</div>
 
                 <div class="muted" style="margin-top:10px; margin-bottom:6px;">Model</div>
                 <input id="togetherModel" class="inp" placeholder="Qwen/Qwen2.5-Coder-32B-Instruct" style="width:100%; max-width: 640px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />

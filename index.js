@@ -2933,7 +2933,21 @@ function appsIcon(kind){
 const APPS_MENU_CSS = `
   /* Apps menu (click to expand; double-click opens /apps) */
   .appsMenuWrap{ position:relative; display:inline-flex; align-items:center; justify-content:flex-end; }
-  .appsMenuBtn{ cursor:pointer; user-select:none; }
+  /* Replace everywhere: use Menu #1 launcher style + underline accent */
+  .appsMenuBtn{
+    cursor:pointer; user-select:none;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.22);
+    background: rgba(0,0,0,.18);
+    padding: 5px 8px;
+    font-weight: 950;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .appsMenuBtnTxt{ border-bottom: 2px solid rgba(34,198,198,.55); padding-bottom: 2px; }
+  .appsMenuBtn:hover{ background: rgba(0,0,0,.26); border-color: rgba(34,198,198,.40); }
+  .appsMenuBtn:hover .appsMenuBtnTxt{ border-bottom-color: rgba(34,198,198,.85); }
+
   .appsMenuBtnChev{ opacity:.8; transition: transform 160ms ease; }
   .appsMenuWrap.open .appsMenuBtnChev{ transform: rotate(180deg); }
 

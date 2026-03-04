@@ -1,9 +1,9 @@
 :root{
   --bg0:#0b0f17;
-  --bg1: rgba(255,255,255,.06);
-  --stroke: rgba(255,255,255,.10);
+  --stroke: rgba(255,255,255,0.10);
   --txt: rgba(255,255,255,.92);
   --muted: rgba(255,255,255,.65);
+  --teal: rgba(34,198,198,.95);
 }
 
 body{ margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: radial-gradient(1200px 700px at 50% -10%, rgba(120,180,255,.18), transparent 55%), radial-gradient(900px 520px at 115% 15%, rgba(180,120,255,.12), transparent 55%), var(--bg0); color: var(--txt); }
@@ -16,7 +16,7 @@ body{ margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, 
 }
 
 h1{ margin:0; font-size:20px; letter-spacing:.2px; }
-.sub{ color:var(--muted); font-size:13px; margin-top:6px; max-width: 68ch; line-height:1.4; }
+.sub{ color:var(--muted); font-size:13px; margin-top:6px; max-width: 78ch; line-height:1.4; }
 
 .pills{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .pill{ text-decoration:none; color:var(--txt); background: rgba(255,255,255,.06); border:1px solid var(--stroke); padding:8px 12px; border-radius:999px; font-weight:800; font-size:13px; }
@@ -31,7 +31,7 @@ h1{ margin:0; font-size:20px; letter-spacing:.2px; }
   padding: 14px;
 }
 
-.q{
+.menuBox{
   position:relative;
   border-radius: 22px;
   border:1px solid var(--stroke);
@@ -40,83 +40,95 @@ h1{ margin:0; font-size:20px; letter-spacing:.2px; }
   min-height: 240px;
 }
 
-.qInner{ position:absolute; inset:0; padding:22px; display:flex; flex-direction:column; justify-content:space-between; }
+.inner{ position:absolute; inset:0; padding:18px; display:flex; flex-direction:column; }
 
-.tag{ font-weight:900; font-size:13px; letter-spacing:.3px; color: rgba(255,255,255,.86); }
-.title{ font-weight:1000; font-size:24px; margin-top:8px; }
-.desc{ color:var(--muted); max-width: 62ch; line-height:1.45; margin-top:10px; font-size:13px; }
+.tag{ font-weight:900; font-size:12px; letter-spacing:.3px; color: rgba(255,255,255,.78); }
+.title{ font-weight:1000; font-size:20px; margin-top:6px; }
+.desc{ color:var(--muted); line-height:1.45; margin-top:8px; font-size:13px; max-width: 62ch; }
 
-.row{ display:flex; justify-content:space-between; align-items:flex-end; gap: 10px; flex-wrap:wrap; }
-.corner{ font-size:12px; color: rgba(255,255,255,.55); }
+.headRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; flex-wrap:wrap; }
 
-.demoBtn{
-  appearance:none; border:0; cursor:pointer;
-  background: rgba(0,0,0,.25);
-  border: 1px solid rgba(255,255,255,.14);
-  color: rgba(255,255,255,.92);
-  padding:10px 14px;
-  border-radius: 14px;
-  font-weight:950;
+.mBtn{
+  display:inline-flex; align-items:center; gap:10px;
+  cursor:pointer; user-select:none;
+  border-radius:999px;
+  border:1px solid rgba(34,198,198,.40);
+  background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08));
+  color: rgba(231,231,231,.92);
+  padding:8px 12px;
+  font-weight:900;
 }
-.demoBtn:hover{ background: rgba(0,0,0,.33); }
+.mBtn:hover{ border-color: rgba(34,198,198,.70); background: linear-gradient(180deg, rgba(34,198,198,.26), rgba(34,198,198,.10)); }
+.mBtn small{ color: rgba(231,231,231,.72); font-weight:800; }
 
-/* Menu 1: "Magnetic" tilt + glow */
-.m1::before{
-  content:''; position:absolute; inset:-2px;
-  background: radial-gradient(520px 280px at var(--mx, 50%) var(--my, 30%), rgba(120,180,255,.35), transparent 55%);
-  opacity:.9; transition: opacity 180ms ease;
-}
-.m1:hover::before{ opacity: 1; }
-.m1{ transform-style:preserve-3d; }
-.m1 .qInner{ transform: translateZ(0); }
+.mPanel{
+  margin-top: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(10,14,28,.88);
+  overflow:hidden;
 
-/* Menu 2: "Slide-in" menu rail */
-.m2{
-  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
-}
-.m2 .rail{
-  position:absolute; left:-40%; top:0; bottom:0; width:40%;
-  background: linear-gradient(180deg, rgba(255,180,120,.20), rgba(255,255,255,.0));
-  border-right: 1px solid rgba(255,255,255,.10);
-  transform: skewX(-12deg);
-  transition: left 220ms cubic-bezier(.2,.9,.2,1);
-}
-.m2:hover .rail{ left:-10%; }
-
-/* Menu 3: "Ripple" focus ring */
-.m3::after{
-  content:''; position:absolute; inset:0;
-  background: radial-gradient(180px 180px at 85% 15%, rgba(180,120,255,.35), transparent 60%);
-  opacity: .85;
-}
-.m3 .ring{
-  position:absolute; inset: -120px;
-  border-radius: 999px;
-  border: 2px solid rgba(180,120,255,.0);
-  transform: scale(.72);
   opacity:0;
-}
-.m3:hover .ring{
-  animation: ring 780ms ease-out;
-}
-@keyframes ring{
-  0%{ opacity:0; transform: scale(.65); border-color: rgba(180,120,255,.0); }
-  20%{ opacity:1; border-color: rgba(180,120,255,.45); }
-  100%{ opacity:0; transform: scale(1.05); border-color: rgba(180,120,255,.0); }
+  pointer-events:none;
 }
 
-/* Menu 4: "Pop" (fast spring) */
-.m4{ background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02)); }
-.m4 .pop{
-  position:absolute; right:-60px; bottom:-60px;
-  width: 220px; height: 220px; border-radius: 999px;
-  background: radial-gradient(circle at 30% 30%, rgba(120,255,170,.28), rgba(120,255,170,.0) 65%);
-  transform: scale(.92);
-  transition: transform 220ms cubic-bezier(.2,1.2,.2,1);
-}
-.m4:hover .pop{ transform: scale(1.05); }
+.menuBox.open .mPanel{ opacity: 1; pointer-events:auto; }
 
-/* Layout responsive */
+.mHead{ padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.10); display:flex; justify-content:space-between; align-items:center; }
+.mHead .hint{ color: rgba(255,255,255,.60); font-size:12px; }
+
+.mGrid{ padding: 12px; display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; }
+@media (max-width: 980px){ .mGrid{ grid-template-columns: 1fr; } }
+
+.mItem{
+  display:flex; gap:10px; align-items:center;
+  padding:10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  text-decoration:none;
+  color: rgba(232,238,252,.92);
+  transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+.mItem:hover{ transform: translateY(-1px); background: rgba(255,255,255,0.06); border-color: rgba(34,198,198,.35); }
+.dot{ width:10px; height:10px; border-radius:999px; background: rgba(34,198,198,.75); box-shadow: 0 0 0 4px rgba(34,198,198,.12); flex:0 0 auto; }
+.lbl{ font-weight: 850; letter-spacing:.2px; }
+
+/* === Menu 1: Magnetic Grid expansion (scale+fade+glow) === */
+.menu1 .mPanel{
+  transform: translateY(-6px) scale(.985);
+  transition: opacity 170ms ease, transform 170ms ease;
+  background: radial-gradient(520px 240px at var(--mx, 30%) var(--my, 20%), rgba(120,180,255,.22), rgba(10,14,28,.86) 58%);
+}
+.menu1.open .mPanel{ transform: translateY(0) scale(1); }
+
+/* === Menu 2: Slide-down rail (height reveal) === */
+.menu2 .mPanel{
+  max-height: 0;
+  transform: translateY(-2px);
+  transition: max-height 220ms cubic-bezier(.2,.9,.2,1), opacity 160ms ease;
+}
+.menu2.open .mPanel{ max-height: 380px; }
+
+/* === Menu 3: Ripple reveal (clip-path) === */
+.menu3 .mPanel{
+  clip-path: circle(0% at 85% 10%);
+  transition: clip-path 320ms cubic-bezier(.2,1,.2,1), opacity 120ms ease;
+}
+.menu3.open .mPanel{ clip-path: circle(140% at 85% 10%); }
+
+/* === Menu 4: Spring pop (overshoot) === */
+.menu4 .mPanel{
+  transform: translateY(-8px) scale(.92);
+  transition: opacity 150ms ease;
+}
+.menu4.open .mPanel{ animation: pop 320ms cubic-bezier(.2,1.25,.2,1) both; }
+@keyframes pop{
+  0%{ transform: translateY(-8px) scale(.92); }
+  70%{ transform: translateY(0) scale(1.02); }
+  100%{ transform: translateY(0) scale(1); }
+}
+
 @media (max-width: 980px){
   .grid{ grid-template-columns: 1fr; grid-template-rows: auto; }
 }

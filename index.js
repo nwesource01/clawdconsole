@@ -3064,7 +3064,7 @@ app.get('/apps/menu-lab', (req, res) => {
     <div class="top">
       <div>
         <h1>Apps Menu Lab</h1>
-        <div class="sub">Four menu styles, one per corner. Tell me something like: <b>Menu 1 with animation 4</b>. These are visual concepts only (not wired into /apps yet).</div>
+        <div class="sub">Four <b>click-to-expand</b> menu options, one per corner. Each button is single-click to open, double-click to go to /apps. Pick like: <b>Menu 1</b> (animation style) or “Menu 1 with Menu 3 reveal”.</div>
       </div>
       <div class="pills">
         <a class="pill" href="/apps">Back to /apps</a>
@@ -3073,65 +3073,78 @@ app.get('/apps/menu-lab', (req, res) => {
     </div>
 
     <div class="grid">
-      <!-- Corner 1 -->
-      <section class="q m1" data-menu="1" aria-label="Menu 1">
-        <div class="qInner">
+      <section class="menuBox menu1" data-menu="1" aria-label="Menu 1">
+        <div class="inner">
           <div>
             <div class="tag">Corner 1 • Menu 1</div>
             <div class="title">Magnetic Grid</div>
-            <div class="desc">Hover tilt + cursor-tracking glow. Fast, premium feel. Works great as a fullscreen app launcher grid.</div>
+            <div class="desc">Fast scale+fade reveal with cursor-glow and a subtle tilt on the panel. “Premium” without being slow.</div>
+            <div class="headRow">
+              <button class="mBtn" type="button"><span>ClawdApps</span><small>▾</small></button>
+              <div class="tag" style="opacity:.65;">Double-click → /apps</div>
+            </div>
           </div>
-          <div class="row">
-            <div class="corner">Animation: hover tilt + glow</div>
-            <button class="demoBtn" type="button" data-copy="Menu 1">Copy label</button>
+
+          <div class="mPanel">
+            <div class="mHead"><div class="hint">Menu 1 reveal</div><div class="hint">Esc closes</div></div>
+            <div class="mGrid"></div>
           </div>
         </div>
       </section>
 
-      <!-- Corner 2 -->
-      <section class="q m2" data-menu="2" aria-label="Menu 2">
-        <div class="rail" aria-hidden="true"></div>
-        <div class="qInner">
+      <section class="menuBox menu2" data-menu="2" aria-label="Menu 2">
+        <div class="inner">
           <div>
             <div class="tag">Corner 2 • Menu 2</div>
-            <div class="title">Slide-Rail</div>
-            <div class="desc">A subtle rail slides in on hover (or focus). Feels like a “drawer” without a full sidebar.</div>
+            <div class="title">Slide-Down Rail</div>
+            <div class="desc">Height-reveal drawer. Feels like a tidy dropdown that expands in place (good for dense nav).</div>
+            <div class="headRow">
+              <button class="mBtn" type="button"><span>ClawdApps</span><small>▾</small></button>
+              <div class="tag" style="opacity:.65;">Double-click → /apps</div>
+            </div>
           </div>
-          <div class="row">
-            <div class="corner">Animation: slide-in rail</div>
-            <button class="demoBtn" type="button" data-copy="Menu 2">Copy label</button>
+
+          <div class="mPanel">
+            <div class="mHead"><div class="hint">Menu 2 reveal</div><div class="hint">Esc closes</div></div>
+            <div class="mGrid"></div>
           </div>
         </div>
       </section>
 
-      <!-- Corner 3 -->
-      <section class="q m3" data-menu="3" aria-label="Menu 3">
-        <div class="ring" aria-hidden="true"></div>
-        <div class="qInner">
+      <section class="menuBox menu3" data-menu="3" aria-label="Menu 3">
+        <div class="inner">
           <div>
             <div class="tag">Corner 3 • Menu 3</div>
-            <div class="title">Focus Ripple</div>
-            <div class="desc">A single ripple on hover. Minimal motion, still feels alive. Great for enterprise “tasteful” vibes.</div>
+            <div class="title">Ripple Reveal</div>
+            <div class="desc">A clip-path circle expands from the top-right like a ripple. Minimal, classy motion.</div>
+            <div class="headRow">
+              <button class="mBtn" type="button"><span>ClawdApps</span><small>▾</small></button>
+              <div class="tag" style="opacity:.65;">Double-click → /apps</div>
+            </div>
           </div>
-          <div class="row">
-            <div class="corner">Animation: ripple ring</div>
-            <button class="demoBtn" type="button" data-copy="Menu 3">Copy label</button>
+
+          <div class="mPanel">
+            <div class="mHead"><div class="hint">Menu 3 reveal</div><div class="hint">Esc closes</div></div>
+            <div class="mGrid"></div>
           </div>
         </div>
       </section>
 
-      <!-- Corner 4 -->
-      <section class="q m4" data-menu="4" aria-label="Menu 4">
-        <div class="pop" aria-hidden="true"></div>
-        <div class="qInner">
+      <section class="menuBox menu4" data-menu="4" aria-label="Menu 4">
+        <div class="inner">
           <div>
             <div class="tag">Corner 4 • Menu 4</div>
             <div class="title">Spring Pop</div>
-            <div class="desc">Quick springy pop + gradient bubble. Feels playful, still clean. Very “app launcher” friendly.</div>
+            <div class="desc">A quick springy pop-in. Feels playful but still crisp. Good if you want “alive UI”.</div>
+            <div class="headRow">
+              <button class="mBtn" type="button"><span>ClawdApps</span><small>▾</small></button>
+              <div class="tag" style="opacity:.65;">Double-click → /apps</div>
+            </div>
           </div>
-          <div class="row">
-            <div class="corner">Animation: spring-pop</div>
-            <button class="demoBtn" type="button" data-copy="Menu 4">Copy label</button>
+
+          <div class="mPanel">
+            <div class="mHead"><div class="hint">Menu 4 reveal</div><div class="hint">Esc closes</div></div>
+            <div class="mGrid"></div>
           </div>
         </div>
       </section>

@@ -2002,6 +2002,80 @@ function readAutoStateMeta(){
   }
 }
 
+const AUTO_STATE_MAX_LINES = Math.max(50, Math.min(2000, Number(process.env.AUTO_STATE_MAX_LINES || 500)));
+const AUTO_STATE_INCLUDE = String(process.env.AUTO_STATE_INCLUDE || 'ops,repo,code,pm,queue,build,publish,upload,bridge,telemetry,security').trim();
+const AUTO_STATE_ALLOW_PREFIXES = new Set(AUTO_STATE_INCLUDE.split(',').map(s => s.trim()).filter(Boolean));
+
+function shouldIncludeAutoStateEvent(ev){
+  const e = String(ev || '').trim();
+  if (!e) return false;
+  // Only include "apps work" style events. Use prefix before first dot.
+  const head = e.split('.')[0];
+  return AUTO_STATE_ALLOW_PREFIXES.has(head);
+}
+
+function summarizeAutoStateEvent(entry){
+  try {
+    const ts = entry && entry.ts ? String(entry.ts) : '';
+    const ev = entry && entry.event ? String(entry.event) : '';
+    const data = entry && typeof entry.data !== 'undefined' ? entry.data : null;
+
+    // Compact one-line JSON for data (avoid huge blobs)
+    let d = '';
+    if (data && typeof data === 'object') {
+      const slim = Array.isArray(data)
+        ? data.slice(0, 6)
+        : Object.fromEntries(Object.entries(data).slice(0, 10));
+      d = JSON.stringify(slim);
+      if (d.length > 240) d = d.slice(0, 240) + '…';
+    } else if (typeof data === 'string') {
+      d = data.length > 240 ? (data.slice(0, 240) + '…') : data;
+      d = JSON.stringify(d);
+    } else if (data != null) {
+      d = JSON.stringify(data);
+    }
+
+    return `- ${ts ? ts.replace('T',' ').slice(0,19) : '(no-ts)'} • ${ev}${d ? (' ' + d) : ''}`;
+  } catch {
+    return '';
+  }
+}
+
+function generateAutoStateFromWorklog({ reason } = {}){
+  try {
+    const now = new Date().toISOString();
+    const all = readLastJsonl(WORK_FILE, 2500);
+    const lines = [];
+
+    lines.push('# AUTO-STATE');
+    lines.push('Updated: ' + now);
+    lines.push('Reason: ' + (reason || 'hourly'));
+    lines.push('Mode: events-only (apps work)');
+    lines.push('');
+
+    // Filter + render newest-last but keep only what fits.
+    const filtered = all.filter(x => x && shouldIncludeAutoStateEvent(x.event));
+    const rendered = filtered.map(summarizeAutoStateEvent).filter(Boolean);
+
+    // Keep most recent lines up to AUTO_STATE_MAX_LINES (minus header).
+    const headLines = lines.length;
+    const budget = Math.max(0, AUTO_STATE_MAX_LINES - headLines - 2);
+    const tail = budget ? rendered.slice(-budget) : [];
+
+    lines.push('## Recent app worklog events');
+    if (!tail.length) lines.push('(none)');
+    else lines.push(...tail);
+
+    lines.push('');
+
+    fs.writeFileSync(AUTO_STATE_FILE, lines.join('\n'), 'utf8');
+    logWork('ops.auto_state.generated', { reason: reason || 'hourly', lines: lines.length, include: Array.from(AUTO_STATE_ALLOW_PREFIXES) });
+    return { ok:true, updatedAt: now, wroteLines: lines.length };
+  } catch (e) {
+    return { ok:false, error: String(e) };
+  }
+}
+
 const AUTO_STATE_ACK_FILE = path.join(DATA_DIR, 'auto-state-ack.json');
 function readAutoStateAck(){
   try {
@@ -2153,6 +2227,27 @@ app.get('/api/ops/auto-state', (req, res) => {
     res.status(500).json({ ok:false, error: String(e) });
   }
 });
+
+app.post('/api/ops/auto-state/generate', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const r = generateAutoStateFromWorklog({ reason: String(req.body?.reason || 'manual') });
+    if (!r || !r.ok) return res.status(500).json({ ok:false, error: r ? r.error : 'failed' });
+    return res.json({ ok:true, result: r });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+// Optional: hourly auto-state generator (events-only). Disabled by default.
+if (String(process.env.AUTO_STATE_HOURLY || '').trim() === '1') {
+  try {
+    generateAutoStateFromWorklog({ reason: 'startup' });
+  } catch {}
+  setInterval(() => {
+    try { generateAutoStateFromWorklog({ reason: 'hourly' }); } catch {}
+  }, 60 * 60 * 1000);
+}
 
 app.post('/api/ops/restart', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');

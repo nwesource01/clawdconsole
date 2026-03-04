@@ -11,6 +11,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const crypto = require('crypto');
 const dns = require('dns');
 const { execFile } = require('child_process');
+const https = require('https');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
 const BUILD = '2026-03-03.78';
@@ -27,6 +28,38 @@ const GATEWAY_WS_URL_DEFAULT = process.env.GATEWAY_WS_URL || 'ws://127.0.0.1:187
 const CONSOLE_SESSION_KEY_DEFAULT = process.env.CONSOLE_SESSION_KEY || 'claw-console';
 
 const DATA_DIR = process.env.DATA_DIR || '/home/master/clawd/console-data';
+
+// Best-effort public IP helper (used for UI status).
+let cachedPublicIp = { ip: null, at: 0 };
+async function getServerPublicIp(){
+  const ttlMs = 10 * 60 * 1000;
+  if (cachedPublicIp.at && (Date.now() - cachedPublicIp.at) < ttlMs) return cachedPublicIp.ip;
+
+  // Allow explicit override.
+  const envIp = String(process.env.PUBLIC_IP || '').trim();
+  if (envIp) {
+    cachedPublicIp = { ip: envIp, at: Date.now() };
+    return envIp;
+  }
+
+  // DigitalOcean metadata (no external internet required)
+  const metaUrl = process.env.DO_METADATA_URL || 'http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address';
+  const mod = metaUrl.startsWith('https:') ? https : http;
+
+  const ip = await new Promise((resolve) => {
+    const req = mod.get(metaUrl, { timeout: 1200 }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => resolve(String(data || '').trim() || null));
+    });
+    req.on('timeout', () => { try { req.destroy(); } catch {} resolve(null); });
+    req.on('error', () => resolve(null));
+  });
+
+  cachedPublicIp = { ip, at: Date.now() };
+  return ip;
+}
 
 // file-backed gateway override config (so different installs/accounts can swap integrations)
 const CODEX_CFG_FILE = path.join(DATA_DIR, 'codex-config.json');
@@ -895,9 +928,10 @@ app.get('/demo/api/del', (req, res) => {
   res.json({ ok: true, demo: true, state: DEMO_DEL });
 });
 
-app.get('/api/status', (req, res) => {
+app.get('/api/status', async (req, res) => {
   const forwardedFor = (req.headers['x-forwarded-for'] || '').toString();
   const clientIp = forwardedFor.split(',')[0].trim() || req.socket.remoteAddress || null;
+  const serverPublicIp = await getServerPublicIp();
   res.json({
     ok: true,
     service: 'claw-console',
@@ -907,6 +941,7 @@ app.get('/api/status', (req, res) => {
     hostname: require('os').hostname(),
     serverBind: '127.0.0.1',
     clientIp,
+    serverPublicIp,
     gateway: {
       connected: !!(gw && gw.connected),
       url: GATEWAY_WS_URL,

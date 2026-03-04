@@ -574,13 +574,13 @@ app.get('/name', (req, res) => {
     .top{display:grid; grid-template-columns: minmax(0, 620px) 1fr; gap:12px; align-items:baseline}
     @media (max-width: 980px){ .top{grid-template-columns: 1fr;} }
     .topR{display:flex; justify-content:flex-end; justify-self:end; width:100%; }
-    .appsMenu{flex-wrap:nowrap; overflow-x:auto; padding-bottom: 2px;}
 
     h1{margin:0; font-size:18px}
     .muted{color:var(--muted); font-size:12px}
     .pill{ display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid rgba(34,198,198,.40); background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08)); color: rgba(231,231,231,.92); text-decoration:none; white-space:nowrap; font-weight:750; font-size:12px; }
     .pill:hover{ border-color: rgba(34,198,198,.70); background: linear-gradient(180deg, rgba(34,198,198,.26), rgba(34,198,198,.10)); }
-    .appsMenu a[aria-current="page"]{ border-color: rgba(154,208,255,0.70); }
+
+    ${APPS_MENU_CSS}
 
     .card{border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,.03); padding:14px; margin-top:12px}
     textarea,input,select{width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text); font-size:14px; font-family: inherit; line-height:1.35}
@@ -647,6 +647,7 @@ app.get('/name', (req, res) => {
   </div>
 
 <script src="/static/name.js"></script>
+<script>${APPS_MENU_JS}</script>
 </body>
 </html>`);
 });
@@ -2778,6 +2779,7 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
   <title>${title}</title>
   <style>
     :root{ --bg:#0b1020; --text:#e8eefc; --muted: rgba(232,238,252,.68); --border: rgba(255,255,255,0.10); --card: rgba(255,255,255,0.04); --card2: rgba(0,0,0,0.14); --accent:#22c6c6; }
+    ${APPS_MENU_CSS}
     body{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--bg); color: var(--text); margin:0; }
     a{ color:#9ad0ff; }
     .wrap{ width:100%; max-width: 1400px; margin:0 auto; padding: 18px; }
@@ -2904,47 +2906,7 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
 
     <div class="footer">Build: <code>${BUILD}</code></div>
   </div>
-    <script>
-      (() => {
-        const wrap = document.getElementById('appsMenuWrap');
-        const btn = document.getElementById('appsMenuBtn');
-        const drop = document.getElementById('appsMenuDrop');
-        if (!wrap || !btn || !drop) return;
-
-        function setOpen(v){
-          wrap.classList.toggle('open', !!v);
-          btn.setAttribute('aria-expanded', v ? 'true' : 'false');
-        }
-
-        // Single click toggles; double click opens /apps.
-        btn.addEventListener('click', (e) => {
-          e.preventDefault();
-          setOpen(!wrap.classList.contains('open'));
-        });
-        btn.addEventListener('dblclick', (e) => {
-          e.preventDefault();
-          window.location.href = '/apps';
-        });
-
-        // Close on outside click
-        document.addEventListener('click', (e) => {
-          if (!wrap.classList.contains('open')) return;
-          const t = e.target;
-          if (t && wrap.contains(t)) return;
-          setOpen(false);
-        });
-
-        // Escape closes
-        document.addEventListener('keydown', (e) => {
-          if (e.key === 'Escape') setOpen(false);
-        });
-
-        // If you click an app link, close after navigation begins.
-        drop.querySelectorAll('a').forEach(a => {
-          a.addEventListener('click', () => setOpen(false));
-        });
-      })();
-    </script>
+    <script>${APPS_MENU_JS}</script>
   </div>
 </body>
 </html>`;
@@ -2967,6 +2929,91 @@ function appsIcon(kind){
   return common[kind] || common.repo;
 }
 
+
+const APPS_MENU_CSS = `
+  /* Apps menu (click to expand; double-click opens /apps) */
+  .appsMenuWrap{ position:relative; display:inline-flex; align-items:center; justify-content:flex-end; }
+  .appsMenuBtn{ cursor:pointer; user-select:none; }
+  .appsMenuBtnChev{ opacity:.8; transition: transform 160ms ease; }
+  .appsMenuWrap.open .appsMenuBtnChev{ transform: rotate(180deg); }
+
+  .appsMenuDrop{
+    position:absolute;
+    right:0;
+    top: calc(100% + 10px);
+    width: min(560px, 92vw);
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: #0a0f1e;
+    box-shadow: 0 18px 60px rgba(0,0,0,.55);
+    overflow:hidden;
+
+    transform: translateY(-6px) scale(.985);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 170ms ease, transform 170ms ease;
+    z-index: 30;
+  }
+  .appsMenuWrap.open .appsMenuDrop{ opacity: 1; transform: translateY(0) scale(1); pointer-events:auto; }
+
+  .appsMenuDropHead{ display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,0.10); }
+  .appsAll{ color: rgba(232,238,252,.92); font-weight:900; text-decoration:none; }
+  .appsAll:hover{ text-decoration: underline; }
+
+  .appsGrid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap:10px; padding: 12px 14px 14px 14px; }
+  @media (max-width: 520px){ .appsGrid{ grid-template-columns: 1fr; } }
+
+  .appsLink{
+    display:flex; align-items:center; gap:10px;
+    padding:9px 10px;
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.04);
+    text-decoration:none;
+    color: rgba(232,238,252,.92);
+    transform: translateZ(0);
+    transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+  }
+  .appsLink:hover{ transform: translateY(-1px); background: rgba(255,255,255,0.06); border-color: rgba(34,198,198,.35); }
+  .appsLink[aria-current="page"]{ border-color: rgba(34,198,198,.55); background: rgba(34,198,198,.10); }
+
+  .appsDot{ width:10px; height:10px; border-radius:999px; background: rgba(34,198,198,.75); box-shadow: 0 0 0 4px rgba(34,198,198,.12); flex:0 0 auto; }
+  .appsLbl{ font-weight: 850; letter-spacing: .2px; }
+`;
+
+const APPS_MENU_JS = `
+(() => {
+  const wrap = document.getElementById('appsMenuWrap');
+  const btn = document.getElementById('appsMenuBtn');
+  const drop = document.getElementById('appsMenuDrop');
+  if (!wrap || !btn || !drop) return;
+
+  function setOpen(v){
+    wrap.classList.toggle('open', !!v);
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    setOpen(!wrap.classList.contains('open'));
+  });
+  btn.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    window.location.href = '/apps';
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!wrap.classList.contains('open')) return;
+    const t = e.target;
+    if (t && wrap.contains(t)) return;
+    setOpen(false);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') setOpen(false);
+  });
+})();
+`;
 
 function appsMenuHtml(activePath){
   const path = String(activePath || '');
@@ -4824,7 +4871,8 @@ app.get('/pm', (req, res) => {
     .muted{color:var(--muted)}
     .pill{ display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid rgba(34,198,198,.40); background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08)); color: rgba(231,231,231,.92); text-decoration:none; white-space:nowrap; font-weight:750; font-size:12px; }
     .pill:hover{ border-color: rgba(34,198,198,.70); background: linear-gradient(180deg, rgba(34,198,198,.26), rgba(34,198,198,.10)); }
-    .appsMenu a[aria-current="page"]{ border-color: rgba(154,208,255,0.70); }
+
+    ${APPS_MENU_CSS}
 
     .boardWrap{flex:1; min-height:0; overflow-x:auto; overflow-y:auto; margin-top:12px; padding-bottom:10px;}
     .board{display:flex; gap:12px; align-items:flex-start; width:max-content; min-width:100%;}
@@ -5032,6 +5080,7 @@ app.get('/pm', (req, res) => {
     }
   })()}</script>
   <script src="/static/pm.js"></script>
+  <script>${APPS_MENU_JS}</script>
 
 </body>
 </html>`);

@@ -57,27 +57,34 @@ h1{ margin:0; font-size:20px; letter-spacing:.2px; }
 .mBtn{
   display:inline-flex; align-items:center; gap:8px;
   cursor:pointer; user-select:none;
-  border-radius:999px;
-  border:1px solid rgba(34,198,198,.40);
-  background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08));
   color: rgba(231,231,231,.92);
   /* tighter button */
-  padding:6px 10px;
-  font-weight:900;
+  padding:5px 8px;
+  font-weight:950;
   font-size:13px;
   line-height:1;
 }
-.mBtn:hover{ border-color: rgba(34,198,198,.70); background: linear-gradient(180deg, rgba(34,198,198,.26), rgba(34,198,198,.10)); }
-.mBtn small{ color: rgba(231,231,231,.72); font-weight:800; }
+.mBtn small{ color: rgba(231,231,231,.72); font-weight:900; }
 
-/* 4 alternatives for the launcher button style */
-.menu1 .mBtn{ /* keep pill */ }
-.menu2 .mBtn{ border-radius: 14px; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.16); }
-.menu2 .mBtn:hover{ border-color: rgba(34,198,198,.40); background: rgba(255,255,255,.09); }
-.menu3 .mBtn{ border-radius: 999px; background: transparent; border-color: rgba(255,255,255,.20); }
-.menu3 .mBtn:hover{ background: rgba(255,255,255,.06); }
-.menu4 .mBtn{ border-radius: 14px; background: rgba(34,198,198,.10); border-color: rgba(34,198,198,.55); }
-.menu4 .mBtn:hover{ background: rgba(34,198,198,.16); border-color: rgba(34,198,198,.75); }
+/* 4 alternatives for the launcher button style (per-corner)
+   - Keep lower-left (Menu 3) as the pill per request.
+*/
+/* Menu 1: square outline */
+.menu1 .mBtn{ border-radius: 10px; border:1px solid rgba(255,255,255,.22); background: rgba(0,0,0,.18); }
+.menu1 .mBtn:hover{ background: rgba(0,0,0,.26); border-color: rgba(34,198,198,.40); }
+
+/* Menu 2: solid square, NO border */
+.menu2 .mBtn{ border-radius: 10px; border:0; background: rgba(255,255,255,.10); }
+.menu2 .mBtn:hover{ background: rgba(255,255,255,.14); }
+
+/* Menu 3: pill (keep) */
+.menu3 .mBtn{ border-radius:999px; border:1px solid rgba(34,198,198,.55); background: rgba(34,198,198,.10); }
+.menu3 .mBtn:hover{ background: rgba(34,198,198,.16); border-color: rgba(34,198,198,.75); }
+
+/* Menu 4: text-only (no border), with underline accent */
+.menu4 .mBtn{ border-radius: 10px; border:0; background: transparent; padding: 5px 0; }
+.menu4 .mBtn span{ border-bottom: 2px solid rgba(34,198,198,.55); padding-bottom: 3px; }
+.menu4 .mBtn:hover span{ border-bottom-color: rgba(34,198,198,.85); }
 
 .mPanel{
   margin-top: 12px;

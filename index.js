@@ -2808,6 +2808,55 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
     .muted{ color: var(--muted); font-size: 12px; }
     .pill{ display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid rgba(34,198,198,.40); background: linear-gradient(180deg, rgba(34,198,198,.18), rgba(34,198,198,.08)); color: rgba(231,231,231,.92); text-decoration:none; white-space:nowrap; font-weight:750; font-size:12px; }
     .pill:hover{ border-color: rgba(34,198,198,.70); background: linear-gradient(180deg, rgba(34,198,198,.26), rgba(34,198,198,.10)); }
+
+    /* Apps menu (click to expand; double-click opens /apps) */
+    .appsMenuWrap{ position:relative; display:inline-flex; align-items:center; justify-content:flex-end; }
+    .appsMenuBtn{ cursor:pointer; user-select:none; }
+    .appsMenuBtnChev{ opacity:.8; transition: transform 160ms ease; }
+    .appsMenuWrap.open .appsMenuBtnChev{ transform: rotate(180deg); }
+
+    .appsMenuDrop{
+      position:absolute;
+      right:0;
+      top: calc(100% + 10px);
+      width: min(560px, 92vw);
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: radial-gradient(560px 240px at 25% 0%, rgba(34,198,198,.20), rgba(0,0,0,0) 60%), rgba(10,14,28,.92);
+      box-shadow: 0 18px 60px rgba(0,0,0,.55);
+      overflow:hidden;
+
+      transform: translateY(-6px) scale(.985);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 170ms ease, transform 170ms ease;
+    }
+    .appsMenuWrap.open .appsMenuDrop{ opacity: 1; transform: translateY(0) scale(1); pointer-events:auto; }
+
+    .appsMenuDropHead{ display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,0.10); }
+    .appsAll{ color: rgba(232,238,252,.92); font-weight:900; text-decoration:none; }
+    .appsAll:hover{ text-decoration: underline; }
+
+    .appsGrid{ display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:10px; padding: 12px 14px 14px 14px; }
+    @media (max-width: 520px){ .appsGrid{ grid-template-columns: 1fr; } }
+
+    .appsLink{
+      display:flex; align-items:center; gap:10px;
+      padding:10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      text-decoration:none;
+      color: rgba(232,238,252,.92);
+      transform: translateZ(0);
+      transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+    }
+    .appsLink:hover{ transform: translateY(-1px); background: rgba(255,255,255,0.06); border-color: rgba(34,198,198,.35); }
+    .appsLink[aria-current="page"]{ border-color: rgba(34,198,198,.55); background: rgba(34,198,198,.10); }
+
+    .appsDot{ width:10px; height:10px; border-radius:999px; background: rgba(34,198,198,.75); box-shadow: 0 0 0 4px rgba(34,198,198,.12); flex:0 0 auto; }
+    .appsLbl{ font-weight: 850; letter-spacing: .2px; }
+
     .card{ background: var(--card); border:1px solid var(--border); border-radius: 14px; padding: 14px; }
     .grid{ display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
     @media (max-width: 1180px){ .grid{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
@@ -2855,6 +2904,48 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
 
     <div class="footer">Build: <code>${BUILD}</code></div>
   </div>
+    <script>
+      (() => {
+        const wrap = document.getElementById('appsMenuWrap');
+        const btn = document.getElementById('appsMenuBtn');
+        const drop = document.getElementById('appsMenuDrop');
+        if (!wrap || !btn || !drop) return;
+
+        function setOpen(v){
+          wrap.classList.toggle('open', !!v);
+          btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+        }
+
+        // Single click toggles; double click opens /apps.
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          setOpen(!wrap.classList.contains('open'));
+        });
+        btn.addEventListener('dblclick', (e) => {
+          e.preventDefault();
+          window.location.href = '/apps';
+        });
+
+        // Close on outside click
+        document.addEventListener('click', (e) => {
+          if (!wrap.classList.contains('open')) return;
+          const t = e.target;
+          if (t && wrap.contains(t)) return;
+          setOpen(false);
+        });
+
+        // Escape closes
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') setOpen(false);
+        });
+
+        // If you click an app link, close after navigation begins.
+        drop.querySelectorAll('a').forEach(a => {
+          a.addEventListener('click', () => setOpen(false));
+        });
+      })();
+    </script>
+  </div>
 </body>
 </html>`;
 }
@@ -2880,7 +2971,6 @@ function appsIcon(kind){
 function appsMenuHtml(activePath){
   const path = String(activePath || '');
   const items = [
-    { label: 'ClawdApps', href: '/apps' },
     { label: 'ClawdPM', href: '/pm' },
     { label: 'ClawdScript', href: '/apps/script' },
     { label: 'ClawdName', href: '/name' },
@@ -2891,14 +2981,30 @@ function appsMenuHtml(activePath){
     { label: 'ClawdPub', href: '/apps/pub' },
     { label: 'ClawdBuild', href: '/apps/build' },
     { label: 'ClawdQueue', href: '/apps/queue' },
+    { label: 'Apps Menu Lab', href: '/apps/menu-lab' },
   ];
 
-  return '<div class="appsMenu" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; align-items:center; width:100%;">' +
-    items.map(it => {
-      const isActive = (path === it.href);
-      return '<a class="pill" href="' + it.href + '" ' + (isActive ? 'aria-current="page"' : '') + '>' + it.label + '</a>';
-    }).join('') +
-    '</div>';
+  const links = items.map(it => {
+    const isActive = (path === it.href);
+    return '<a class="appsLink" href="' + it.href + '" ' + (isActive ? 'aria-current="page"' : '') + '>'
+      + '<span class="appsDot" aria-hidden="true"></span>'
+      + '<span class="appsLbl">' + escHtml(it.label) + '</span>'
+      + '</a>';
+  }).join('');
+
+  return ''
+    + '<div class="appsMenuWrap" id="appsMenuWrap">'
+    +   '<button class="pill appsMenuBtn" id="appsMenuBtn" type="button" title="Click to open menu • Double-click to open /apps">'
+    +     '<span class="appsMenuBtnTxt">ClawdApps</span>'
+    +     '<span class="appsMenuBtnChev" aria-hidden="true">▾</span>'
+    +   '</button>'
+    +   '<div class="appsMenuDrop" id="appsMenuDrop" role="menu" aria-label="ClawdApps menu">'
+    +     '<div class="appsMenuDropHead">'
+    +       '<a class="appsAll" href="/apps">Open /apps directory</a>'
+    +     '</div>'
+    +     '<div class="appsGrid">' + links + '</div>'
+    +   '</div>'
+    + '</div>';
 }
 
 app.get('/apps', (req, res) => {

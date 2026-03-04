@@ -1299,6 +1299,122 @@
     }
   }
 
+  // --- Interface theme (background) ---
+  const uiGear = document.getElementById('uiGear');
+  const uiModal = document.getElementById('uiModal');
+  const uiModalClose = document.getElementById('uiModalClose');
+  const uiBgPreset = document.getElementById('uiBgPreset');
+  const uiBgColor = document.getElementById('uiBgColor');
+  const uiThemeSave = document.getElementById('uiThemeSave');
+  const uiThemeReset = document.getElementById('uiThemeReset');
+  const uiThemeMsg = document.getElementById('uiThemeMsg');
+
+  function setThemeMsg(t){ if (uiThemeMsg) uiThemeMsg.textContent = String(t||''); }
+  function openUiModal(on){ if (!uiModal) return; uiModal.classList.toggle('open', !!on); }
+
+  function hexToRgb(hex){
+    const h = String(hex||'').trim();
+    const m = /^#?([0-9a-f]{6})$/i.exec(h);
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    const r = (n >> 16) & 255;
+    const g = (n >> 8) & 255;
+    const b = n & 255;
+    return { r, g, b };
+  }
+  function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+  function mix(a,b,t){ return Math.round(a + (b-a)*t); }
+  function rgbToHex(r,g,b){
+    const x = (v)=>v.toString(16).padStart(2,'0');
+    return '#' + x(r) + x(g) + x(b);
+  }
+
+  function applyThemeVars(theme){
+    const preset = String(theme?.preset || 'clawd');
+    const color = String(theme?.color || '#0b0f1a');
+
+    // presets (background only)
+    let bg0 = '#0b0f1a', bg1 = '#0b1020', bg2 = '#0a132a', accent = 'rgba(34,198,198,0.10)';
+
+    if (preset === 'midnight') {
+      bg0 = '#070a12'; bg1 = '#0a1022'; bg2 = '#0e1b3a'; accent = 'rgba(154,208,255,0.10)';
+    } else if (preset === 'nebula') {
+      bg0 = '#070a14'; bg1 = '#130b2a'; bg2 = '#0a1e2c'; accent = 'rgba(255,120,220,0.10)';
+    } else if (preset === 'slate') {
+      bg0 = '#0b0f14'; bg1 = '#0e141c'; bg2 = '#121a26'; accent = 'rgba(170,190,255,0.08)';
+    } else if (preset === 'custom') {
+      const rgb = hexToRgb(color) || { r:11, g:15, b:26 };
+      // derive a slightly lighter top and a deeper bottom
+      bg0 = rgbToHex(mix(rgb.r, 0, 0.15), mix(rgb.g, 0, 0.15), mix(rgb.b, 0, 0.15));
+      bg1 = rgbToHex(mix(rgb.r, 255, 0.06), mix(rgb.g, 255, 0.06), mix(rgb.b, 255, 0.06));
+      bg2 = rgbToHex(mix(rgb.r, 40, 0.10), mix(rgb.g, 60, 0.10), mix(rgb.b, 120, 0.10));
+      accent = `rgba(${rgb.r},${rgb.g},${rgb.b},0.16)`;
+    }
+
+    const root = document.documentElement;
+    root.style.setProperty('--bg', bg0);
+    root.style.setProperty('--bg0', bg0);
+    root.style.setProperty('--bg1', bg1);
+    root.style.setProperty('--bg2', bg2);
+    root.style.setProperty('--bgAccent', accent);
+  }
+
+  async function loadUiTheme(){
+    try {
+      const res = await fetch(apiUrl('/api/ops/ui-theme'), { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      const t = j.theme || {};
+      applyThemeVars(t);
+      if (uiBgPreset) uiBgPreset.value = String(t.preset || 'clawd');
+      if (uiBgColor) uiBgColor.value = String(t.color || '#0b0f1a');
+    } catch (e) {
+      dbg('ui theme load failed: ' + String(e));
+    }
+  }
+
+  async function saveUiTheme(){
+    setThemeMsg('Saving…');
+    try {
+      const preset = uiBgPreset ? String(uiBgPreset.value||'') : 'clawd';
+      const color = uiBgColor ? String(uiBgColor.value||'') : '#0b0f1a';
+      const res = await fetch(apiUrl('/api/ops/ui-theme'), {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        cache:'no-store',
+        body: JSON.stringify({ preset, color }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      applyThemeVars(j.theme || { preset, color });
+      setThemeMsg('Saved.');
+      setTimeout(()=>setThemeMsg(''), 1000);
+    } catch (e) {
+      setThemeMsg('Save failed: ' + String(e));
+    }
+  }
+
+  async function resetUiTheme(){
+    if (uiBgPreset) uiBgPreset.value = 'clawd';
+    if (uiBgColor) uiBgColor.value = '#0b0f1a';
+    await saveUiTheme();
+  }
+
+  if (uiGear) uiGear.addEventListener('click', () => { openUiModal(true); });
+  if (uiModalClose) uiModalClose.addEventListener('click', () => openUiModal(false));
+  if (uiModal) uiModal.addEventListener('click', (e) => { if (e.target === uiModal) openUiModal(false); });
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') openUiModal(false); });
+  if (uiThemeSave) uiThemeSave.addEventListener('click', saveUiTheme);
+  if (uiThemeReset) uiThemeReset.addEventListener('click', resetUiTheme);
+  if (uiBgPreset) uiBgPreset.addEventListener('change', () => {
+    const v = String(uiBgPreset.value||'');
+    if (v !== 'custom') setThemeMsg('');
+  });
+
+  // initial theme load
+  try { loadUiTheme(); } catch {}
+
   // Paste secret (concealed)
   const secretForm = document.getElementById('secretForm');
   const secretVal = document.getElementById('secretVal');

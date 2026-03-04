@@ -71,6 +71,31 @@ let gwLastEvent = null;
 
 // Together.ai (OpenAI-compatible) config (Qwen/Llama/etc)
 const TOGETHER_CFG_FILE = path.join(DATA_DIR, 'together-config.json');
+
+// UI theme (background) config
+const UI_THEME_FILE = path.join(DATA_DIR, 'ui-theme.json');
+const UI_THEME_DEFAULT = { preset: 'clawd', color: '#0b0f1a', updatedAt: null };
+function readUiTheme(){
+  try {
+    if (!fs.existsSync(UI_THEME_FILE)) return { ...UI_THEME_DEFAULT };
+    const j = JSON.parse(fs.readFileSync(UI_THEME_FILE, 'utf8'));
+    return {
+      preset: String(j.preset || UI_THEME_DEFAULT.preset),
+      color: String(j.color || UI_THEME_DEFAULT.color),
+      updatedAt: j.updatedAt || null,
+    };
+  } catch {
+    return { ...UI_THEME_DEFAULT };
+  }
+}
+function writeUiTheme(patch){
+  const cur = readUiTheme();
+  const next = { ...cur, ...patch, updatedAt: new Date().toISOString() };
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+  const ok = writeJson(UI_THEME_FILE, next);
+  return ok ? next : null;
+}
+
 function readTogetherCfg(){
   const j = readJson(TOGETHER_CFG_FILE, null) || {};
   return {
@@ -1096,6 +1121,28 @@ app.post('/api/ops/codex/reconnect', (req, res) => {
   setTimeout(connectGateway, 50);
   logWork('ops.codex.reconnect', {});
   res.json({ ok:true });
+});
+
+// --- UI Theme Ops integration ---
+app.get('/api/ops/ui-theme', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const t = readUiTheme();
+  res.json({ ok:true, theme: t });
+});
+
+app.post('/api/ops/ui-theme', express.json({ limit: '50kb' }), (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const preset = String(req.body?.preset || '').trim();
+  const color = String(req.body?.color || '').trim();
+
+  const patch = {};
+  if (preset) patch.preset = preset.slice(0, 40);
+  if (color) patch.color = color.slice(0, 32);
+
+  const next = writeUiTheme(patch);
+  if (!next) return res.status(500).json({ ok:false, error:'write_failed' });
+  logWork('ui.theme.saved', { preset: next.preset });
+  res.json({ ok:true, theme: next });
 });
 
 // --- Together.ai Ops integration (config + test) ---
@@ -6418,7 +6465,13 @@ app.get('/', (req, res) => {
   <meta name="claw-build" content="${BUILD}" />
   <style>
     :root {
+      /* Theme vars (customizable via Interface dialog) */
       --bg: #0b0f1a;
+      --bg0: #0b0f1a;
+      --bg1: #0b1020;
+      --bg2: #0a132a;
+      --bgAccent: rgba(34,198,198,0.10);
+
       --card: #11182a;
       --card2: #0f1526;
       --text: #e7e7e7;
@@ -6428,7 +6481,17 @@ app.get('/', (req, res) => {
     }
     html, body { height: 100%; overflow: hidden; }
     html{ color-scheme: dark; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 18px; line-height: 1.35; background: var(--bg); color: var(--text); }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 0;
+      padding: 18px;
+      line-height: 1.35;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 700px at 12% 8%, var(--bgAccent), transparent 60%),
+        linear-gradient(180deg, var(--bg1), var(--bg0));
+      background-attachment: fixed;
+    }
 
     /* brand: dark scrollbars everywhere (including textarea/pre) */
     * { scrollbar-color: rgba(154,208,255,0.28) rgba(0,0,0,0.55); }
@@ -6619,9 +6682,54 @@ app.get('/', (req, res) => {
     #chatlog { overflow: auto; scroll-behavior: auto; overflow-anchor: none; }
     .ok { color: #7CFFB2; }
     .err { color: #ff8c8c; }
+
+    /* Interface modal */
+    .modalOverlay{ position:fixed; inset:0; background: rgba(0,0,0,0.55); display:none; align-items:center; justify-content:center; z-index: 5000; }
+    .modalOverlay.open{ display:flex; }
+    .modal{ width: min(720px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow:auto; border-radius:16px; border:1px solid rgba(255,255,255,0.14); background: rgba(17,24,42,0.92); backdrop-filter: blur(10px); padding:14px; }
+    .modalTitle{ font-weight:900; font-size:16px; }
+    .modalRow{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .modalClose{ margin-left:auto; }
+    .modalHr{ height:1px; background: rgba(255,255,255,0.12); margin:12px 0; }
   </style>
 </head>
 <body>
+  <div class="modalOverlay" id="uiModal">
+    <div class="modal">
+      <div class="modalRow">
+        <div class="modalTitle">Interface</div>
+        <button id="uiModalClose" class="wlbtn modalClose" type="button">Close</button>
+      </div>
+      <div class="muted" style="margin-top:6px;">UI-only preferences for this Console.</div>
+      <div class="modalHr"></div>
+
+      <div style="font-weight:900; margin-bottom:8px;">Background</div>
+      <div class="muted" style="margin-bottom:10px;">Pick a preset or choose a base color. Applies under all cards.</div>
+
+      <div class="modalRow">
+        <label class="muted" style="min-width:120px;">Preset</label>
+        <select id="uiBgPreset" class="inp" style="flex:1; min-width: 240px; max-width: 520px;">
+          <option value="clawd">ClawdConsole (default)</option>
+          <option value="midnight">Midnight</option>
+          <option value="nebula">Nebula</option>
+          <option value="slate">Slate</option>
+          <option value="custom">Custom…</option>
+        </select>
+      </div>
+
+      <div class="modalRow" style="margin-top:10px;">
+        <label class="muted" style="min-width:120px;">Base color</label>
+        <input id="uiBgColor" type="color" class="inp" value="#0b0f1a" style="width:70px; padding: 4px; height: 36px;" />
+        <span class="muted">(custom preset)</span>
+      </div>
+
+      <div class="modalRow" style="margin-top:14px;">
+        <button id="uiThemeSave" type="button" class="pill">Save</button>
+        <button id="uiThemeReset" type="button" class="wlbtn">Reset</button>
+        <span id="uiThemeMsg" class="muted"></span>
+      </div>
+    </div>
+  </div>
   <div class="wrap">
     <div class="sidebar">
       <div class="card">
@@ -6640,6 +6748,10 @@ app.get('/', (req, res) => {
               <div class="muted">Your command deck</div>
             </div>
           </div>
+
+          <button id="uiGear" type="button" class="wlbtn" title="Interface" style="margin-left:auto; display:flex; align-items:center; justify-content:center; width:34px; height:34px; padding:0; border-radius:12px;">
+            ⚙
+          </button>
         </div>
         <div class="pill" id="status" style="margin-top: 10px;">Connecting…</div>
         <div class="muted" style="margin-top: 8px;">Build: <code>${BUILD}</code></div>

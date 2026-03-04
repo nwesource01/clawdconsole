@@ -4497,6 +4497,7 @@ function renderModulePage(key){
           <button class="pill" id="opsTabG" type="button">Gateway</button>
           <button class="pill" id="opsTabC" type="button">Codex</button>
           <button class="pill" id="opsTabTogether" type="button">Together</button>
+          <button class="pill" id="opsTabBridge" type="button">ClawdBridge</button>
           <button class="pill" id="opsTabClawd" type="button">Clawd</button>
           <span style="flex:1;"></span>
           <span id="opsHydration" class="muted" title="Auto-state hydration: unknown" style="display:inline-flex; align-items:center; gap:6px; user-select:none;">
@@ -4637,6 +4638,67 @@ function renderModulePage(key){
             </div>
           </div>
         </div><!-- /opsTabTogetherView -->
+
+        <div id="opsTabBridgeView" style="display:none;">
+          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">ClawdBridge</div>
+            <div class="muted" style="margin-bottom:10px;">Cross-box notes + newborn instructions. Pair new boxes to the boss here.</div>
+
+            <div class="twoCol" style="margin-bottom:12px;">
+              <div>
+                <div style="font-weight:900; margin-bottom:6px;">Boss token</div>
+                <div class="muted" style="margin-bottom:6px;">On the boss box, click Copy. On a new box, paste the token into Peer token and Save.</div>
+                <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
+                  <input id="bridgeBossToken" class="inp" readonly style="flex:1; min-width:240px;" placeholder="(load to reveal)" />
+                  <button id="bridgeBossCopy" class="pill" type="button">Copy</button>
+                </div>
+                <div class="muted" style="margin-top:6px;">(Masked in UI; copy grabs full value.)</div>
+              </div>
+              <div>
+                <div style="font-weight:900; margin-bottom:6px;">Peer</div>
+                <div class="muted" style="margin-bottom:6px;">No sudo needed; stored file-backed in DATA_DIR.</div>
+                <div class="muted" style="margin-bottom:6px;">Peer URL</div>
+                <input id="bridgePeerUrl" class="inp" placeholder="https://claw.nwesource.com" style="width:100%;" />
+                <div class="muted" style="margin-top:10px; margin-bottom:6px;">Peer token</div>
+                <input id="bridgePeerToken" class="inp" type="password" placeholder="paste boss BRIDGE_TOKEN" style="width:100%;" />
+                <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+                  <button id="bridgePeerSave" class="pill" type="button">Save</button>
+                  <button id="bridgePeerTest" class="wlbtn" type="button">Test</button>
+                  <span class="muted" id="bridgePeerStatus"></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
+              <button class="pill" id="bridgeRefresh" type="button">Refresh</button>
+              <span class="muted" id="bridgeMsg"></span>
+            </div>
+
+            <div class="twoCol" style="margin-top:12px;">
+              <div>
+                <div class="muted" style="margin-bottom:6px;">Direction</div>
+                <select id="bridgeDir" class="inp" style="width:100%; max-width: 320px;">
+                  <option value="outbox">Outbox</option>
+                  <option value="inbox">Inbox</option>
+                </select>
+
+                <div class="muted" style="margin-top:10px; margin-bottom:6px;">Summary</div>
+                <input id="bridgeSummary" class="inp" style="width:100%;" placeholder="optional" />
+
+                <div class="muted" style="margin-top:10px; margin-bottom:6px;">Text</div>
+                <textarea id="bridgeText" class="inp" style="width:100%; min-height:140px;"></textarea>
+
+                <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+                  <button class="pill" id="bridgePost" type="button">Post</button>
+                </div>
+              </div>
+              <div>
+                <div style="font-weight:900; margin-bottom:6px;">Recent</div>
+                <div id="bridgeList"></div>
+              </div>
+            </div>
+          </div>
+        </div><!-- /opsTabBridgeView -->
 
         <div id="opsTabClawdView" style="display:none;">
           <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
@@ -5981,15 +6043,57 @@ function logWork(event, data) {
 }
 
 // --- Token-only Bridge (cross-box notes) ---
-const BRIDGE_TOKEN = String(process.env.BRIDGE_TOKEN || '').trim();
+// Bridge auth token can come from env OR a file-backed value (so pairing can be done from UI without sudo).
+const BRIDGE_TOKEN_ENV = String(process.env.BRIDGE_TOKEN || '').trim();
+const BRIDGE_TOKEN_FILE = path.join(DATA_DIR, 'bridge-token.txt');
+const BRIDGE_PEER_FILE = path.join(DATA_DIR, 'bridge-peer.json');
+
 const BRIDGE_INBOX_FILE = path.join(DATA_DIR, 'bridge-inbox.md');
 const BRIDGE_OUTBOX_FILE = path.join(DATA_DIR, 'bridge-outbox.md');
 const BRIDGE_LOG_FILE = path.join(DATA_DIR, 'bridge-messages.jsonl');
 
+function readBridgeToken(){
+  if (BRIDGE_TOKEN_ENV) return BRIDGE_TOKEN_ENV;
+  try {
+    const t = fs.existsSync(BRIDGE_TOKEN_FILE) ? String(fs.readFileSync(BRIDGE_TOKEN_FILE, 'utf8')).trim() : '';
+    return t || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeBridgeTokenFile(tok){
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+  try { fs.writeFileSync(BRIDGE_TOKEN_FILE, String(tok||'').trim() + '\n', 'utf8'); return true; } catch { return false; }
+}
+
+function readBridgePeer(){
+  try {
+    if (!fs.existsSync(BRIDGE_PEER_FILE)) return { url:'', token:'', updatedAt:null };
+    const j = JSON.parse(fs.readFileSync(BRIDGE_PEER_FILE, 'utf8'));
+    return {
+      url: (typeof j.url === 'string') ? j.url : '',
+      token: (typeof j.token === 'string') ? j.token : '',
+      updatedAt: j.updatedAt || null,
+    };
+  } catch {
+    return { url:'', token:'', updatedAt:null };
+  }
+}
+
+function writeBridgePeer(patch){
+  const cur = readBridgePeer();
+  const next = { ...cur, ...patch, updatedAt: new Date().toISOString() };
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+  const ok = writeJson(BRIDGE_PEER_FILE, next);
+  return ok ? next : null;
+}
+
 function bridgeAuthOk(req){
-  if (!BRIDGE_TOKEN) return false;
+  const token = readBridgeToken();
+  if (!token) return false;
   const tok = String(req.headers['x-clawd-bridge-token'] || '').trim();
-  return tok && tok === BRIDGE_TOKEN;
+  return tok && tok === token;
 }
 
 function readTextFileSafe(p){
@@ -6045,6 +6149,63 @@ app.post('/api/ops/bridge/outbox', (req, res) => {
   const ok = writeTextFileSafe(BRIDGE_OUTBOX_FILE, text);
   appendBridgeLog('out', summary, text);
   res.json({ ok: !!ok });
+});
+
+// Bridge config helpers for UI
+app.get('/api/ops/bridge/config', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const tok = readBridgeToken();
+  const peer = readBridgePeer();
+  res.json({
+    ok:true,
+    token: tok ? { present:true, masked: tok.slice(0,4) + '********' + tok.slice(-4) } : { present:false, masked:'' },
+    // For the BOSS console, UI can request the full token (copy button)
+    fullToken: tok || '',
+    peer: { url: peer.url || '', tokenMasked: peer.token ? (peer.token.slice(0,4) + '********' + peer.token.slice(-4)) : '', hasToken: !!peer.token, updatedAt: peer.updatedAt || null },
+    fromEnv: !!BRIDGE_TOKEN_ENV,
+  });
+});
+
+app.post('/api/ops/bridge/pair', express.json({ limit:'50kb' }), (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const token = String(req.body?.token || '').trim();
+  const peerUrl = String(req.body?.peerUrl || '').trim();
+  const peerToken = String(req.body?.peerToken || '').trim();
+
+  if (token) {
+    const ok = writeBridgeTokenFile(token);
+    if (!ok) return res.status(500).json({ ok:false, error:'write_token_failed' });
+  }
+
+  if (peerUrl || peerToken) {
+    const next = writeBridgePeer({
+      url: peerUrl ? peerUrl.replace(/\/+$/,'') : undefined,
+      token: peerToken || undefined,
+    });
+    if (!next) return res.status(500).json({ ok:false, error:'write_peer_failed' });
+  }
+
+  logWork('bridge.paired', { hasToken: !!readBridgeToken(), peerUrl: (readBridgePeer().url || '') });
+  res.json({ ok:true });
+});
+
+app.post('/api/ops/bridge/test-peer', express.json({ limit:'20kb' }), async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const peer = readBridgePeer();
+  const url = String(req.body?.peerUrl || peer.url || '').trim();
+  const tok = String(req.body?.peerToken || peer.token || '').trim();
+  if (!url) return res.status(400).json({ ok:false, error:'no_peer_url' });
+  if (!tok) return res.status(400).json({ ok:false, error:'no_peer_token' });
+
+  try {
+    const u = url.replace(/\/+$/,'') + '/api/ops/bridge/outbox';
+    const r = await fetch(u, { headers: { 'X-Clawd-Bridge-Token': tok }, cache:'no-store' });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j || !j.ok) return res.status(400).json({ ok:false, error:'peer_failed', http: r.status, body: j });
+    res.json({ ok:true });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:'exception', message: String(e) });
+  }
 });
 
 // Console UI (ops) endpoints for bridge log + posting.

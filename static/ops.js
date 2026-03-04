@@ -464,6 +464,14 @@
   const brMsg = $('bridgeMsg');
   const brList = $('bridgeList');
 
+  const brBossTok = $('bridgeBossToken');
+  const brBossCopy = $('bridgeBossCopy');
+  const brPeerUrl = $('bridgePeerUrl');
+  const brPeerTok = $('bridgePeerToken');
+  const brPeerSave = $('bridgePeerSave');
+  const brPeerTest = $('bridgePeerTest');
+  const brPeerStatus = $('bridgePeerStatus');
+
   const setBrMsg = (t) => { try { if (brMsg) brMsg.textContent = t || ''; } catch {} };
   const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -509,6 +517,17 @@
     const silent = !!opts.silent;
     if (!silent) setBrMsg('Loading…');
     try {
+      // load config (boss token + peer)
+      try {
+        const rc = await fetch('/api/ops/bridge/config', { credentials:'include', cache:'no-store' });
+        const jc = await rc.json().catch(() => null);
+        if (rc.ok && jc && jc.ok) {
+          if (brBossTok) brBossTok.value = jc.fullToken ? String(jc.fullToken) : (jc.token && jc.token.masked ? String(jc.token.masked) : '');
+          if (brPeerUrl) brPeerUrl.value = String(jc.peer?.url || '');
+          if (brPeerTok) brPeerTok.value = '';
+        }
+      } catch {}
+
       const res = await fetch('/api/ops/bridge/list?limit=120', { credentials:'include', cache:'no-store' });
       const j = await res.json();
       if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
@@ -563,8 +582,64 @@
     }
   }
 
+  async function saveBridgePeer(){
+    if (brPeerStatus) brPeerStatus.textContent = 'Saving…';
+    try {
+      const peerUrl = brPeerUrl ? String(brPeerUrl.value||'').trim() : '';
+      const peerToken = brPeerTok ? String(brPeerTok.value||'').trim() : '';
+      const res = await fetch('/api/ops/bridge/pair', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        body: JSON.stringify({ peerUrl, peerToken }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      if (brPeerStatus) brPeerStatus.textContent = 'Saved.';
+      setTimeout(()=>{ if (brPeerStatus) brPeerStatus.textContent=''; }, 900);
+      if (brPeerTok) brPeerTok.value = '';
+    } catch (e) {
+      if (brPeerStatus) brPeerStatus.textContent = 'Save failed: ' + String(e);
+    }
+  }
+
+  async function testBridgePeer(){
+    if (brPeerStatus) brPeerStatus.textContent = 'Testing…';
+    try {
+      const peerUrl = brPeerUrl ? String(brPeerUrl.value||'').trim() : '';
+      const peerToken = brPeerTok ? String(brPeerTok.value||'').trim() : '';
+      const res = await fetch('/api/ops/bridge/test-peer', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        body: JSON.stringify({ peerUrl, peerToken }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+      if (brPeerStatus) brPeerStatus.textContent = 'OK.';
+      setTimeout(()=>{ if (brPeerStatus) brPeerStatus.textContent=''; }, 900);
+    } catch (e) {
+      if (brPeerStatus) brPeerStatus.textContent = 'Test failed: ' + String(e);
+    }
+  }
+
+  async function copyBossToken(){
+    try {
+      const tok = brBossTok ? String(brBossTok.value||'').trim() : '';
+      if (!tok) return;
+      await navigator.clipboard.writeText(tok);
+      setBrMsg('Boss token copied.');
+      setTimeout(()=>setBrMsg(''), 900);
+    } catch (e) {
+      setBrMsg('Copy failed: ' + String(e));
+    }
+  }
+
   if (brRefresh) brRefresh.addEventListener('click', loadBridge);
   if (brPost) brPost.addEventListener('click', postBridge);
+  if (brPeerSave) brPeerSave.addEventListener('click', saveBridgePeer);
+  if (brPeerTest) brPeerTest.addEventListener('click', testBridgePeer);
+  if (brBossCopy) brBossCopy.addEventListener('click', copyBossToken);
 
   // --- Resources ---
   const resRefresh = $('resRefresh');

@@ -287,8 +287,8 @@
       if (tgBase && /api\.together\.(ai|xyz)\/models\//i.test(tgBase.value)) tgBase.value = 'https://api.together.xyz';
       if (tgModel) tgModel.value = String(cfg.model || 'Qwen/Qwen3-Coder-Next-FP8');
       if (tgPick && tgModel) tgPick.value = String(tgModel.value||'').trim();
-      // never populate key field from server
-      if (tgKey) tgKey.value = '';
+      // never populate key field from server; show placeholders if key exists
+      if (tgKey) tgKey.value = (cfg.hasKey ? '********' : '');
       setTgMsg('Loaded' + (cfg.hasKey ? ' (key set)' : ' (no key)') + '.');
       setTimeout(() => setTgMsg(''), 1200);
       refreshTogetherModels();

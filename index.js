@@ -1049,7 +1049,8 @@ app.get('/api/ops/together', (req, res) => {
   const sess = getSessionFromReq(req);
   if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
   const cfg = readTogetherCfg();
-  res.json({ ok:true, config: { baseUrl: cfg.baseUrl, model: cfg.model, hasKey: !!cfg.apiKey, updatedAt: cfg.updatedAt || null } });
+  const maskedKey = cfg.apiKey ? (String(cfg.apiKey).slice(0,4) + '********' + String(cfg.apiKey).slice(-4)) : '';
+  res.json({ ok:true, config: { baseUrl: cfg.baseUrl, model: cfg.model, hasKey: !!cfg.apiKey, maskedKey, updatedAt: cfg.updatedAt || null } });
 });
 
 app.post('/api/ops/together', express.json({ limit: '50kb' }), (req, res) => {

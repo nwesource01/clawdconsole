@@ -6394,15 +6394,15 @@ app.get('/', (req, res) => {
     .wlbtn.in { border-color: rgba(154,208,255,0.55); background: rgba(154,208,255,0.10); }
     .wlbtn.out { border-color: rgba(255,160,80,0.55); background: rgba(255,160,80,0.10); }
 
-    #plan { height: 44px; white-space: nowrap; background: #1f4b8f; border-color: rgba(154,208,255,0.30); }
+    #plan { height: 36px; white-space: nowrap; background: #1f4b8f; border-color: rgba(154,208,255,0.30); }
     #plan:hover { background: #2456a3; }
 
     /* Send = primary action (green) */
-    #send { height: 44px; white-space: nowrap; background: #19783d; border-color: rgba(255,255,255,0.18); }
+    #send { height: 36px; white-space: nowrap; background: #19783d; border-color: rgba(255,255,255,0.18); }
     #send:hover { background: #1e8a46; }
 
     /* Iterate = teal */
-    #iterate { height: 44px; white-space: nowrap; background: #118a8a; border-color: rgba(255,255,255,0.18); }
+    #iterate { height: 36px; white-space: nowrap; background: #118a8a; border-color: rgba(255,255,255,0.18); }
     #iterate:hover { background: #13a0a0; }
 
     /* Thinking + DEL status colors */
@@ -6445,19 +6445,19 @@ app.get('/', (req, res) => {
 
     /* Composer: grid so left (textarea+quick buttons) and right (actions) never overlap */
     #composer { display:grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items:start; }
-    .composerLeft{ min-width:0; display:flex; flex-direction:column; gap:10px; }
+    .composerLeft{ min-width:0; display:flex; flex-direction:column; gap:10px; overflow:hidden; }
     .composerActions{ display:flex; flex-direction:column; gap:8px; align-items:stretch; justify-content:flex-start; }
 
-    #quickbar{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-start; align-items:center; margin:0; }
-    #quickButtons{ margin:0; padding:0; gap:10px; }
+    #quickbar{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-start; align-items:center; margin:0; overflow:hidden; }
+    #quickButtons{ margin:0; padding:0; gap:10px; max-width:100%; }
     #debug{ margin-top: 4px !important; }
 
-    /* Composer textarea: make it as low as possible by matching action stack height */
-    #msg { width: 100%; height: 168px; min-height: 168px; max-height: 168px; overflow:auto; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
+    /* Composer textarea: shorter by default (closer to pre-mic) */
+    #msg { width: 100%; height: 120px; min-height: 120px; max-height: 240px; overflow:auto; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
 
     /* Action buttons: tighter + uniform */
     #mic,#plan,#send,#iterate{ height: 36px; padding: 6px 10px; font-size: 13px; white-space: nowrap; }
-    #mic{ font-size: 16px; padding: 6px 0; width: 56px; }
+    #mic{ font-size: 15px; padding: 6px 0; width: 44px; }
     #micStatus{ font-size:12px; min-height: 16px; }
     /* #pasteHint removed (replaced by ClawdSnap) */
     .preview { display:flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }

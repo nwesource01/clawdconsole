@@ -36,9 +36,13 @@ h1{ margin:0; font-size:20px; letter-spacing:.2px; }
   border-radius: 22px;
   border:1px solid var(--stroke);
   background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.02));
-  overflow:hidden;
+  /* Allow the expanded menu panel to render outside the card bounds */
+  overflow: visible;
   min-height: 240px;
 }
+
+/* Bring the active corner above its neighbors so the open menu isn't clipped */
+.menuBox.open{ z-index: 6; }
 
 .inner{ position:absolute; inset:0; padding:18px; display:flex; flex-direction:column; }
 

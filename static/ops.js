@@ -287,8 +287,12 @@
       if (tgBase && /api\.together\.(ai|xyz)\/models\//i.test(tgBase.value)) tgBase.value = 'https://api.together.xyz';
       if (tgModel) tgModel.value = String(cfg.model || 'Qwen/Qwen3-Coder-Next-FP8');
       if (tgPick && tgModel) tgPick.value = String(tgModel.value||'').trim();
-      // never populate key field from server; show placeholders if key exists
-      if (tgKey) tgKey.value = (cfg.hasKey ? '********' : '');
+      // never populate key field from server.
+      // If a key exists, show a placeholder mask but keep the real input empty so Save doesn't overwrite.
+      if (tgKey) {
+        tgKey.value = '';
+        tgKey.placeholder = cfg.hasKey ? '********' : 'together_...';
+      }
       setTgMsg('Loaded' + (cfg.hasKey ? ' (key set)' : ' (no key)') + '.');
       setTimeout(() => setTgMsg(''), 1200);
       refreshTogetherModels();
@@ -305,7 +309,7 @@
         model: tgModel ? tgModel.value : '',
       };
       const key = tgKey ? String(tgKey.value || '') : '';
-      if (key) body.apiKey = key;
+      if (key && key !== '********') body.apiKey = key;
 
       const res = await fetch('/api/ops/together', {
         method:'POST',
@@ -352,7 +356,7 @@
         prompt: tgPrompt ? tgPrompt.value : '',
       };
       const key = tgKey ? String(tgKey.value || '') : '';
-      if (key) body.apiKey = key;
+      if (key && key !== '********') body.apiKey = key;
 
       const res = await fetch('/api/ops/together/test', {
         method:'POST',

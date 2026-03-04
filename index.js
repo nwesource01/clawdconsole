@@ -538,6 +538,9 @@ app.use((req, res, next) => {
   if (req.path === '/demo' || req.path.startsWith('/demo/')) return next();
   if (req.path === '/favicon.ico' || req.path.startsWith('/static/')) return next();
 
+  // token-only bridge endpoints (for cross-box notes)
+  if (req.path === '/api/ops/bridge/inbox' || req.path === '/api/ops/bridge/outbox') return next();
+
   // allow telemetry collector endpoints without auth (hosted collector)
   if (req.path.startsWith('/api/telemetry/v1/')) return next();
 
@@ -5811,6 +5814,73 @@ function logWork(event, data) {
   broadcast({ type: 'worklog', entry });
   return entry;
 }
+
+// --- Token-only Bridge (cross-box notes) ---
+const BRIDGE_TOKEN = String(process.env.BRIDGE_TOKEN || '').trim();
+const BRIDGE_INBOX_FILE = path.join(DATA_DIR, 'bridge-inbox.md');
+const BRIDGE_OUTBOX_FILE = path.join(DATA_DIR, 'bridge-outbox.md');
+const BRIDGE_LOG_FILE = path.join(DATA_DIR, 'bridge-messages.jsonl');
+
+function bridgeAuthOk(req){
+  if (!BRIDGE_TOKEN) return false;
+  const tok = String(req.headers['x-clawd-bridge-token'] || '').trim();
+  return tok && tok === BRIDGE_TOKEN;
+}
+
+function readTextFileSafe(p){
+  try { return fs.existsSync(p) ? String(fs.readFileSync(p, 'utf8')) : ''; } catch { return ''; }
+}
+
+function writeTextFileSafe(p, s){
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+  try { fs.writeFileSync(p, String(s || ''), 'utf8'); return true; } catch { return false; }
+}
+
+function appendBridgeLog(dir, summary, text){
+  const entry = {
+    id: 'br_' + crypto.randomBytes(6).toString('hex') + Date.now().toString(16),
+    ts: new Date().toISOString(),
+    dir: String(dir || ''),
+    summary: summary ? String(summary) : null,
+    text: String(text || ''),
+  };
+  try { appendJsonl(BRIDGE_LOG_FILE, entry); } catch {}
+  try { broadcast({ type: 'bridge', entry }); } catch {}
+  try { logWork('bridge.' + String(dir || 'post'), { summary: entry.summary, bytes: entry.text.length }); } catch {}
+  return entry;
+}
+
+app.get('/api/ops/bridge/inbox', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!bridgeAuthOk(req)) return res.status(401).type('text/plain').send('Auth required');
+  res.json({ ok:true, text: readTextFileSafe(BRIDGE_INBOX_FILE) });
+});
+
+app.post('/api/ops/bridge/inbox', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!bridgeAuthOk(req)) return res.status(401).type('text/plain').send('Auth required');
+  const summary = (req.body && typeof req.body.summary === 'string') ? req.body.summary : '';
+  const text = (req.body && typeof req.body.text === 'string') ? req.body.text : '';
+  const ok = writeTextFileSafe(BRIDGE_INBOX_FILE, text);
+  appendBridgeLog('in', summary, text);
+  res.json({ ok: !!ok });
+});
+
+app.get('/api/ops/bridge/outbox', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!bridgeAuthOk(req)) return res.status(401).type('text/plain').send('Auth required');
+  res.json({ ok:true, text: readTextFileSafe(BRIDGE_OUTBOX_FILE) });
+});
+
+app.post('/api/ops/bridge/outbox', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!bridgeAuthOk(req)) return res.status(401).type('text/plain').send('Auth required');
+  const summary = (req.body && typeof req.body.summary === 'string') ? req.body.summary : '';
+  const text = (req.body && typeof req.body.text === 'string') ? req.body.text : '';
+  const ok = writeTextFileSafe(BRIDGE_OUTBOX_FILE, text);
+  appendBridgeLog('out', summary, text);
+  res.json({ ok: !!ok });
+});
 
 // --- Agent bridge (Gateway chat.send) ---
 let gw = {

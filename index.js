@@ -264,28 +264,16 @@ function slugifyWsTitle(s){
 }
 
 function loadCodeWs(){
-  const adminWs = { id:'admin', title:'Admin (ClawdRoot)', root: '/home/master/clawd', git: null };
   try {
     if (!fs.existsSync(CODE_WS_FILE)) throw new Error('missing');
     const j = JSON.parse(fs.readFileSync(CODE_WS_FILE, 'utf8'));
     if (!j || !Array.isArray(j.workspaces)) throw new Error('bad');
-
-    // migrate: ensure Admin workspace exists for full architecture browsing
-    const hasAdmin = j.workspaces.some(w => w && String(w.id||'') === 'admin');
-    if (!hasAdmin) {
-      j.workspaces.push(adminWs);
-      try {
-        fs.mkdirSync(path.dirname(CODE_WS_FILE), { recursive:true });
-        fs.writeFileSync(CODE_WS_FILE, JSON.stringify(j, null, 2), 'utf8');
-      } catch {}
-    }
     return j;
   } catch {
     // seed
     const seeded = {
       workspaces: [
         { id:'console', title:'Console', root: path.resolve(__dirname), git: null },
-        adminWs,
       ],
     };
     try {
@@ -370,10 +358,6 @@ app.use((req, res, next) => {
   // allow telemetry collector endpoints without auth (hosted collector)
   if (req.path.startsWith('/api/telemetry/v1/')) return next();
 
-  // allow token-gated cross-box bridge posts without BasicAuth/session
-  // (the route handler enforces BRIDGE_TOKEN via X-Clawd-Bridge-Token)
-  if (req.path === '/api/ops/bridge/inbox' || req.path === '/api/ops/bridge/outbox') return next();
-
   // 1) session cookie
   const cookies = parseCookies(req);
   const tok = cookies[SESS_COOKIE];
@@ -396,23 +380,10 @@ app.use((req, res, next) => {
     return res.status(401).type('text/plain').send('Auth required');
   }
 
-  // set session cookie so fetch() and WS auth work without Authorization header
+  // set session cookie so fetch() works without Authorization header
   const token = newToken();
   sessions.set(token, { exp: Date.now() + SESS_TTL_MS, unlocks: {} });
-
-  // Secure cookies on plain HTTP will be dropped by browsers, causing repeated auth prompts.
-  // Only mark Secure when we're actually on HTTPS (or behind a TLS proxy that sets X-Forwarded-Proto).
-  const xfProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
-  const isHttps = (req.secure === true) || xfProto === 'https';
-  const cookieParts = [
-    `${SESS_COOKIE}=${encodeURIComponent(token)}`,
-    'Path=/',
-    `Max-Age=${Math.floor(SESS_TTL_MS/1000)}`,
-    'HttpOnly',
-    (isHttps ? 'Secure' : null),
-    'SameSite=Strict'
-  ].filter(Boolean);
-  res.setHeader('Set-Cookie', cookieParts.join('; '));
+  res.setHeader('Set-Cookie', `${SESS_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${Math.floor(SESS_TTL_MS/1000)}; HttpOnly; Secure; SameSite=Strict`);
 
   return next();
 });
@@ -717,7 +688,7 @@ app.get('/demo', (req, res) => {
     <div class="badge">DEMO</div>
     <div class="title">Clawd Console</div>
     <div class="sub">Safe playground • no integrations • no outbound messaging</div>
-    <a class="link" href="/" target="_blank" rel="noopener">Open app</a>
+    <a class="link" href="#" onclick="return false" rel="noopener">Open app</a>
   </div>
   <div class="wrap">
     <div class="card" id="left">
@@ -772,53 +743,9 @@ app.get('/demo/api/del', (req, res) => {
   res.json({ ok: true, demo: true, state: DEMO_DEL });
 });
 
-// best-effort public IP detection (DigitalOcean metadata first; env override supported)
-let serverPublicIpCache = { ip: null, ts: 0 };
-function getServerPublicIpCached(){
-  const envIp = String(process.env.PUBLIC_IP || '').trim();
-  if (envIp) return envIp;
-  const now = Date.now();
-  if (serverPublicIpCache.ip && (now - serverPublicIpCache.ts) < 6 * 60 * 60 * 1000) return serverPublicIpCache.ip;
-  return serverPublicIpCache.ip || null;
-}
-async function refreshServerPublicIp(){
-  const envIp = String(process.env.PUBLIC_IP || '').trim();
-  if (envIp) {
-    serverPublicIpCache = { ip: envIp, ts: Date.now() };
-    return envIp;
-  }
-  // DigitalOcean metadata service (no external network)
-  try {
-    const http = require('http');
-    const url = 'http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address';
-    const ip = await new Promise((resolve, reject) => {
-      const r = http.get(url, { timeout: 1200 }, (resp) => {
-        let buf = '';
-        resp.setEncoding('utf8');
-        resp.on('data', (d) => buf += d);
-        resp.on('end', () => resolve(String(buf||'').trim()));
-      });
-      r.on('error', reject);
-      r.on('timeout', () => { try { r.destroy(new Error('timeout')); } catch {} });
-    });
-    if (ip && /^[0-9.]{7,15}$/.test(ip)) {
-      serverPublicIpCache = { ip, ts: Date.now() };
-      return ip;
-    }
-  } catch {}
-  return null;
-}
-
 app.get('/api/status', (req, res) => {
   const forwardedFor = (req.headers['x-forwarded-for'] || '').toString();
   const clientIp = forwardedFor.split(',')[0].trim() || req.socket.remoteAddress || null;
-  const serverPublicIp = getServerPublicIpCached();
-
-  // refresh in background if missing/stale
-  if (!serverPublicIp || (Date.now() - serverPublicIpCache.ts) > (6 * 60 * 60 * 1000)) {
-    refreshServerPublicIp().catch(() => {});
-  }
-
   res.json({
     ok: true,
     service: 'claw-console',
@@ -828,7 +755,6 @@ app.get('/api/status', (req, res) => {
     hostname: require('os').hostname(),
     serverBind: '127.0.0.1',
     clientIp,
-    serverPublicIp,
     gateway: {
       connected: !!(gw && gw.connected),
       url: GATEWAY_WS_URL,
@@ -965,24 +891,6 @@ app.post('/api/ops/codex/reconnect', (req, res) => {
   res.json({ ok:true });
 });
 
-// Optional: allow restarting gateway service from UI (explicitly gated)
-// This is a "remote ops" capability. It MUST be opt-in.
-const REMOTE_OPS_ENABLED = String(process.env.REMOTE_OPS_ENABLED || '').trim() === '1';
-app.post('/api/ops/gateway/restart', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  const sess = getSessionFromReq(req);
-  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
-  if (!REMOTE_OPS_ENABLED) return res.status(404).json({ ok:false, error:'not_enabled' });
-  try {
-    execFileSync('clawdbot', ['gateway', 'restart'], { stdio:['ignore','pipe','pipe'], timeout: 25_000 });
-    logWork('ops.gateway.restart', {});
-    return res.json({ ok:true });
-  } catch (e) {
-    logWork('ops.gateway.restart.error', { error: String(e) });
-    return res.status(500).json({ ok:false, error: String(e) });
-  }
-});
-
 app.get('/clawdpub/sop', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const txt = readSopSnippet(200000);
@@ -994,6 +902,13 @@ const ADMINONLY_ENABLED = String(process.env.ADMINONLY_ENABLED || '').trim() ===
 app.get('/adminonly', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   if (!ADMINONLY_ENABLED) return res.status(404).type('text/plain').send('Not found');
+
+  // Hostname-gated admin: only expose admin surfaces on claw.nwesource.com
+  // (app.clawdconsole.com remains a non-admin preview host.)
+  const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+  if (host && host !== 'claw.nwesource.com') {
+    return res.status(404).type('text/plain').send('Not found');
+  }
 
   res.type('text/html; charset=utf-8').send(`<!doctype html>
 <html>
@@ -1044,6 +959,7 @@ app.get('/adminonly', (req, res) => {
       <button id="admTabAdoption" class="tabbtn" type="button" style="margin-top:10px;">Adoption</button>
       <button id="admTabCRM" class="tabbtn" type="button" style="margin-top:10px;">CRM</button>
       <button id="admTabChangelog" class="tabbtn" type="button" style="margin-top:10px;">Changelog</button>
+      <button id="admTabFeatures" class="tabbtn" type="button" style="margin-top:10px;">Features</button>
       <div class="muted" style="margin-top:10px;">Default tab: Sitemap</div>
     </aside>
 
@@ -1219,6 +1135,31 @@ app.get('/adminonly', (req, res) => {
 
         <div id="chgList" style="margin-top:12px;"></div>
         <div class="muted" style="margin-top:12px;">Tip: this is for operator-facing patch notes; the commit list is still available in the Repo tab in the main Console.</div>
+      </div>
+
+      <div id="admPanelFeatures" class="card" style="display:none;">
+        <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline; flex-wrap:wrap;">
+          <h1 style="margin:0; font-size:18px;">Features (placeholder)</h1>
+          <div class="muted">ClawdWork • AI Memory</div>
+        </div>
+
+        <div class="muted" style="margin-top:10px; line-height:1.55;">
+          Goal: a THOROUGH, living catalog of everything shipped in ClawdConsole, organized two ways:
+          <ul>
+            <li><b>By Widget / Surface</b> (Console Home, ClawdWork, ClawdList, Transcript, ClawdPM, ClawdCode, ClawdOps, Admin, etc.)</li>
+            <li><b>By Solution Category</b> (AI Memory & continuity, operator safety, automation/queueing, publishing, debugging/observability, onboarding, etc.)</li>
+          </ul>
+          Each feature becomes a card with:
+          <ul>
+            <li><b>Feature name</b> + status (draft/ready)</li>
+            <li><b>Problem it solves</b> (pain)</li>
+            <li><b>How to use</b> (steps)</li>
+            <li><b>Where it lives</b> (route + widget)</li>
+            <li><b>Proof</b> (screenshot or transcript link/message id)</li>
+          </ul>
+
+          Not building the full system yet — this is the placeholder + agreed direction.
+        </div>
       </div>
 
       <div class="muted" style="margin-top:12px;">More admin tabs coming.</div>
@@ -1462,75 +1403,6 @@ app.get('/api/repo/commits', async (req, res) => {
   }
 });
 
-function countJsonlSince(fp, sinceMs){
-  try {
-    if (!fs.existsSync(fp)) return 0;
-    const txt = fs.readFileSync(fp, 'utf8');
-    const lines = txt.split(/\r?\n/).filter(Boolean);
-    let n = 0;
-    for (const ln of lines){
-      let o; try { o = JSON.parse(ln); } catch { o = null; }
-      if (!o) continue;
-      const ts = Date.parse(o.ts || o.t || o.time || '');
-      if (Number.isFinite(ts) && ts >= sinceMs) n++;
-    }
-    return n;
-  } catch {
-    return 0;
-  }
-}
-
-app.get('/api/repo/metrics', async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  const repoDir = __dirname;
-  const sinceMs = Date.now() - (24 * 60 * 60 * 1000);
-
-  try {
-    // commits last 24h
-    const commits24h = await new Promise((resolve) => {
-      const args = ['-C', repoDir, 'rev-list', '--count', '--since=24 hours ago', 'HEAD'];
-      execFile('git', args, { timeout: 5000 }, (err, stdout) => {
-        if (err) return resolve(null);
-        const n = Number(String(stdout||'').trim());
-        resolve(Number.isFinite(n) ? n : null);
-      });
-    });
-
-    const worklog24h = countJsonlSince(path.join(DATA_DIR, 'worklog.jsonl'), sinceMs);
-    const bridge24h = countJsonlSince(path.join(DATA_DIR, 'bridge-messages.jsonl'), sinceMs);
-    const msg24h = countJsonlSince(path.join(DATA_DIR, 'messages.jsonl'), sinceMs);
-
-    // queue completions (best-effort: worklog event starts with queue. and includes completed)
-    let queueDone24h = 0;
-    try {
-      const fp = path.join(DATA_DIR, 'worklog.jsonl');
-      if (fs.existsSync(fp)) {
-        const txt = fs.readFileSync(fp,'utf8');
-        const lines = txt.split(/\r?\n/).filter(Boolean);
-        for (const ln of lines){
-          let o; try { o = JSON.parse(ln); } catch { o = null; }
-          if (!o) continue;
-          const ts = Date.parse(o.ts || '');
-          if (!Number.isFinite(ts) || ts < sinceMs) continue;
-          const ev = String(o.event||'');
-          if (ev === 'queue.cardCompleted' || ev === 'pm.cardPatch') {
-            // include pm.cardPatch only when queueStatus is done
-            if (ev === 'pm.cardPatch') {
-              const qs = String(o.data && o.data.queueStatus || '');
-              if (qs !== 'done') continue;
-            }
-            queueDone24h++;
-          }
-        }
-      }
-    } catch {}
-
-    res.json({ ok:true, build: BUILD, sinceMs, commits24h, worklog24h, bridge24h, messages24h: msg24h, queueDone24h });
-  } catch (e) {
-    res.status(500).json({ ok:false, error: String(e) });
-  }
-});
-
 app.get('/api/repo/install', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
@@ -1540,46 +1412,6 @@ app.get('/api/repo/install', (req, res) => {
     res.json({ ok: true, tarUrl: tarUrl || null, guide: guide || '' });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
-  }
-});
-
-// Upstream releases feed (read-only)
-const UPSTREAM_RELEASE_LATEST_URL = String(process.env.UPSTREAM_RELEASE_LATEST_URL || 'https://clawdconsole.com/releases/latest.json').trim();
-app.get('/api/repo/releases/latest', async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  try {
-    const u = new URL(UPSTREAM_RELEASE_LATEST_URL);
-    if (u.protocol !== 'https:') return res.status(400).json({ ok:false, error:'bad_url' });
-
-    const https = require('https');
-    const data = await new Promise((resolve, reject) => {
-      const r = https.get(u, { timeout: 5000, headers: { 'User-Agent':'ClawdConsole/1.0' } }, (resp) => {
-        let buf = '';
-        resp.setEncoding('utf8');
-        resp.on('data', (d) => buf += d);
-        resp.on('end', () => resolve({ status: resp.statusCode || 0, body: buf }));
-      });
-      r.on('error', reject);
-      r.on('timeout', () => { try { r.destroy(new Error('timeout')); } catch {} });
-    });
-
-    if (data.status < 200 || data.status >= 300) return res.status(502).json({ ok:false, error:'upstream_http_'+String(data.status) });
-    let j; try { j = JSON.parse(String(data.body||'')); } catch { j = null; }
-    if (!j || typeof j !== 'object') return res.status(502).json({ ok:false, error:'bad_json' });
-
-    // normalize
-    const out = {
-      build: String(j.build || ''),
-      level: String(j.level || ''),
-      ts: String(j.ts || ''),
-      title: String(j.title || ''),
-      body: String(j.body || ''),
-      url: j.url ? String(j.url) : null,
-    };
-
-    return res.json({ ok:true, upstreamUrl: UPSTREAM_RELEASE_LATEST_URL, latest: out, local: { build: BUILD } });
-  } catch (e) {
-    return res.status(500).json({ ok:false, error: String(e) });
   }
 });
 
@@ -2122,137 +1954,6 @@ app.post('/api/ops/brand', (req, res) => {
   }
 });
 
-// --- Bridge notes (bidirectional, token-gated) ---
-// Use this to let Clawdwell post diffs/results and let Clawdio reply, without email.
-// Stored in DATA_DIR so it survives code updates.
-const BRIDGE_TOKEN = String(process.env.BRIDGE_TOKEN || '').trim();
-function bridgeOk(req){
-  if (!BRIDGE_TOKEN) return false;
-  const t = String(req.headers['x-clawd-bridge-token'] || '').trim();
-  return t && t === BRIDGE_TOKEN;
-}
-
-function readTextFile(fp){
-  try { return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : ''; } catch { return ''; }
-}
-function writeTextFile(fp, txt){
-  fs.mkdirSync(path.dirname(fp), { recursive:true });
-  fs.writeFileSync(fp, String(txt || ''), 'utf8');
-}
-
-const BRIDGE_INBOX_FILE = path.join(DATA_DIR, 'bridge-inbox.md');
-const BRIDGE_OUTBOX_FILE = path.join(DATA_DIR, 'bridge-outbox.md');
-const BRIDGE_LOG_FILE = path.join(DATA_DIR, 'bridge-messages.jsonl');
-
-function appendBridgeMessage(dir, text, summary = '', meta = {}){
-  const obj = {
-    id: 'br_' + Date.now().toString(16) + '_' + Math.random().toString(16).slice(2),
-    ts: new Date().toISOString(),
-    dir: (dir === 'outbox') ? 'outbox' : 'inbox',
-    summary: String(summary || '').trim().slice(0, 140),
-    text: String(text || ''),
-    meta: (meta && typeof meta === 'object') ? meta : {},
-  };
-  try { appendJsonl(BRIDGE_LOG_FILE, obj); } catch {}
-  return obj;
-}
-
-function readBridgeMessages(limit = 200){
-  try {
-    const txt = fs.existsSync(BRIDGE_LOG_FILE) ? fs.readFileSync(BRIDGE_LOG_FILE, 'utf8') : '';
-    const lines = txt.split('\n').filter(Boolean);
-    const tail = lines.slice(-Math.max(1, Math.min(2000, Number(limit)||200)));
-    const out = [];
-    for (const ln of tail) {
-      let o; try { o = JSON.parse(ln); } catch { o = null; }
-      if (o && typeof o === 'object') out.push(o);
-    }
-    return out;
-  } catch {
-    return [];
-  }
-}
-
-// Token-gated endpoints for cross-box posting/polling
-app.get('/api/ops/bridge/inbox', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  if (!bridgeOk(req)) return res.status(403).json({ ok:false, error:'forbidden' });
-  return res.json({ ok:true, path: BRIDGE_INBOX_FILE, text: readTextFile(BRIDGE_INBOX_FILE) });
-});
-app.post('/api/ops/bridge/inbox', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  if (!bridgeOk(req)) return res.status(403).json({ ok:false, error:'forbidden' });
-  const text = String(req.body?.text || '');
-  const summary = String(req.body?.summary || '').trim();
-  writeTextFile(BRIDGE_INBOX_FILE, text);
-  const ev = appendBridgeMessage('inbox', text, summary, { via:'token' });
-  logWork('ops.bridge.inbox.saved', { bytes: Buffer.byteLength(text,'utf8') });
-  return res.json({ ok:true, path: BRIDGE_INBOX_FILE, event: ev });
-});
-
-app.get('/api/ops/bridge/outbox', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  if (!bridgeOk(req)) return res.status(403).json({ ok:false, error:'forbidden' });
-  return res.json({ ok:true, path: BRIDGE_OUTBOX_FILE, text: readTextFile(BRIDGE_OUTBOX_FILE) });
-});
-app.post('/api/ops/bridge/outbox', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  if (!bridgeOk(req)) return res.status(403).json({ ok:false, error:'forbidden' });
-  const text = String(req.body?.text || '');
-  const summary = String(req.body?.summary || '').trim();
-  writeTextFile(BRIDGE_OUTBOX_FILE, text);
-  const ev = appendBridgeMessage('outbox', text, summary, { via:'token' });
-  logWork('ops.bridge.outbox.saved', { bytes: Buffer.byteLength(text,'utf8') });
-  return res.json({ ok:true, path: BRIDGE_OUTBOX_FILE, event: ev });
-});
-
-// UI (same-box) endpoints: no token required (still behind Console auth)
-app.get('/api/ops/bridge/list', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  const limit = Math.max(1, Math.min(500, Number(req.query.limit || 120)));
-  const items = readBridgeMessages(limit);
-  return res.json({ ok:true, path: BRIDGE_LOG_FILE, items });
-});
-
-app.post('/api/ops/bridge/post', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  const dir = String(req.body?.dir || 'outbox');
-  const text = String(req.body?.text || '');
-  const summary = String(req.body?.summary || '').trim();
-  if (!text.trim()) return res.status(400).json({ ok:false, error:'Missing text' });
-
-  if (dir === 'inbox') {
-    writeTextFile(BRIDGE_INBOX_FILE, text);
-  } else {
-    writeTextFile(BRIDGE_OUTBOX_FILE, text);
-  }
-  const ev = appendBridgeMessage(dir, text, summary, { via:'ui' });
-  return res.json({ ok:true, event: ev });
-});
-
-// Backwards-compat: keep the single clawdwell-notes endpoint around (UI uses it), file-backed.
-const CLAWDWELL_NOTES_FILE = path.join(DATA_DIR, 'clawdwell-notes.md');
-app.get('/api/ops/clawdwell-notes', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  try {
-    const text = fs.existsSync(CLAWDWELL_NOTES_FILE) ? fs.readFileSync(CLAWDWELL_NOTES_FILE, 'utf8') : '';
-    return res.json({ ok:true, text });
-  } catch (e) {
-    return res.status(500).json({ ok:false, error: String(e) });
-  }
-});
-app.post('/api/ops/clawdwell-notes', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  try {
-    const text = String(req.body?.text || '');
-    fs.writeFileSync(CLAWDWELL_NOTES_FILE, text, 'utf8');
-    logWork('ops.clawdwell_notes.saved', { bytes: Buffer.byteLength(text, 'utf8') });
-    return res.json({ ok:true });
-  } catch (e) {
-    return res.status(500).json({ ok:false, error: String(e) });
-  }
-});
-
 app.get('/api/ops/profile', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
@@ -2288,96 +1989,182 @@ app.post('/api/ops/commit', (req, res) => {
   }
 });
 
-// Host resource snapshot for ClawdOps (best-effort, no external deps)
-app.get('/api/ops/resources', (req, res) => {
+const AUTO_STATE_FILE = path.join(DATA_DIR, 'auto-state.md');
+function readAutoStateMeta(){
+  try {
+    if (!fs.existsSync(AUTO_STATE_FILE)) return { fileUpdatedAt: '' };
+    const raw = fs.readFileSync(AUTO_STATE_FILE, 'utf8');
+    const head = raw.split(/\r?\n/).slice(0, 12).join('\n');
+    const m = head.match(/\bUpdated:\s*([^\n]+)\s*/i);
+    return { fileUpdatedAt: m ? String(m[1] || '').trim() : '' };
+  } catch {
+    return { fileUpdatedAt: '' };
+  }
+}
+
+const AUTO_STATE_ACK_FILE = path.join(DATA_DIR, 'auto-state-ack.json');
+function readAutoStateAck(){
+  try {
+    if (!fs.existsSync(AUTO_STATE_ACK_FILE)) return { ackAt:'', updatedAt:'' };
+    const j = JSON.parse(fs.readFileSync(AUTO_STATE_ACK_FILE, 'utf8'));
+    return { ackAt: String(j.ackAt||''), updatedAt: String(j.updatedAt||'') };
+  } catch {
+    return { ackAt:'', updatedAt:'' };
+  }
+}
+function writeAutoStateAck({ ackAt, updatedAt }){
+  try {
+    const next = { ackAt: String(ackAt||''), updatedAt: String(updatedAt||''), wroteAt: new Date().toISOString() };
+    fs.mkdirSync(path.dirname(AUTO_STATE_ACK_FILE), { recursive:true });
+    fs.writeFileSync(AUTO_STATE_ACK_FILE, JSON.stringify(next, null, 2), 'utf8');
+    return next;
+  } catch {
+    return null;
+  }
+}
+
+app.get('/api/ops/auto-state/status', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    const os = require('os');
-    const cpus = os.cpus() || [];
-    const cores = cpus.length || 1;
-    const load = os.loadavg ? os.loadavg() : [0,0,0];
-    const memTotal = os.totalmem ? os.totalmem() : 0;
-    const memFree = os.freemem ? os.freemem() : 0;
-    const memUsed = memTotal - memFree;
-    const memPct = memTotal ? (memUsed / memTotal) : 0;
-
-    // disk: root fs only (fast)
-    let disk = null;
-    try {
-      const { execFileSync } = require('child_process');
-      const out = execFileSync('df', ['-Pk', '/'], { encoding:'utf8' });
-      const lines = out.trim().split(/\r?\n/);
-      const parts = (lines[lines.length-1] || '').trim().split(/\s+/);
-      // Filesystem 1024-blocks Used Available Capacity Mounted on
-      if (parts.length >= 6) {
-        const totalK = Number(parts[1]||0);
-        const usedK = Number(parts[2]||0);
-        const availK = Number(parts[3]||0);
-        const pct = String(parts[4]||'').replace('%','');
-        disk = { mount: parts[5], totalBytes: totalK*1024, usedBytes: usedK*1024, availBytes: availK*1024, usedPct: Number(pct)/100 };
-      }
-    } catch {}
-
-    // alerts (simple thresholds)
-    const alerts = [];
-    if (memPct >= 0.90) alerts.push({ level:'warn', kind:'mem', msg:'RAM usage above 90%' });
-    if (disk && disk.usedPct >= 0.90) alerts.push({ level:'warn', kind:'disk', msg:'Disk usage above 90% on /' });
-    const load1 = Number(load[0]||0);
-    if (load1 > (cores * 1.25)) alerts.push({ level:'warn', kind:'cpu', msg:'Load average high for core count' });
-
-    return res.json({
-      ok:true,
-      host:{
-        hostname: os.hostname ? os.hostname() : null,
-        platform: os.platform ? os.platform() : null,
-        uptimeSec: os.uptime ? os.uptime() : null,
-        cores,
-        load1: load[0],
-        load5: load[1],
-        load15: load[2],
-        memTotal,
-        memUsed,
-        memFree,
-        memPct,
-        disk,
-      },
-      alerts,
-      ts: new Date().toISOString(),
-    });
+    const meta = readAutoStateMeta();
+    const fileUpdatedAt = meta.fileUpdatedAt || '';
+    const ack = readAutoStateAck();
+    const aiAckAt = ack.ackAt || '';
+    const aiAckUpdatedAt = ack.updatedAt || '';
+    const aiCaughtUp = !!fileUpdatedAt && fileUpdatedAt === aiAckUpdatedAt;
+    res.json({ ok:true, fileUpdatedAt, aiAckAt, aiAckUpdatedAt, aiCaughtUp });
   } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+let autoStateRehydrate = { inProgress:false, lastSentAt:0, nonce:'', updatedAt:'' };
+
+async function pollForAutoStateAck({ wantLine, fileUpdatedAt, runId }){
+  const startedAt = Date.now();
+  let last = '';
+  while (Date.now() - startedAt < 60_000) {
+    await new Promise(r => setTimeout(r, 1100));
+    let payload;
+    try { payload = await gwSendReq('chat.history', { sessionKey: CONSOLE_SESSION_KEY, limit: 160 }); } catch { payload = null; }
+    const messages = payload?.messages;
+    if (!Array.isArray(messages)) continue;
+
+    const assistants = messages
+      .map(m => (m && m.message) ? m.message : m)
+      .filter(m => m && m.role === 'assistant');
+
+    // Scan newest-first for the ACK line.
+    for (let k = assistants.length - 1; k >= 0; k--) {
+      const txt = extractTextFromGatewayMessage(assistants[k]);
+      if (!txt || txt === last) continue;
+      last = txt;
+      const line = String(txt).trim().split(/\r?\n/)[0];
+      if (line === wantLine) {
+        const out = writeAutoStateAck({ ackAt: new Date().toISOString(), updatedAt: fileUpdatedAt || '' });
+        logWork('ops.auto_state.rehydrate.acked', { updatedAt: fileUpdatedAt || '', runId });
+        return { ok:true, out };
+      }
+    }
+  }
+  return { ok:false, error:'ack_timeout' };
+}
+
+app.post('/api/ops/auto-state/rehydrate', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  // Disabled: too noisy. Re-enable only when we have a safer handshake.
+  return res.status(410).json({ ok:false, error:'rehydrate_disabled' });
+  try {
+    if (!gw.connected) return res.status(409).json({ ok:false, error:'gateway_not_connected' });
+
+    const meta = readAutoStateMeta();
+    const fileUpdatedAt = meta.fileUpdatedAt || '';
+    const text = fs.existsSync(AUTO_STATE_FILE) ? fs.readFileSync(AUTO_STATE_FILE, 'utf8') : '';
+    if (!text.trim()) return res.status(404).json({ ok:false, error:'auto_state_missing' });
+
+    const ack = readAutoStateAck();
+    if (fileUpdatedAt && ack && ack.updatedAt === fileUpdatedAt) {
+      return res.json({ ok:true, noop:true, fileUpdatedAt, aiAckAt: ack.ackAt, aiAckUpdatedAt: ack.updatedAt });
+    }
+
+    // Dedup: if a rehydrate is already in progress, don't spam the model.
+    if (autoStateRehydrate.inProgress && autoStateRehydrate.updatedAt === fileUpdatedAt) {
+      return res.status(202).json({ ok:true, inProgress:true, fileUpdatedAt });
+    }
+
+    const nonce = crypto.randomBytes(6).toString('hex');
+    const wantLine = 'AUTO_STATE_ACK Updated=' + (fileUpdatedAt || '(unknown)') + ' Nonce=' + nonce;
+
+    // Strip any trailing "validation" style prompts accidentally embedded in auto-state.
+    const safeText = String(text || '').replace(/\n---\s*alladat\s*validation[\s\S]*$/i, '').trimEnd();
+
+    const prompt = [
+      'AUTO_STATE_REHYDRATE v1',
+      'Updated: ' + (fileUpdatedAt || '(unknown)'),
+      'Nonce: ' + nonce,
+      '',
+      'You are being given the current Console AUTO-STATE. Ingest it as operating context.',
+      'Then reply with EXACTLY one line:',
+      wantLine,
+      '',
+      '--- AUTO-STATE BEGIN ---',
+      safeText,
+      '--- AUTO-STATE END ---',
+    ].join('\n');
+
+    const runId = 'rehydrate_' + Date.now().toString(16) + '_' + nonce;
+
+    autoStateRehydrate = { inProgress:true, lastSentAt: Date.now(), nonce, updatedAt: fileUpdatedAt || '' };
+
+    await gwSendReq('chat.send', {
+      sessionKey: CONSOLE_SESSION_KEY,
+      idempotencyKey: runId,
+      message: prompt,
+      deliver: true,
+    });
+    logWork('ops.auto_state.rehydrate.sent', { runId, updatedAt: fileUpdatedAt || '' });
+
+    // respond immediately; poll in background and write ACK file when it arrives
+    res.json({ ok:true, sent:true, fileUpdatedAt });
+
+    pollForAutoStateAck({ wantLine, fileUpdatedAt, runId })
+      .then((r) => {
+        if (!r || !r.ok) logWork('ops.auto_state.rehydrate.timeout', { updatedAt: fileUpdatedAt || '', runId });
+      })
+      .catch((e) => {
+        logWork('ops.auto_state.rehydrate.error', { error: String(e), runId });
+      })
+      .finally(() => {
+        autoStateRehydrate.inProgress = false;
+      });
+  } catch (e) {
+    autoStateRehydrate.inProgress = false;
+    logWork('ops.auto_state.rehydrate.error', { error: String(e) });
     return res.status(500).json({ ok:false, error: String(e) });
   }
 });
 
-const UPDATES_CFG_FILE = path.join(DATA_DIR, 'update-config.json');
-function readUpdatesCfg(){
-  const fb = { mode:'notify', maxLevel:'patch', updatedAt:null };
-  const j = readJson(UPDATES_CFG_FILE, fb);
-  if (!j || typeof j !== 'object') return fb;
-  const mode = ['manual','notify','auto'].includes(String(j.mode)) ? String(j.mode) : 'notify';
-  const maxLevel = ['patch','minor','major'].includes(String(j.maxLevel)) ? String(j.maxLevel) : 'patch';
-  return { mode, maxLevel, updatedAt: j.updatedAt || null };
-}
-function writeUpdatesCfg(cfg){
-  const cur = readUpdatesCfg();
-  const mode = ['manual','notify','auto'].includes(String(cfg?.mode)) ? String(cfg.mode) : cur.mode;
-  const maxLevel = ['patch','minor','major'].includes(String(cfg?.maxLevel)) ? String(cfg.maxLevel) : cur.maxLevel;
-  const out = { mode, maxLevel, updatedAt: new Date().toISOString() };
-  writeJson(UPDATES_CFG_FILE, out);
-  return out;
-}
-
-app.get('/api/ops/updates/config', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  try { return res.json({ ok:true, cfg: readUpdatesCfg() }); }
-  catch (e) { return res.status(500).json({ ok:false, error: String(e) }); }
-});
-app.post('/api/ops/updates/config', (req, res) => {
+app.get('/api/ops/auto-state', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    const saved = writeUpdatesCfg(req.body?.cfg || {});
-    logWork('ops.updates.saved', saved);
-    return res.json({ ok:true, cfg: saved });
+    const text = fs.existsSync(AUTO_STATE_FILE) ? fs.readFileSync(AUTO_STATE_FILE, 'utf8') : '';
+    res.json({ ok:true, text });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.post('/api/ops/restart', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const confirm = String(req.body?.confirm || '').trim().toUpperCase();
+    if (confirm !== 'RESTART') return res.status(400).json({ ok:false, error:'confirm_required' });
+    logWork('ops.restart.requested', { by: 'ui' });
+    res.json({ ok:true });
+    // restart after response so the browser receives OK
+    setTimeout(() => {
+      try { process.exit(0); } catch {}
+    }, 250);
   } catch (e) {
     return res.status(500).json({ ok:false, error: String(e) });
   }
@@ -2930,7 +2717,7 @@ function appsPageShell({ title, subtitle, bodyHtml, activePath }) {
     input, textarea, select{ background:#0d1426; border:1px solid rgba(255,255,255,0.14); color: var(--text); border-radius: 12px; padding: 10px 12px; font-size: 14px; font-family: inherit; }
   </style>
 </head>
-<body data-wide="${(activePath === '/apps/code') ? '1' : '0'}">
+<body data-wide="${(activePath === '/apps/code' || activePath === '/apps/code2') ? '1' : '0'}">
   <div class="wrap">
     <div class="top">
       <div class="topL">
@@ -3165,7 +2952,7 @@ function renderModulePage(key){
           .ccPanelBody.tight { padding:10px; overflow:hidden; min-height:0; }
           .ccEditor { width:100%; max-width:100%; box-sizing:border-box; height:100%; min-height:0; flex:1; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
           .ccSmall { font-size: 12px; }
-          .ccIframe { width:100%; height: 100%; min-height: 0; border:0; border-radius:12px; background:#0b1020; flex:1; }
+          .ccIframe { width:100%; height: 100%; min-height: 56vh; border:0; border-radius:12px; background:#0b1020; }
           .ccMono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
           .ccGrow { flex:1; min-height:0; }
         </style>
@@ -3212,15 +2999,23 @@ function renderModulePage(key){
           <div class="card ccPanel">
             <div class="ccPanelHead">
               <div style="font-weight:900;">App Preview</div>
-              <div class="row" style="gap:8px; align-items:center; min-width: 0; flex:1; justify-content:flex-end;">
-                <input id="appUrl" class="ccMono" value="/proxy/5000/" style="width:min(680px, 60vw); min-width: 240px; padding:8px 10px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text);" />
+              <div class="row" style="gap:8px; align-items:center;">
+                <select id="appPreset" style="padding:8px 10px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text);">
+                  <option value="/proxy/5000/">localhost:5000 (server)</option>
+                  <option value="/proxy/5001/">localhost:5001 (server)</option>
+                </select>
+                <button class="pill" id="appOpen" type="button">Open</button>
+                <button class="pill" id="codeExpApp" type="button">Expand</button>
+              </div>
+            </div>
+            <div class="ccPanelBody" style="padding-top:8px;">
+              <div class="muted ccSmall">Server-side preview (proxied). This loads the app running on the Console host, not your laptop.</div>
+              <div class="row" style="margin-top:8px; gap:10px; align-items:center; flex-wrap:wrap;">
+                <input id="appUrl" class="ccMono" value="/proxy/5000/" style="flex:1; min-width: 260px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text);" />
                 <button class="pill" id="appGo" type="button">Go</button>
                 <span class="muted ccSmall" id="appMsg"></span>
               </div>
-            </div>
-            <div class="ccPanelBody" style="padding-top:8px; display:flex; flex-direction:column; gap:10px; flex:1; min-height:0;">
-              <div class="muted ccSmall">Server-side preview (proxied). This loads the app running on the Console host, not your laptop.</div>
-              <div style="flex:1; min-height:0;">
+              <div style="margin-top:10px;">
                 <iframe id="appFrame" class="ccIframe" src="/proxy/5000/"></iframe>
               </div>
             </div>
@@ -3288,198 +3083,277 @@ function renderModulePage(key){
       </div>
       <script src="/static/code.js?v=${BUILD}"></script>
     ` },
-    repo: { title:'ClawdRepo', subtitle:'Changelog + commits for this project + useful repo links.', body:`
+
+    code2: { title:'ClawdCode2', subtitle:'FlexCol cockpit (left nav + reorderable panes).', body:`
+      <div style="line-height:1.55; display:flex; flex-direction:column; flex:1; min-height:0; padding-bottom: 12px; box-sizing:border-box;">
+        <style>
+          #cc2Root{ display:flex; flex:1; min-height:0; gap:12px; }
+          #cc2Nav{ width: 320px; max-width: 520px; min-width: 220px; overflow:hidden; transition: width .12s ease; }
+          #cc2Root.navClosed #cc2Nav{ width: 42px; min-width: 42px; }
+          #cc2Root.navClosed #cc2Nav .navOpenOnly{ display:none !important; }
+          #cc2Root.navClosed #cc2Nav .navClosedOnly{ display:flex !important; }
+          #cc2Nav .navClosedOnly{ display:none; flex-direction:column; align-items:center; gap:10px; padding:10px 0; }
+
+          .cc2Dot{ width:8px; height:8px; border-radius:99px; background: rgba(34,198,198,.9); box-shadow: 0 0 0 2px rgba(34,198,198,.18); }
+          .cc2Tri{ appearance:none; border:0; background:transparent; color: rgba(232,238,252,.55); font-weight:900; cursor:pointer; padding:6px; line-height:1; }
+          .cc2Tri:hover{ color: rgba(232,238,252,.78); }
+
+          .cc2ProjIco{ width:28px; height:28px; border-radius:10px; background: rgba(34,198,198,.10); border:1px solid rgba(34,198,198,.35); display:flex; align-items:center; justify-content:center; }
+          .cc2ProjIco svg{ width:18px; height:18px; stroke: rgba(34,198,198,.95); fill:none; stroke-width:2.6; }
+
+          #cc2Main{ flex:1; min-width:0; min-height:0; display:flex; }
+          #cc2Flex{ flex:1; min-width:0; min-height:0; display:flex; overflow:hidden; }
+
+          .pane{ min-height:0; height:100%; display:flex; flex-direction:column; border:1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.04); border-radius:14px; overflow:hidden; }
+          .paneHead{ display:flex; align-items:center; gap:10px; padding:10px 10px 8px 10px; border-bottom:1px solid rgba(255,255,255,0.08); min-width:0; }
+          .paneHead .title{ font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+          .paneHead .spacer{ flex:1; }
+          .paneHead .btn{ border:0; background:transparent; color: rgba(232,238,252,.70); cursor:pointer; padding:6px; line-height:1; }
+          .paneHead .btn:hover{ color: rgba(232,238,252,.92); }
+          .paneHead .btnGroup{ display:flex; gap:2px; align-items:center; }
+          .paneBody{ padding:10px; min-height:0; overflow:auto; }
+          .paneBody.tight{ overflow:hidden; }
+          .paneIcon{ width:18px; height:18px; opacity:.92; display:flex; align-items:center; justify-content:center; }
+          .paneIcon svg{ width:18px; height:18px; stroke: rgba(232,238,252,.82); fill:none; stroke-width:2.4; }
+
+          .resizer{ width:10px; cursor: col-resize; flex: 0 0 10px; position:relative; }
+          .resizer:after{ content:''; position:absolute; left:4px; top:10px; bottom:10px; width:2px; background: rgba(232,238,252,.12); border-radius:99px; }
+          .resizer:hover:after{ background: rgba(232,238,252,.22); }
+
+          .paneCollapsed{ flex: 0 0 54px !important; width:54px !important; }
+          .paneCollapsed .paneBody{ display:none !important; }
+          .paneCollapsed .title{ display:none !important; }
+          .paneCollapsed .btnGroup.move, .paneCollapsed .btnGroup.size{ display:none !important; }
+
+          #pane-appPreview{ --urlCompactMin: 360px; }
+          #pane-appPreview.headCollapsed .appHeadRow{ display:none !important; }
+          #pane-appPreview.urlHidden .appHeadRow{ display:none !important; }
+          #pane-appPreview.urlCompact #appUrl{ width: min(360px, 38vw) !important; }
+        </style>
+
+        <div id="cc2Root">
+          <div class="card" id="cc2Nav" style="padding:12px; display:flex; flex-direction:column; gap:12px; min-height:0;">
+            <div class="navClosedOnly">
+              <button class="cc2Tri" id="cc2NavOpen" title="Open menu">▸</button>
+              <button class="cc2ProjIco" id="cc2NavIcon" title="Open menu" style="cursor:pointer;">${appsIcon('code')}</button>
+              <div class="cc2Dot" title="Status"></div>
+            </div>
+
+            <div class="navOpenOnly" style="display:flex; flex-direction:column; gap:12px; min-height:0;">
+              <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+                <div style="display:flex; gap:10px; align-items:flex-start; min-width:0;">
+                  <div class="cc2ProjIco">${appsIcon('code')}</div>
+                  <div style="min-width:0;">
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                      <div style="font-weight:900;">ClawdCode2</div>
+                      <div class="cc2Dot" title="Status"></div>
+                      <div class="muted" style="font-size:12px;">build ${BUILD}</div>
+                    </div>
+                    <div class="muted" id="cc2Ctx" style="margin-top:4px;">Workspace • Branch • Env</div>
+                  </div>
+                </div>
+                <button class="cc2Tri" id="cc2NavClose" title="Close menu">◂</button>
+              </div>
+
+              <div class="subcard" style="margin:0;">
+                <div class="muted" style="font-weight:900; margin-bottom:6px;">Workspace</div>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                  <select id="hdrWsSel" style="flex:1; min-width: 160px;"></select>
+                  <button class="pill" id="hdrWsAdd" type="button">Add</button>
+                </div>
+                <div class="muted" id="codeMsg" style="margin-top:8px;"></div>
+              </div>
+
+              <div class="subcard" style="margin:0;">
+                <div class="muted" style="font-weight:900; margin-bottom:6px;">Git</div>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                  <select id="hdrGitSel" style="flex:1; min-width: 160px;"><option value="">None</option></select>
+                  <button class="pill" id="hdrGitConnect" type="button">Connect</button>
+                  <button class="pill" id="hdrGitDisc" type="button">Disconnect</button>
+                </div>
+              </div>
+
+              <div class="subcard" style="margin:0; min-height:0; overflow:auto;">
+                <div class="muted" style="font-weight:900; margin-bottom:8px;">Apps</div>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                  <a class="pill" href="/apps" target="_blank" rel="noopener" style="justify-content:flex-start;">ClawdApps</a>
+                  <a class="pill" href="/pm" target="_blank" rel="noopener" style="justify-content:flex-start;">ClawdPM</a>
+                  <a class="pill" href="/apps/script" target="_blank" rel="noopener" style="justify-content:flex-start;">ClawdScript</a>
+                  <a class="pill" href="/name" target="_blank" rel="noopener" style="justify-content:flex-start;">ClawdName</a>
+                  <a class="pill" href="/apps/repo" target="_blank" rel="noopener" style="justify-content:flex-start;">ClawdRepo</a>
+                  <a class="pill" href="/apps/sec" target="_blank" rel="noopener" style="justify-content:flex-start;">ClawdSec</a>
+                  <a class="pill" href="/apps/ops" target="_blank" rel="noopener" style="justify-content:flex-start;">ClawdOps</a>
+                  <a class="pill" href="/apps/pub" target="_blank" rel="noopener" style="justify-content:flex-start;">ClawdPub</a>
+                  <a class="pill" href="/apps/build" target="_blank" rel="noopener" style="justify-content:flex-start;">ClawdBuild</a>
+                  <a class="pill" href="/apps/queue" target="_blank" rel="noopener" style="justify-content:flex-start;">ClawdQueue</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="cc2Main">
+            <div id="cc2Flex">
+              <div class="pane" id="pane-workspace" style="flex: 0 0 360px;">
+                <div class="paneHead">
+                  <div class="paneIcon">${appsIcon('repo')}</div>
+                  <div class="title">Workspace</div>
+                  <div class="spacer"></div>
+                  <div class="btnGroup move"><button class="btn" data-act="left">◁</button><button class="btn" data-act="right">▷</button></div>
+                  <div class="btnGroup size"><button class="btn" data-act="minus">−</button><button class="btn" data-act="plus">+</button></div>
+                  <button class="btn" data-act="collapse">▸</button>
+                </div>
+                <div class="paneBody">
+                  <div class="muted" id="codeCwd" style="font-size:12px; margin-bottom:8px;"></div>
+                  <div id="codeTree" style="min-height:0;"></div>
+                </div>
+              </div>
+
+              <div class="pane" id="pane-filePreview" style="flex: 0 0 520px;">
+                <div class="paneHead">
+                  <div class="paneIcon">${appsIcon('code')}</div>
+                  <div class="title">File Preview</div>
+                  <div class="spacer"></div>
+                  <div class="btnGroup move"><button class="btn" data-act="left">◁</button><button class="btn" data-act="right">▷</button></div>
+                  <div class="btnGroup size"><button class="btn" data-act="minus">−</button><button class="btn" data-act="plus">+</button></div>
+                  <button class="pill" id="codeSave" type="button">Save</button>
+                  <button class="pill" id="codeReload" type="button">Reload</button>
+                  <button class="btn" data-act="collapse">▸</button>
+                </div>
+                <div class="paneBody tight" style="display:flex; flex-direction:column; gap:10px;">
+                  <div class="muted" id="codePath" style="font-size:12px; max-width: 80ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
+                  <div id="codeBlocked" style="display:none; border:1px solid rgba(255,255,255,0.12); border-radius:12px; padding:10px; background: rgba(255,255,255,0.03);"></div>
+                  <textarea id="codeEditor" spellcheck="false" style="flex:1; min-height:0; width:100%; box-sizing:border-box;"></textarea>
+                </div>
+              </div>
+
+              <div class="pane" id="pane-appPreview" style="flex: 1 1 auto; min-width: 360px;">
+                <div class="paneHead">
+                  <div class="paneIcon">${appsIcon('ops')}</div>
+                  <div class="title">App Preview</div>
+                  <div class="spacer"></div>
+                  <div class="btnGroup move"><button class="btn" data-act="left">◁</button><button class="btn" data-act="right">▷</button></div>
+                  <div class="btnGroup size"><button class="btn" data-act="minus">−</button><button class="btn" data-act="plus">+</button></div>
+                  <button class="btn" id="appHeadToggle" title="Collapse header">▾</button>
+                  <button class="btn" data-act="collapse">▸</button>
+                </div>
+                <div class="paneBody" style="padding-top:8px; display:flex; flex-direction:column; gap:10px;">
+                  <div class="appHeadRow" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <input id="appUrl" class="ccMono" value="/proxy/5000/" style="flex: 1 1 320px; min-width: 220px;" />
+                    <button class="pill" id="appGo" type="button">Go</button>
+                    <span class="muted" id="appMsg" style="font-size:12px;"></span>
+                  </div>
+                  <div class="muted" style="font-size:12px;">Server-side preview (proxied). Loads the app running on the Console host.</div>
+                  <div style="flex:1; min-height:0;"><iframe id="appFrame" class="ccIframe" src="/proxy/5000/" style="width:100%; height:100%; min-height:0; border:0; border-radius:12px; background:#0b1020;"></iframe></div>
+                </div>
+              </div>
+
+              <div class="pane" id="pane-chat" style="flex: 0 0 360px;">
+                <div class="paneHead">
+                  <div class="paneIcon">${appsIcon('script')}</div>
+                  <div class="title">Chat</div>
+                  <div class="spacer"></div>
+                  <div class="btnGroup move"><button class="btn" data-act="left">◁</button><button class="btn" data-act="right">▷</button></div>
+                  <div class="btnGroup size"><button class="btn" data-act="minus">−</button><button class="btn" data-act="plus">+</button></div>
+                  <button class="btn" data-act="collapse">▸</button>
+                </div>
+                <div class="paneBody" style="display:flex; flex-direction:column; gap:10px;">
+                  <div class="muted" id="chatMsg" style="font-size:12px;"></div>
+                  <div id="chatLog" style="flex:1; min-height:0; overflow:auto; border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:8px; background: rgba(0,0,0,0.10);"></div>
+                  <textarea id="chatInput" placeholder="Message…" style="width:100%; min-height: 90px; max-height: 180px;"></textarea>
+                  <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                    <button class="pill" id="chatSend" type="button" style="border-color: rgba(154,208,255,0.55);">Send</button>
+                    <button class="pill" id="chatJump" type="button">Jump to latest</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="pane" id="pane-ops" style="flex: 0 0 420px;">
+                <div class="paneHead">
+                  <div class="paneIcon">${appsIcon('queue')}</div>
+                  <div class="title">ClawdList / Work</div>
+                  <div class="spacer"></div>
+                  <div class="btnGroup move"><button class="btn" data-act="left">◁</button><button class="btn" data-act="right">▷</button></div>
+                  <div class="btnGroup size"><button class="btn" data-act="minus">−</button><button class="btn" data-act="plus">+</button></div>
+                  <button class="btn" data-act="collapse">▸</button>
+                </div>
+                <div class="paneBody" style="display:flex; flex-direction:column; gap:12px; min-height:0;">
+                  <div class="card" id="opListCard" style="background: rgba(255,255,255,0.03); overflow:auto; min-height:180px; flex: 1 1 auto;">
+                    <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
+                      <div class="muted" id="deStatus" style="font-size:12px;">Idle</div>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:center; margin-top:10px;">
+                      <button class="pill" id="dePrev" type="button">Prev</button>
+                      <button class="pill" id="deNext" type="button">Next</button>
+                    </div>
+                    <div id="deLists" style="margin-top:10px;"></div>
+                  </div>
+
+                  <div class="card" id="opWorkCard" style="background: rgba(255,255,255,0.03); flex: 0 0 44%; min-height: 220px; display:flex; flex-direction:column;">
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                      <div style="font-weight:900;">ClawdWork</div>
+                      <button id="wlToggle" type="button" class="wlbtn" title="Collapse" style="border:0; background:transparent; color: rgba(232,238,252,.72); padding:6px;">▾</button>
+                      <button class="pill" id="wlAdd" type="button">Add</button>
+                      <button class="pill" id="wlStop" type="button">Stop</button>
+                      <span class="muted" id="wlThinking" style="font-size:12px;">Idle</span>
+                      <span style="flex:1;"></span>
+                      <div class="muted" id="wlMsg" style="font-size:12px;"></div>
+                    </div>
+                    <div id="worklogWrap" style="margin-top:10px; flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column;">
+                      <div id="worklog" style="flex:1; min-height:0; overflow:auto;"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <script src="/static/code2.js?v=${BUILD}"></script>
+    ` },
+
+    repo: { title:'ClawdRepo', subtitle:'Commits for this project + useful repo links.', body:`
       <div class="subcard" style="line-height:1.55;">
         <div class="muted">Local repo: <code>${__dirname}</code></div>
         <div class="muted" style="margin-top:6px;">GitHub: <a href="https://github.com/nwesource01/clawdconsole" target="_blank" rel="noopener">nwesource01/clawdconsole</a></div>
-
-        <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
           <button class="pill" id="repoRefreshBtn" type="button" style="cursor:pointer;">Refresh</button>
-          <span class="muted" id="repoMsg"></span>
         </div>
-
-        <div class="grid" id="repoCards" style="margin-top:12px; grid-template-columns: repeat(5, minmax(0,1fr)); align-items:stretch;"></div>
-
-        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
-          <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
-            <div style="font-weight:900;">Upstream release feed</div>
-            <span class="muted" id="repoUpMsg"></span>
-          </div>
-          <div id="repoUpstream" class="muted" style="margin-top:8px;">Loading…</div>
-        </div>
-
-        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);" id="repoChangelogCard">
-          <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
-            <div style="font-weight:900;">Changelog (last 24h vibes)</div>
-            <button class="pill" id="repoToggleChangelog" type="button">Full Changelog</button>
-          </div>
-          <div id="repoChangelog" class="muted" style="margin-top:8px;">Loading…</div>
-        </div>
-
         <div id="repoCommits" class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);"></div>
-
-        <div id="repoChangelogFull" class="card" style="display:none; margin-top:12px; background: rgba(0,0,0,0.10);">
-          <div style="font-weight:900; margin-bottom:8px;">Full changelog</div>
-          <div id="repoChangelogAll" class="muted">Loading…</div>
-        </div>
       </div>
 
       <script>
       (async () => {
         const box = document.getElementById('repoCommits');
         const btn = document.getElementById('repoRefreshBtn');
-        const msgEl = document.getElementById('repoMsg');
-        const cardsEl = document.getElementById('repoCards');
-        const chEl = document.getElementById('repoChangelog');
-        const upEl = document.getElementById('repoUpstream');
-        const upMsg = document.getElementById('repoUpMsg');
 
-        function esc(s){
-          return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-        }
-        function setMsg(t){ if (msgEl) msgEl.textContent = t || ''; }
-        function setUpMsg(t){ if (upMsg) upMsg.textContent = t || ''; }
-
-        function card(label, value){
-          return '<div class="card" style="background: rgba(255,255,255,0.03); padding:10px;">'
-            + '<div class="muted" style="font-size:12px;">' + esc(label) + '</div>'
-            + '<div style="font-weight:900; font-size:18px; margin-top:4px;">' + esc(value) + '</div>'
-            + '</div>';
-        }
-
-        async function loadCommits(){
+        async function load(){
           if (!box) return;
-          box.innerHTML = '<div class="muted">Loading commits…</div>';
+          box.innerHTML = '<div class="muted">Loading…</div>';
           try {
             const res = await fetch('/api/repo/commits?limit=80', { credentials:'include', cache:'no-store' });
             const j = await res.json();
             const commits = (j && j.ok && Array.isArray(j.commits)) ? j.commits : [];
             if (!commits.length) { box.innerHTML = '<div class="muted">No commits found.</div>'; return; }
-            box.innerHTML = '<div style="font-weight:900; padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08);">Recent commits</div>' + commits.map(c => {
+            box.innerHTML = commits.map(c => {
               const short = String(c.hash||'').slice(0,7);
               const msg = String(c.subject||'');
               const when = String(c.date||'');
-              const refs = c.refs ? ('<span class="muted">(' + esc(String(c.refs)) + ')</span>') : '';
+              const refs = c.refs ? ('<span class="muted">(' + String(c.refs) + ')</span>') : '';
               return '<div style="padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08)">' +
                 '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">' +
-                  '<div><code>' + esc(short) + '</code> ' + refs + '</div>' +
-                  '<div class="muted">' + esc(when) + '</div>' +
+                  '<div><code>' + short + '</code> ' + refs + '</div>' +
+                  '<div class="muted">' + when + '</div>' +
                 '</div>' +
-                '<div style="margin-top:6px;">' + esc(msg) + '</div>' +
+                '<div style="margin-top:6px;">' + msg + '</div>' +
               '</div>';
             }).join('');
-          } catch (e) {
+          } catch {
             box.innerHTML = '<div class="muted">Failed to load commits.</div>';
           }
         }
 
-        async function loadCards(){
-          if (!cardsEl) return;
-          try {
-            const res = await fetch('/api/repo/metrics', { credentials:'include', cache:'no-store' });
-            const j = await res.json();
-            if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
-            cardsEl.innerHTML = [
-              card('Build', j.build || ''),
-              card('Commits (24h)', String(j.commits24h ?? '—')),
-              card('Bridge msgs (24h)', String(j.bridge24h ?? '—')),
-              card('Queue done (24h)', String(j.queueDone24h ?? '—')),
-              card('Worklog events (24h)', String(j.worklog24h ?? '—')),
-            ].join('');
-          } catch {
-            cardsEl.innerHTML = '';
-          }
-        }
-
-        async function loadUpstream(){
-          if (!upEl) return;
-          setUpMsg('');
-          upEl.textContent = 'Loading…';
-          try {
-            const res = await fetch('/api/repo/releases/latest', { credentials:'include', cache:'no-store' });
-            const j = await res.json();
-            if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
-            const latest = j.latest || {};
-            const localBuild = (j.local && j.local.build) ? String(j.local.build) : '';
-            const upBuild = String(latest.build || '');
-            const lvl = String(latest.level || '');
-            const title = String(latest.title || '');
-            const ts = String(latest.ts || '');
-            const url = latest.url ? String(latest.url) : '';
-
-            const status = (upBuild && localBuild && upBuild !== localBuild) ? 'Update available' : 'Up to date';
-            setUpMsg(status);
-
-            upEl.innerHTML = ''
-              + '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:baseline;">'
-              +   '<div><b>Latest:</b> <code>' + esc(upBuild || '—') + '</code></div>'
-              +   (lvl ? ('<div class="muted">level: ' + esc(lvl) + '</div>') : '')
-              +   (ts ? ('<div class="muted">' + esc(ts.slice(0,19).replace('T',' ')) + '</div>') : '')
-              + '</div>'
-              + (title ? ('<div style="margin-top:6px;">' + esc(title) + '</div>') : '')
-              + (url ? ('<div style="margin-top:6px;"><a href="' + esc(url) + '" target="_blank" rel="noopener">Release notes</a></div>') : '');
-          } catch (e) {
-            setUpMsg('');
-            upEl.innerHTML = '<div class="muted">Upstream feed unavailable.</div>';
-          }
-        }
-
-        function renderChangelogInto(el, items, limit){
-          if (!el) return;
-          const arr = Array.isArray(items) ? items : [];
-          if (!arr.length) { el.innerHTML = '<div class="muted">(no entries)</div>'; return; }
-          el.innerHTML = arr.slice(0, limit).map(it => {
-            const title = esc(it.title || 'Changelog');
-            const ts = esc(String(it.ts||'').slice(0,19).replace('T',' '));
-            const body = esc(it.body || '');
-            return '<details style="border-top:1px solid rgba(255,255,255,0.08); padding:10px 8px;">'
-              + '<summary style="cursor:pointer;"><b>' + title + '</b> <span class="muted">' + ts + '</span></summary>'
-              + '<pre style="white-space:pre-wrap; margin:10px 0 0;">' + body + '</pre>'
-              + '</details>';
-          }).join('');
-        }
-
-        async function loadChangelog(){
-          if (chEl) chEl.textContent = 'Loading…';
-          const allEl = document.getElementById('repoChangelogAll');
-          if (allEl) allEl.textContent = 'Loading…';
-          try {
-            const res = await fetch('/api/changelog?limit=200', { credentials:'include', cache:'no-store' });
-            const j = await res.json();
-            const items = (j && j.ok && Array.isArray(j.items)) ? j.items : [];
-            renderChangelogInto(chEl, items, 10);
-            renderChangelogInto(allEl, items, 200);
-          } catch {
-            if (chEl) chEl.innerHTML = '<div class="muted">Failed to load changelog.</div>';
-            if (allEl) allEl.innerHTML = '<div class="muted">Failed to load changelog.</div>';
-          }
-        }
-
-        function wireToggle(){
-          const tBtn = document.getElementById('repoToggleChangelog');
-          const full = document.getElementById('repoChangelogFull');
-          const commits = document.getElementById('repoCommits');
-          if (!tBtn || !full || !commits) return;
-          let on = false;
-          const sync = () => {
-            full.style.display = on ? '' : 'none';
-            commits.style.display = on ? 'none' : '';
-            tBtn.textContent = on ? 'Back to Repo' : 'Full Changelog';
-          };
-          tBtn.addEventListener('click', () => { on = !on; sync(); });
-          sync();
-        }
-
-        async function refreshAll(){
-          setMsg('');
-          setMsg('Refreshing…');
-          await Promise.all([loadCards(), loadUpstream(), loadChangelog(), loadCommits()]);
-          setMsg('');
-        }
-
-        if (btn) btn.addEventListener('click', refreshAll);
-        wireToggle();
-        refreshAll();
+        if (btn) btn.addEventListener('click', load);
+        load();
       })();
       </script>
     ` },
@@ -3554,15 +3428,17 @@ function renderModulePage(key){
     ` },
     ops: { title:'ClawdOps', subtitle:'Questionnaire + Gateway + Codex.', body:`
       <div class="subcard" style="line-height:1.55;">
-        <div class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+        <div class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:10px; align-items:center;">
           <button class="pill" id="opsTabQ" type="button">Questionnaire</button>
           <button class="pill" id="opsTabG" type="button">Gateway</button>
           <button class="pill" id="opsTabC" type="button">Codex</button>
           <button class="pill" id="opsTabClawd" type="button">Clawd</button>
-          <button class="pill" id="opsTabClawdwell" type="button">Clawdwell</button>
-          <button class="pill" id="opsTabBridge" type="button">ClawdBridge</button>
-          <button class="pill" id="opsTabRes" type="button">Resources</button>
-          <button class="pill" id="opsTabUpd" type="button">Updates</button>
+          <span style="flex:1;"></span>
+          <span id="opsHydration" class="muted" title="Auto-state hydration: unknown" style="display:inline-flex; align-items:center; gap:6px; user-select:none;">
+            <span id="opsHydrationIcon" aria-hidden="true" style="font-weight:900;">…</span>
+            <span class="muted" style="font-size:12px;">Auto-state</span>
+          </span>
+          <button class="pill" id="opsRestart" type="button" style="border-color: rgba(255,160,160,0.55);">Restart Console</button>
           <span class="muted" id="opsTabMsg"></span>
         </div>
 
@@ -3676,127 +3552,6 @@ function renderModulePage(key){
             </div>
           </div>
         </div><!-- /opsTabClawdView -->
-
-        <div id="opsTabClawdwellView" style="display:none;">
-          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
-            <div style="font-weight:900; margin-bottom:8px;">Clawdwell Notes</div>
-            <div class="muted" style="margin-bottom:10px;">Running log for the first-run experience (aim: first 100 steps). File-backed in DATA_DIR so it survives code updates.</div>
-
-            <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
-              <button class="pill" id="cwSave" type="button">Save</button>
-              <button class="pill" id="cwReload" type="button">Reload</button>
-              <span class="muted" id="cwMsg"></span>
-            </div>
-
-            <div style="margin-top:12px;">
-              <textarea id="cwNotes" placeholder="# Clawdwell first-run log\n\n- Step 1: ..." style="width:100%; min-height:360px;"></textarea>
-              <div class="muted" style="margin-top:8px;">Saved to: <code>${DATA_DIR}/clawdwell-notes.md</code></div>
-            </div>
-          </div>
-        </div><!-- /opsTabClawdwellView -->
-
-        <div id="opsTabBridgeView" style="display:none;">
-          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
-            <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
-              <div>
-                <div style="font-weight:900;">ClawdBridge</div>
-                <div class="muted" style="margin-top:4px;">Append-only message log for Clawdwell ↔ Clawdio coordination.</div>
-              </div>
-              <div class="row" style="gap:10px; flex-wrap:wrap;">
-                <button class="pill" id="bridgeRefresh" type="button">Refresh</button>
-              </div>
-            </div>
-
-            <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
-              <select id="bridgeDir" class="inp" style="width: 220px;">
-                <option value="inbox">INBOX (from Clawdwell)</option>
-                <option value="outbox">OUTBOX (to Clawdwell)</option>
-              </select>
-              <input id="bridgeSummary" class="inp" placeholder="Summary (optional)" style="flex:1; min-width: 220px;" />
-              <button class="pill" id="bridgePost" type="button">Post</button>
-              <span class="muted" id="bridgeMsg"></span>
-            </div>
-
-            <div style="margin-top:10px;">
-              <textarea id="bridgeText" placeholder="# Message\n\nPaste diffs, findings, and decisions here…" style="width:100%; min-height:180px;"></textarea>
-              <div class="muted" style="margin-top:8px;">Stored in: <code>${DATA_DIR}/bridge-messages.jsonl</code> (append-only)</div>
-            </div>
-
-            <div style="margin-top:12px; font-weight:900;">Recent</div>
-            <div id="bridgeList" style="margin-top:8px; max-height: 55vh; overflow:auto; padding-right:6px;"></div>
-          </div>
-        </div><!-- /opsTabBridgeView -->
-
-        <div id="opsTabResView" style="display:none;">
-          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
-            <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
-              <div>
-                <div style="font-weight:900;">Resources</div>
-                <div class="muted" style="margin-top:4px;">Live snapshot of CPU/RAM/disk + basic alerts.</div>
-              </div>
-              <div class="row" style="gap:10px; flex-wrap:wrap;">
-                <button class="pill" id="resRefresh" type="button">Refresh</button>
-                <span class="muted" id="resMsg"></span>
-              </div>
-            </div>
-
-            <div class="twoCol" style="margin-top:12px;">
-              <div>
-                <div style="font-weight:900; margin-bottom:8px;">Snapshot</div>
-                <pre id="resPre" style="white-space:pre-wrap; word-break:break-word; margin:0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.12); max-height: 45vh; overflow:auto;"></pre>
-              </div>
-              <div>
-                <div style="font-weight:900; margin-bottom:8px;">Alerts</div>
-                <div id="resAlerts" class="muted">(none)</div>
-                <div class="muted" style="margin-top:10px;">Tip: alerts are simple thresholds (90% RAM/disk, high load). We can tune later.</div>
-              </div>
-            </div>
-          </div>
-        </div><!-- /opsTabResView -->
-
-        <div id="opsTabUpdView" style="display:none;">
-          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
-            <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
-              <div>
-                <div style="font-weight:900;">Updates</div>
-                <div class="muted" style="margin-top:4px;">Choose update mode + channel. Auto-update will be gated on snapshots (next step).</div>
-              </div>
-              <div class="row" style="gap:10px; flex-wrap:wrap;">
-                <button class="pill" id="updReload" type="button">Reload</button>
-                <button class="pill" id="updSave" type="button">Save</button>
-                <span class="muted" id="updMsg"></span>
-              </div>
-            </div>
-
-            <div class="twoCol" style="margin-top:12px;">
-              <div>
-                <div style="font-weight:900; margin-bottom:8px;">Settings</div>
-                <div class="field">
-                  <label>Mode</label>
-                  <select id="updMode">
-                    <option value="manual">Manual</option>
-                    <option value="notify">Notify only</option>
-                    <option value="auto">Auto (requires snapshot support)</option>
-                  </select>
-                </div>
-                <div class="field" style="margin-top:10px;">
-                  <label>Max level</label>
-                  <select id="updLevel">
-                    <option value="patch">Patch</option>
-                    <option value="minor">Minor</option>
-                    <option value="major">Major</option>
-                  </select>
-                </div>
-                <div class="muted" style="margin-top:10px;">Upstream feed: <code>https://clawdconsole.com/releases/latest.json</code></div>
-              </div>
-              <div>
-                <div style="font-weight:900; margin-bottom:8px;">Status</div>
-                <div id="updStatus" class="muted">Loading…</div>
-                <pre id="updLatest" style="white-space:pre-wrap; word-break:break-word; margin:10px 0 0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.12); max-height: 40vh; overflow:auto;"></pre>
-              </div>
-            </div>
-          </div>
-        </div><!-- /opsTabUpdView -->
 
       </div>
       <script src="/static/ops.js"></script>
@@ -4225,15 +3980,6 @@ function renderModulePage(key){
         if (cbA) cbA.addEventListener('change', saveAutorun);
         if (btnStop) btnStop.addEventListener('click', stopAutorun);
 
-        // Live refresh via SSE (no manual refresh needed)
-        try {
-          const es = new EventSource('/api/queue/stream');
-          es.addEventListener('pm', () => load());
-          es.addEventListener('queue', () => load());
-          es.addEventListener('hello', () => {});
-          es.onerror = () => { /* ignore; browser will retry */ };
-        } catch {}
-
         load();
       })();
       </script>
@@ -4250,6 +3996,7 @@ function renderModulePage(key){
     script: '/apps/script',
     repo: '/apps/repo',
     code: '/apps/code',
+    code2: '/apps/code2',
     sec: '/apps/sec',
     ops: '/apps/ops',
     pub: '/apps/pub',
@@ -4268,6 +4015,11 @@ app.get('/apps/script', (req,res) => {
 app.get('/apps/code', (req,res) => {
   res.setHeader('Cache-Control', 'no-store');
   const html = renderModulePage('code');
+  res.type('text/html; charset=utf-8').send(html);
+});
+app.get('/apps/code2', (req,res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const html = renderModulePage('code2');
   res.type('text/html; charset=utf-8').send(html);
 });
 app.get('/apps/repo', (req,res) => {
@@ -4465,43 +4217,10 @@ function readQueueState(){
   };
   return readJson(QUEUE_STATE_FILE, fallback);
 }
-// --- Queue live stream (SSE) ---
-// Used by /apps/queue to live-refresh without manual reload.
-const queueSseClients = new Set();
-function queueSseBroadcast(event, data){
-  const payload = { event: String(event||'update'), ts: new Date().toISOString(), data: (data && typeof data === 'object') ? data : { value: data } };
-  const line = 'event: ' + payload.event + '\n' + 'data: ' + JSON.stringify(payload) + '\n\n';
-  for (const res of Array.from(queueSseClients)) {
-    try { res.write(line); } catch { try { queueSseClients.delete(res); } catch {} }
-  }
-}
-
-app.get('/api/queue/stream', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders && res.flushHeaders();
-
-  // hello
-  try { res.write('event: hello\n' + 'data: ' + JSON.stringify({ ts: new Date().toISOString() }) + '\n\n'); } catch {}
-  queueSseClients.add(res);
-
-  const ping = setInterval(() => {
-    try { res.write(': ping\n\n'); } catch {}
-  }, 15000);
-
-  req.on('close', () => {
-    try { clearInterval(ping); } catch {}
-    try { queueSseClients.delete(res); } catch {}
-  });
-});
-
 function writeQueueState(s){
   const out = (s && typeof s === 'object') ? s : readQueueState();
   out.updatedAt = new Date().toISOString();
   writeJson(QUEUE_STATE_FILE, out);
-  // notify queue watchers
-  queueSseBroadcast('queue', { updatedAt: out.updatedAt, selectedColumnId: out.selectedColumnId, autorunEnabled: out.autorunEnabled, currentCardId: out.currentCardId, pendingRunAt: out.pendingRunAt });
   return out;
 }
 
@@ -4509,57 +4228,23 @@ function readPM(){
   const fallback = {
     updatedAt: null,
     columns: [
-      { id: 'get-started', title: 'Get Started', cards: [
-        {
-          id: 'welcome',
-          title: 'Welcome to ClawdPM',
-          body: 'This is a simple board. Click a card to edit details, generate to-dos, and move it through columns.\n\nTip: use + Card to add work, and keep cards as small task-groups.',
-          priority: 'planning',
-          createdAt: new Date().toISOString(),
-          todos: []
-        },
+      { id: 'p0', title: 'Projects', cards: [
+        { id: 'c1', title: 'Clawdbot Clone Spinup', body: 'Spin up a fresh Clawdbot/Moltbot box reliably.', priority: 'high', createdAt: new Date().toISOString() },
+        { id: 'c2', title: 'Clawdbot Install Revision', body: 'Make install easier (target: < 30 minutes, not 6 hours).', priority: 'ultra', createdAt: new Date().toISOString() },
+        { id: 'c3', title: 'Manage ClawdConsole Open Source Branch', body: 'Keep OSS repo clean, reviewed, tagged releases.', priority: 'normal', createdAt: new Date().toISOString() },
+        { id: 'c4', title: 'Test ClawdConsole on New Box (Validation)', body: 'Install + run on a clean box; verify docs + defaults.', priority: 'planning', createdAt: new Date().toISOString() },
       ]},
-      { id: 'p0', title: 'Projects', cards: [] },
       { id: 'p1', title: 'Backlog', cards: [] },
       { id: 'p2', title: 'Doing', cards: [] },
       { id: 'p3', title: 'Done', cards: [] },
     ]
   };
-
-  const pm = readJson(PM_FILE, fallback);
-
-  // Lightweight migration: ensure a leftmost "Get Started" column exists.
-  // If the Welcome card exists under Projects, move it into Get Started.
-  try {
-    pm.columns = Array.isArray(pm.columns) ? pm.columns : [];
-    const hasGetStarted = pm.columns.some(c => c && (String(c.id||'') === 'get-started' || String(c.title||'').toLowerCase() === 'get started'));
-    if (!hasGetStarted) {
-      pm.columns.unshift({ id:'get-started', title:'Get Started', cards: [] });
-    }
-
-    const gs = pm.columns.find(c => c && String(c.id||'') === 'get-started') || pm.columns[0];
-    if (gs) gs.cards = Array.isArray(gs.cards) ? gs.cards : [];
-
-    const proj = pm.columns.find(c => c && (String(c.id||'') === 'p0' || String(c.title||'').toLowerCase() === 'projects'));
-    if (proj) {
-      proj.cards = Array.isArray(proj.cards) ? proj.cards : [];
-      const wi = proj.cards.findIndex(c => c && String(c.id||'') === 'welcome');
-      if (wi >= 0 && gs) {
-        const [welcome] = proj.cards.splice(wi, 1);
-        const already = gs.cards.some(c => c && String(c.id||'') === 'welcome');
-        if (!already) gs.cards.unshift(welcome);
-      }
-    }
-  } catch {}
-
-  return pm;
+  return readJson(PM_FILE, fallback);
 }
 function writePM(pm){
   const out = pm && Array.isArray(pm.columns) ? pm : readPM();
   out.updatedAt = new Date().toISOString();
   writeJson(PM_FILE, out);
-  // notify queue watchers (PM changed)
-  try { queueSseBroadcast('pm', { updatedAt: out.updatedAt, cols: Array.isArray(out.columns) ? out.columns.length : 0 }); } catch {}
   return out;
 }
 
@@ -4706,8 +4391,7 @@ function scheduleQueueAutorun(ms){
       writeQueueState(state2);
 
       // send message into Console as if user requested next task
-      // Mark as automated so ClawdList doesn't ingest it.
-      acceptMessage({ text: queueKickoffMessage(next), attachments: [], meta: { source:'queue', noClawdList:true } });
+      acceptMessage({ text: queueKickoffMessage(next), attachments: [] });
       logWork('queue.autorun.kickoff', { cardId: String(next.id||''), title: String(next.title||''), colId: String(col?.id||'') });
     } catch (e) {
       logWork('queue.autorun.error', { error: String(e) });
@@ -4875,10 +4559,8 @@ app.get('/pm', (req, res) => {
     .box *::-webkit-scrollbar-track, #cm_todos::-webkit-scrollbar-track{ background: rgba(0,0,0,0.18); border-radius: 10px; }
     .pillbtn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 999px; padding:8px 10px; cursor:pointer; font-size:12px}
     .pillbtn:hover{border-color: rgba(34,198,198,.65)}
-
-    /* danger styling shared across pills + buttons */
-    .pillDanger{ border-color: rgba(255,97,97,.45) !important; background: rgba(255,97,97,.10) !important; color: rgba(231,231,231,.92) !important; }
-    .pillDanger:hover{ border-color: rgba(255,97,97,.70) !important; background: rgba(255,97,97,.14) !important; }
+    .pillDanger{ border-color: rgba(255,97,97,.45); background: rgba(255,97,97,.10); }
+    .pillDanger:hover{ border-color: rgba(255,97,97,.70); background: rgba(255,97,97,.14); }
 
     .todo{display:grid; grid-template-columns: auto 1fr auto; gap:8px; align-items:center; padding:8px 10px; border:1px solid rgba(255,255,255,.10); border-radius:12px; background: rgba(255,255,255,.03); margin-top:8px}
     .todo input[type=text]{width:100%; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.10); background:#0d1426; color:var(--text)}
@@ -4893,17 +4575,17 @@ app.get('/pm', (req, res) => {
 </head>
 <body>
   <div class="wrap">
-    <div class="top" style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
-      <div style="min-width: 220px;">
+    <div class="top" style="display:grid; grid-template-columns: auto auto 1fr; gap:12px; align-items:baseline;">
+      <div>
         <h1>ClawdPM</h1>
         <div class="muted small">Cards are task-groups. Click a card to generate + manage to-dos.</div>
         <div class="muted small" id="pm_js_status" style="margin-top:6px;">JS: (loading…)</div>
       </div>
-      <div class="row" style="gap:10px; flex-wrap:wrap; align-items:flex-start; justify-content:flex-end; flex:1; min-width: 260px;">
+      <div style="align-self:start;">
         <button class="btn" id="pmRefresh" type="button">Refresh</button>
-        <div id="pmMenuWrap" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end;">
-          ${appsMenuHtml('/pm')}
-        </div>
+      </div>
+      <div id="pmMenuWrap" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; justify-self:end; width:100%;">
+        ${appsMenuHtml('/pm')}
       </div>
     </div>
 
@@ -5326,7 +5008,7 @@ function consoleBotSay(text) {
 
 gw.pending = new Map(); // id -> {resolve,reject,method}
 
-function gwSendReq(method, params, timeoutMs = 60_000) {
+function gwSendReq(method, params) {
   if (!gw.ws || gw.ws.readyState !== WebSocket.OPEN) {
     const eobj = { message: 'gateway ws not connected' };
     gwLastError = { ts: new Date().toISOString(), message: eobj.message, raw: eobj };
@@ -5338,7 +5020,6 @@ function gwSendReq(method, params, timeoutMs = 60_000) {
   gw.ws.send(JSON.stringify({ type: 'req', id, method, params }));
   return new Promise((resolve, reject) => {
     gw.pending.set(id, { resolve, reject, method, ts: Date.now() });
-    const t = Math.max(1000, Number(timeoutMs) || 60_000);
     setTimeout(() => {
       const p = gw.pending.get(id);
       if (!p) return;
@@ -5348,7 +5029,7 @@ function gwSendReq(method, params, timeoutMs = 60_000) {
       const err = new Error(eobj.message);
       err.raw = eobj;
       reject(err);
-    }, t);
+    }, 60_000);
   });
 }
 
@@ -5458,16 +5139,12 @@ function connectGateway() {
   });
 }
 
-function acceptMessage({ text, attachments, meta }) {
+function acceptMessage({ text, attachments }) {
   const msg = makeMsg({ text, attachments });
-  // lightweight meta for internal sources (not stored in message schema by default)
-  const m = (meta && typeof meta === 'object') ? meta : {};
   appendJsonl(MSG_FILE, msg);
 
   // Dynamic Execution List extraction: if user message contains a 3+ item list.
-  // IMPORTANT: skip automation-originated messages (e.g. Queue kickoff) so ClawdList doesn't explode.
-  const isAutomated = !!m.noClawdList || /\bQUEUE\s+AUTORUN\b/i.test(String(msg.text||''));
-  const items = isAutomated ? null : extractChecklist(msg.text);
+  const items = extractChecklist(msg.text);
   if (items) {
     const state = loadDEState();
     const de = {
@@ -5508,39 +5185,29 @@ function acceptMessage({ text, attachments, meta }) {
 
         logWork('gateway.chat.send', { runId, sessionKey: CONSOLE_SESSION_KEY });
 
-        // Primary reply path is via gateway chat final events (WS).
-        // chat.history is a fallback only (and should not be hammered).
-        const fallbackOnce = async () => {
-          try {
-            if (!runState.inFlight) return;
-            const payload = await gwSendReq('chat.history', { sessionKey: CONSOLE_SESSION_KEY, limit: 50 }, 120_000);
-            const messages = payload?.messages;
-            if (!Array.isArray(messages)) return;
-            const assistants = messages
-              .map(m => (m && m.message) ? m.message : m)
-              .filter(m => m && m.role === 'assistant');
-            const latest = assistants[assistants.length - 1];
-            const txt = extractTextFromGatewayMessage(latest);
-            if (txt) {
-              consoleBotSay(txt);
-              logWork('gateway.reply.posted', { sessionKey: CONSOLE_SESSION_KEY, runId, via: 'history_fallback' });
-              setInFlight(false);
-            }
-          } catch (e) {
-            logWork('gateway.reply.fallback.error', { runId, error: String(e) });
+        // Poll chat.history for the assistant reply
+        const startedAt = Date.now();
+        let lastTxt = '';
+        while (Date.now() - startedAt < 90_000) {
+          await new Promise(r => setTimeout(r, 900));
+          const payload = await gwSendReq('chat.history', { sessionKey: CONSOLE_SESSION_KEY, limit: 50 });
+          const messages = payload?.messages;
+          if (!Array.isArray(messages)) continue;
+          const assistants = messages
+            .map(m => (m && m.message) ? m.message : m)
+            .filter(m => m && m.role === 'assistant');
+          const latest = assistants[assistants.length - 1];
+          const txt = extractTextFromGatewayMessage(latest);
+          if (txt && txt !== lastTxt) {
+            lastTxt = txt;
+            consoleBotSay(txt);
+            logWork('gateway.reply.posted', { sessionKey: CONSOLE_SESSION_KEY, runId });
+            setInFlight(false);
+            return;
           }
-        };
-
-        // give the WS event path a chance to arrive first
-        setTimeout(() => { void fallbackOnce(); }, 4500);
-        // hard-stop: if nothing arrives, clear thinking so the UI doesn't hang forever
-        setTimeout(() => {
-          if (!runState.inFlight) return;
-          logWork('gateway.reply.timeout', { runId });
-          setInFlight(false);
-        }, 150_000);
-
-        return;
+        }
+        logWork('gateway.reply.timeout', { runId });
+        setInFlight(false);
       } catch (e) {
         const detail = (e && e.raw) ? e.raw : (e && e.message) ? e.message : String(e);
         consoleBotSay('Codex/Gateway error:\n' + (typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2)));
@@ -6014,6 +5681,14 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
 
           <div class="ruleItem">
             <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
+              <div class="ruleTitle">Workflow: don’t ask for “yes/no” on numbered choices</div>
+              <div class="ruleChevron">▸</div>
+            </div>
+            <div class="ruleBody">When I present numbered options, stop there. Do not suggest extra alternatives or ask open-ended follow-ups. Charles will reply with the number.</div>
+          </div>
+
+          <div class="ruleItem">
+            <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
               <div class="ruleTitle">URLs: add "open in a new tab/window"</div>
               <div class="ruleChevron">▸</div>
             </div>
@@ -6022,10 +5697,10 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
 
           <div class="ruleItem">
             <div class="ruleHead" role="button" tabindex="0" aria-expanded="false">
-              <div class="ruleTitle">URLs: plain links, one per line</div>
+              <div class="ruleTitle">URLs: plain links only (no parentheses / styling)</div>
               <div class="ruleChevron">▸</div>
             </div>
-            <div class="ruleBody">Prefer plain links (no embed tricks) and one link per line for readability.</div>
+            <div class="ruleBody">Post URLs as plain text, one per line. Do NOT wrap URLs in parentheses/brackets/angle brackets/quotes, and do NOT bold/italicize them. This avoids dead links and makes chat auto-hyperlink reliably.</div>
           </div>
 
           <div class="ruleItem">
@@ -6177,7 +5852,7 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         </div>
 
         <!-- preview moved to ClawdSnap -->
-        <div class="muted" id="debug" style="margin-top: 10px; min-height:18px; height:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>
+        <div class="muted" id="debug" style="margin-top: 10px;"></div>
       </div>
     </div>
 
@@ -6214,11 +5889,14 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
             </div>
           </div>
           <div class="row" style="gap:8px; align-items:center;">
+            <span id="homeHydration" class="muted" title="Auto-state hydration: unknown" style="display:inline-flex; align-items:center; gap:6px; user-select:none;">
+              <span id="homeHydrationIcon" aria-hidden="true" style="font-weight:900;">…</span>
+            </span>
+            <button id="homeRestart" type="button" class="wlbtn" title="Restart Console">Restart</button>
             <button id="btnStop" type="button" style="background:transparent; border:1px solid rgba(255,80,80,0.8);">Stop</button>
             <button id="btnAdd" type="button" style="background:transparent; border:1px solid rgba(80,255,160,0.8);">Add</button>
             <div class="pill" id="thinking">Idle</div>
             <button id="wlToggle" type="button" class="wlbtn" title="Collapse">▾</button>
-            <button id="gwRestart" type="button" class="wlbtn" title="Restart Gateway (if enabled)">Restart</button>
           </div>
         </div>
         <div id="wlBody">

@@ -972,6 +972,16 @@
 
       const bodyHtml = isBot ? renderRichText(m.text || '') : ('<div class="md_txt">' + linkify(esc(m.text || '')).replace(/\n/g,'<br>') + '</div>');
 
+      // If the assistant signals caught-up, flip the local indicator green.
+      if (isBot) {
+        const t = String(m.text || '');
+        if (/^\s*CAUGHT_UP_OK\s*$/m.test(t)) {
+          setCaughtUpOk();
+          // update icon immediately (don't wait for the polling interval)
+          try { refreshHomeHydration(); } catch {}
+        }
+      }
+
       const msgId = (m && m.id) ? String(m.id) : '';
       const msgRef = msgId ? ('<span class="msgref" title="Click to paste message id" data-msgid="' + esc(msgId) + '">Msg ID</span>') : '';
       const pmRef = msgId ? ('<span class="msgpm" title="Send this message to ClawdPM" data-pm-msgid="' + esc(msgId) + '">Send to ClawdPM</span>') : '';
@@ -1337,6 +1347,68 @@
   // Stop/Add/Restart buttons
   const btnStop = document.getElementById('btnStop');
   const btnAdd = document.getElementById('btnAdd');
+  const homeRestart = document.getElementById('homeRestart');
+  const homeHydWrap = document.getElementById('homeHydration');
+  const homeHydIcon = document.getElementById('homeHydrationIcon');
+
+  function getCaughtUp(){
+    try {
+      const ok = localStorage.getItem('cc_caught_up_ok') === '1';
+      const at = localStorage.getItem('cc_caught_up_at') || '';
+      return { ok, at };
+    } catch {
+      return { ok:false, at:'' };
+    }
+  }
+
+  function setCaughtUpOk(){
+    try {
+      localStorage.setItem('cc_caught_up_ok', '1');
+      localStorage.setItem('cc_caught_up_at', new Date().toISOString());
+    } catch {}
+  }
+
+  function clearCaughtUp(){
+    try {
+      localStorage.removeItem('cc_caught_up_ok');
+      localStorage.removeItem('cc_caught_up_at');
+    } catch {}
+  }
+
+  async function refreshHomeHydration(){
+    if (!homeHydWrap || !homeHydIcon) return;
+    const st = getCaughtUp();
+    homeHydIcon.textContent = st.ok ? '✔' : '✖';
+    homeHydIcon.style.color = st.ok ? 'rgba(80,220,140,0.95)' : 'rgba(255,120,120,0.95)';
+    homeHydWrap.title = st.ok
+      ? ('AI is caught up. (Saw CAUGHT_UP_OK)\nAt: ' + (st.at || '—'))
+      : 'AI is not caught up yet. Use Catch Up and wait for CAUGHT_UP_OK.';
+  }
+
+  if (homeRestart) {
+    homeRestart.addEventListener('click', async () => {
+      const ok = prompt('Type RESTART to restart the Console service:');
+      if (String(ok || '').trim().toUpperCase() !== 'RESTART') return;
+      clearCaughtUp();
+      try { refreshHomeHydration(); } catch {}
+      homeRestart.disabled = true;
+      try {
+        await fetch(apiUrl('/api/ops/restart'), {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          credentials:'include',
+          cache:'no-store',
+          body: JSON.stringify({ confirm:'RESTART' })
+        });
+      } catch {}
+      // Page will likely drop; re-enable after a moment in case it doesn't.
+      setTimeout(() => { try { homeRestart.disabled = false; } catch {} }, 5000);
+    });
+  }
+
+  refreshHomeHydration();
+  setInterval(() => { try { refreshHomeHydration(); } catch {} }, 5000);
+
   if (btnStop) {
     btnStop.addEventListener('click', async () => {
       // Stop should also clear the thinking UI optimistically.
@@ -1599,55 +1671,20 @@
     return sendMessageWsOrHttp(text, atts).then(refresh);
   }
 
-  // Two-stage click protection (prevents accidental sends)
-  function twoStage(btn, action, opts = {}) {
-    if (!btn) return;
-    const label = btn.textContent;
-    const armedLabel = opts.armedLabel || ('Confirm ' + label);
-    const timeoutMs = Number(opts.timeoutMs || 5000);
+  // Insert-only buttons should be one-click (no confirmation).
 
-    let armed = false;
-    let t = null;
-
-    function disarm() {
-      armed = false;
-      if (t) { clearTimeout(t); t = null; }
-      btn.textContent = label;
-      btn.classList.remove('armed');
-    }
-
-    btn.addEventListener('click', async () => {
-      if (!armed) {
-        armed = true;
-        btn.textContent = armedLabel;
-        btn.classList.add('armed');
-        if (t) clearTimeout(t);
-        t = setTimeout(disarm, timeoutMs);
-        return;
-      }
-
-      disarm();
-      await action();
-    });
-
-    // allow right-click to disarm quickly
-    btn.addEventListener('contextmenu', (e) => {
-      if (armed) { e.preventDefault(); disarm(); }
-    });
-  }
-
-  // Plan button (two-stage): inserts PLAN MODE prefix (does not send)
+  // Plan button: inserts PLAN MODE prefix (does not send)
   const planBtn = document.getElementById('plan');
-  twoStage(planBtn, async () => {
+  if (planBtn) planBtn.addEventListener('click', () => {
     if (!ta) return;
     const cur = ta.value || '';
     if (!/^PLAN MODE\n/.test(cur)) ta.value = 'PLAN MODE\n' + cur;
     ta.focus();
-  }, { armedLabel: 'Insert Plan' });
+  });
 
-  // Iterate button (two-stage): appends the iterative authorization block (does not send)
+  // Iterate button: appends the iterative authorization block (does not send)
   const iterateBtn = document.getElementById('iterate');
-  twoStage(iterateBtn, async () => {
+  if (iterateBtn) iterateBtn.addEventListener('click', () => {
     if (!ta) return;
     const cur = String(ta.value || '');
     if (/^ITERATIVE MODE \(AUTHORIZED\)/m.test(cur)) { ta.focus(); return; }
@@ -1669,65 +1706,74 @@
 
     ta.value = (cur.replace(/\s*$/,'') + '\n\n' + block + '\n');
     ta.focus();
-  }, { armedLabel: 'Insert Iterate' });
+  });
 
-  // Send button (two-stage)
+  // Send button: single-click send (the explicit second step)
   if (sendBtn) {
     try { sendBtn.removeEventListener('click', sendMessage); } catch {}
-    twoStage(sendBtn, async () => {
-      const text = ta ? ta.value : '';
-      const atts = pendingAttachments;
-      pendingAttachments = [];
-      renderPreview();
-      if (ta) ta.value = '';
-      await sendMessageWsOrHttp(text, atts);
-      await refresh();
-    }, { armedLabel: 'Confirm Send' });
+    sendBtn.addEventListener('click', sendMessage);
   }
 
-  // Enter-to-send is allowed (matches transcript behavior). Shift+Enter inserts newline.
+  // Enter-to-send is enabled. Shift+Enter inserts newline.
   if (ta) {
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        const text = ta.value;
-        const atts = pendingAttachments;
-        pendingAttachments = [];
-        renderPreview();
-        ta.value = '';
-        sendMessageWsOrHttp(text, atts).then(refresh);
+        sendMessage();
       }
     });
   }
 
   // Quick action buttons
   const btnCatchUp = document.getElementById('btnCatchUp');
-  twoStage(btnCatchUp, async () => {
+  if (btnCatchUp) btnCatchUp.addEventListener('click', () => {
     if (!ta) return;
     // Per transcript: Catch up inserts a prompt so user can decide before sending.
-    const insert = 'Catch up: Please give me a concise recap of what happened most recently, what is currently in-progress, and what you think the next 3 actions should be.';
+    const insert = [
+      'Catch up:',
+      '1) First, read the Console AUTO-STATE file: /home/master/clawd/console-data/auto-state.md',
+      '2) Also read the key workspace memory files (when available):',
+      '   - /home/master/clawd/MEMORY.md',
+      '   - /home/master/clawd/notes.md',
+      '   - /home/master/clawd/AGENTS.md',
+      '   - /home/master/clawd/SOUL.md',
+      '   - /home/master/clawd/memory/url-formatting-rule.md',
+      '   - /home/master/clawd/memory/clawd-rules.md',
+      '3) Then skim recent transcript entries — it contains our full operating history.',
+      '',
+      'Rules:',
+      '- Do NOT paste the file contents back to me; just confirm you read them.',
+      '',
+      'After you have ingested the above, reply with:',
+      '- a concise recap of what happened most recently',
+      '- what is currently in progress',
+      '- the next 3 actions you recommend',
+      '',
+      'Finally, output exactly this token on its own line:',
+      'CAUGHT_UP_OK'
+    ].join('\n');
     const cur = ta.value || '';
     ta.value = insert + (cur ? ('\n\n' + cur) : '');
     ta.focus();
-  }, { armedLabel: 'Insert Catch Up' });
+  });
 
   const btnRecent = document.getElementById('btnReviewRecent');
-  twoStage(btnRecent, async () => {
+  if (btnRecent) btnRecent.addEventListener('click', () => {
     if (!ta) return;
     const insert = 'Review Recent: Please review the last 100 messages from *me* in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.';
     const cur = ta.value || '';
     ta.value = insert + (cur ? ('\n\n' + cur) : '');
     ta.focus();
-  }, { armedLabel: 'Insert Review Recent' });
+  });
 
   const btnWeek = document.getElementById('btnReviewWeek');
-  twoStage(btnWeek, async () => {
+  if (btnWeek) btnWeek.addEventListener('click', () => {
     if (!ta) return;
     const insert = 'Review Week: Please review all messages from the last 7 days in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.';
     const cur = ta.value || '';
     ta.value = insert + (cur ? ('\n\n' + cur) : '');
     ta.focus();
-  }, { armedLabel: 'Insert Review Week' });
+  });
 
   // Repeat Last: copy your most recent message back into the textarea (no send).
   const btnRepeat = document.getElementById('btnRepeatLast');
@@ -1744,9 +1790,9 @@
     });
   }
 
-  // GitCommit (two-stage): inserts an instruction into composer; user still hits Send to execute.
+  // GitCommit: inserts an instruction into composer; user still hits Send to execute.
   const btnGitCommit = document.getElementById('btnGitCommit');
-  twoStage(btnGitCommit, async () => {
+  if (btnGitCommit) btnGitCommit.addEventListener('click', () => {
     if (!ta) return;
     const insert = [
       'GitCommit: Please commit the current changes in /home/master/clawd/apps/console.',
@@ -1756,7 +1802,7 @@
     const cur = ta.value || '';
     ta.value = insert + (cur ? ('\n\n' + cur) : '');
     ta.focus();
-  }, { armedLabel: 'Insert GitCommit' });
+  });
 
   function initRulesAccordion() {
     const heads = Array.from(document.querySelectorAll('.ruleHead'));

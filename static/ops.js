@@ -7,6 +7,9 @@
   const btnCommit = $('opsCommit');
   const btnTemplate = $('opsTemplate');
   const btnRepeat = $('opsRepeat');
+  const btnRestart = $('opsRestart');
+  const hydWrap = $('opsHydration');
+  const hydIcon = $('opsHydrationIcon');
   const list = $('opsRepeated');
 
   function setMsg(t){ if (msg) msg.textContent = t || ''; }
@@ -130,6 +133,26 @@
   if (btnTemplate) btnTemplate.addEventListener('click', insertTemplate);
   if (btnRepeat) btnRepeat.addEventListener('click', loadRepeated);
 
+  if (btnRestart) btnRestart.addEventListener('click', async () => {
+    const ok = prompt('Type RESTART to restart the Console service:');
+    if (String(ok || '').trim().toUpperCase() !== 'RESTART') return;
+    setMsg('Restarting…');
+    try {
+      const res = await fetch('/api/ops/restart', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        cache:'no-store',
+        body: JSON.stringify({ confirm: 'RESTART' })
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+      setMsg('Restart requested. Reconnect in ~3–10s…');
+    } catch (e) {
+      setMsg('Restart failed: ' + String(e));
+    }
+  });
+
   // --- tabs ---
   const tabQ = $('opsTabQ');
   const tabG = $('opsTabG');
@@ -183,9 +206,27 @@
   // default
   showTab('q');
 
+  async function refreshHydration(){
+    if (!hydWrap || !hydIcon) return;
+    let ok = false;
+    let at = '';
+    try {
+      ok = localStorage.getItem('cc_caught_up_ok') === '1';
+      at = localStorage.getItem('cc_caught_up_at') || '';
+    } catch {}
+
+    hydIcon.textContent = ok ? '✔' : '✖';
+    hydIcon.style.color = ok ? 'rgba(80,220,140,0.95)' : 'rgba(255,120,120,0.95)';
+    hydWrap.title = ok
+      ? ('AI is caught up. (Saw CAUGHT_UP_OK)\nAt: ' + (at || '—'))
+      : 'AI is not caught up yet. Use Catch Up and wait for CAUGHT_UP_OK.';
+  }
+
   // initial loads
   loadBrand();
   loadClawdwellNotes();
+  refreshHydration();
+  setInterval(() => { try { refreshHydration(); } catch {} }, 5000);
   // Bridge is loaded on demand when tab is opened, but we also poll for a "new" indicator.
   setInterval(() => { try { loadBridge({ silent:true }); } catch {} }, 8000);
 

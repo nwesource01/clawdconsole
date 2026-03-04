@@ -92,19 +92,22 @@
     const roleKey = item.r || '';
     const text = item.x || '';
     const atts = Array.isArray(item.a) ? item.a : [];
+    const mid = String(item.i || item.id || '').trim();
 
     const speaker = (roleKey === 'assistant') ? AGENT_NAME : USER_NAME;
     const speakerClass = (roleKey === 'assistant') ? 't_agent' : 't_user';
 
     const div = document.createElement('div');
     div.className = 't_row';
+    if (mid) div.setAttribute('data-mid', mid);
 
     const top = document.createElement('div');
     top.className = 't_top';
 
     const meta = document.createElement('div');
     meta.className = 't_meta';
-    meta.innerHTML = '<span class="t_ts">' + esc(fmtTs(ts)) + '</span> — <span class="' + speakerClass + '">' + esc(speaker) + '</span>';
+    const midShort = mid ? mid.slice(0, 14) : '';
+    meta.innerHTML = '<span class="t_ts">' + esc(fmtTs(ts)) + '</span> — <span class="' + speakerClass + '">' + esc(speaker) + '</span>' + (midShort ? (' <span class="muted">·</span> <code title="Message ID">' + esc(midShort) + '</code>') : '');
 
     const actions = document.createElement('div');
     actions.className = 't_actions';
@@ -142,35 +145,52 @@
       actions.appendChild(btnList);
     }
 
+    async function withStatus(label, fn){
+      const prev = statusEl ? statusEl.textContent : '';
+      try {
+        if (statusEl) statusEl.textContent = label + '…';
+        await fn();
+        if (statusEl) statusEl.textContent = label + ' ✓';
+        setTimeout(() => { if (statusEl) statusEl.textContent = prev; }, 900);
+      } catch (e) {
+        if (statusEl) statusEl.textContent = label + ' failed: ' + String(e);
+        throw e;
+      }
+    }
+
     const btnDiscuss = document.createElement('button');
     btnDiscuss.textContent = 'Discuss';
     btnDiscuss.addEventListener('click', async () => {
-      const msg = `Discuss transcript item:\n[${ts}] (${role})\n${text}`;
-      await sendToChat(msg);
+      const msgIdLine = mid ? ('Message ID: ' + mid + '\n') : '';
+      const msg = `Discuss transcript item:\n${msgIdLine}[${ts}] (${roleKey})\n${text}`;
+      await withStatus('Sent to chat', () => sendToChat(msg));
     });
 
     const btnReview = document.createElement('button');
     btnReview.textContent = 'Review';
     btnReview.addEventListener('click', async () => {
-      const msg = `Review this transcript item and tell me if it contains an uncompleted request/task, and what the next action should be. Do not take action yet.\n\n[${ts}] (${role})\n${text}`;
-      await sendToChat(msg);
+      const msgIdLine = mid ? ('Message ID: ' + mid + '\n') : '';
+      const msg = `Review this transcript item and tell me if it contains an uncompleted request/task, and what the next action should be. Do not take action yet.\n\n${msgIdLine}[${ts}] (${roleKey})\n${text}`;
+      await withStatus('Sent to chat', () => sendToChat(msg));
     });
 
     const btnCopy = document.createElement('button');
     btnCopy.textContent = 'Copy';
     btnCopy.addEventListener('click', async () => {
-      const s = `[${ts}] (${role}) ${text}`;
-      try {
-        await navigator.clipboard.writeText(s);
-      } catch {
-        // fallback
-        const ta = document.createElement('textarea');
-        ta.value = s;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        ta.remove();
-      }
+      const msgIdLine = mid ? (' id=' + mid) : '';
+      const s = `[${ts}] (${roleKey})${msgIdLine} ${text}`;
+      await withStatus('Copied', async () => {
+        try {
+          await navigator.clipboard.writeText(s);
+        } catch {
+          const ta = document.createElement('textarea');
+          ta.value = s;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+      });
     });
 
     actions.appendChild(btnDiscuss);

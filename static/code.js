@@ -27,10 +27,13 @@
   // layout expand
   const ideEl = $('ccIde');
   const btnExpFile = $('codeExpFile');
+  const btnExpApp = $('codeExpApp');
 
   // --- App preview ---
+  const appPreset = $('appPreset');
   const appUrl = $('appUrl');
   const appGo = $('appGo');
+  const appOpen = $('appOpen');
   const appFrame = $('appFrame');
   const appMsg = $('appMsg');
 
@@ -408,7 +411,11 @@
     const on = ideEl.classList.contains('exp-file');
     setExpand(on ? '' : 'file');
   });
-  // App preview expand button removed (more vertical space).
+  if (btnExpApp) btnExpApp.addEventListener('click', () => {
+    if (!ideEl) return;
+    const on = ideEl.classList.contains('exp-app');
+    setExpand(on ? '' : 'app');
+  });
 
   if (wsToggle) wsToggle.addEventListener('click', () => toggleCollapse('ws'));
   if (fileToggle) fileToggle.addEventListener('click', () => toggleCollapse('file'));
@@ -432,26 +439,21 @@
     return url;
   }
 
-  const LS_APPURL = 'cc_code_app_url_v1';
-
   function applyAppUrl(u){
     const url = normalizePreviewUrl(u);
     if (!url) return;
     if (appUrl) appUrl.value = url;
     if (appFrame) appFrame.src = url;
     setAppMsg('Loading…');
-    try { localStorage.setItem(LS_APPURL, url); } catch {}
   }
 
-  // restore last used preview URL
-  try {
-    const last = localStorage.getItem(LS_APPURL) || '';
-    if (last && appUrl) appUrl.value = last;
-    if (last && appFrame) appFrame.src = normalizePreviewUrl(last);
-  } catch {}
-
+  if (appPreset) appPreset.addEventListener('change', () => applyAppUrl(appPreset.value));
   if (appGo) appGo.addEventListener('click', () => applyAppUrl(appUrl && appUrl.value));
-  if (appUrl) appUrl.addEventListener('change', () => applyAppUrl(appUrl.value));
+  if (appOpen) appOpen.addEventListener('click', () => {
+    const url = normalizePreviewUrl(appUrl && appUrl.value);
+    if (!url) return;
+    window.open(url, '_blank', 'noopener');
+  });
   if (appFrame) {
     appFrame.addEventListener('load', () => setAppMsg(''));
     appFrame.addEventListener('error', () => setAppMsg('Failed to load.'));
@@ -530,10 +532,9 @@
 
   if (chatSend) chatSend.addEventListener('click', sendChat);
   if (chatJump) chatJump.addEventListener('click', scrollChatBottom);
-  // Enter-to-send in ClawdCode chat column. Shift+Enter inserts newline.
   if (chatInput) {
     chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         sendChat();
       }

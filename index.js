@@ -6556,6 +6556,9 @@ app.get('/', (req, res) => {
     *::-webkit-scrollbar-thumb:hover { background: rgba(154,208,255,0.40); }
     a { color: var(--accent); }
 
+    /* Normalize card title sizes (ClawdApps/Rules/Tools/ReadMe/List/Work/etc) */
+    h2 { font-size: 14px; font-weight: 900; letter-spacing: 0.2px; }
+
     .scriptBtn{
       display:inline-flex;
       align-items:center;
@@ -6827,8 +6830,7 @@ app.get('/', (req, res) => {
           </button>
         </div>
         <div class="pill" id="status" style="margin-top: 10px;">Connecting…</div>
-        <div class="muted" style="margin-top: 8px;">Build: <code>${BUILD}</code></div>
-        <div class="muted" style="margin-top: 6px;">(If UI looks stale, hard refresh. Build is server-tracked.)</div>
+        <div class="muted" style="margin-top: 8px;">Build: <code title="If UI looks stale, hard refresh. Build is server-tracked.">${BUILD}</code></div>
         <div class="muted" style="margin-top: 10px; display:flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
           <span>Storage: <code>${DATA_DIR}</code></span>
           <div class="row" style="gap:8px; justify-content:flex-end;"><a class="scriptBtn" href="/transcript" target="_blank" rel="noopener">ClawdScript - View Entire Chat</a></div>

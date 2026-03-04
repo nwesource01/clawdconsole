@@ -5704,13 +5704,13 @@ app.get('/', (req, res) => {
     .statusline { display:flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
     .pill { border: 1px solid var(--border); background: #0d1426; border-radius: 999px; padding: 6px 10px; font-size: 12px; color: var(--muted); }
 
-    /* Rules accordion */
+    /* Rules accordion (tight + no bold titles) */
     .ruleItem { border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; background: rgba(255,255,255,0.03); overflow:hidden; }
-    .ruleHead { width:100%; display:flex; justify-content: space-between; gap: 10px; align-items:center; padding: 10px 12px; cursor:pointer; user-select:none; }
+    .ruleHead { width:100%; display:flex; justify-content: space-between; gap: 10px; align-items:center; padding: 8px 10px; cursor:pointer; user-select:none; }
     .ruleHead:hover { background: rgba(255,255,255,0.04); }
-    .ruleTitle { font-weight: 750; font-size: 14px; color: rgba(231,231,231,0.92); }
+    .ruleTitle { font-weight: 500; font-size: 13px; color: rgba(231,231,231,0.92); }
     .ruleChevron { color: rgba(231,231,231,0.6); font-size: 12px; }
-    .ruleBody { display:none; padding: 0 12px 12px 12px; color: rgba(231,231,231,0.82); font-size: 13px; line-height: 1.55; }
+    .ruleBody { display:none; padding: 0 10px 10px 10px; color: rgba(231,231,231,0.82); font-size: 13px; line-height: 1.5; }
     .ruleBody.open { display:block; }
 
     /* Prevent forced scroll-to-bottom: user controls reading position */
@@ -5866,10 +5866,10 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
 
         <div id="rulesBody" style="margin-top:10px;">
           <div class="muted" style="margin-bottom: 10px;">Operator heaven: small rules that prevent repeat questions. (Pulled from <code>ClawdRules.md</code>)</div>
-          <div id="rulesList" style="display:flex; flex-direction:column; gap:10px;">
+          <div id="rulesList" style="display:flex; flex-direction:column; gap:8px;">
             <div class="muted">Loading rules…</div>
           </div>
-          <div class="muted" style="margin-top:10px;">Add rules by saying: <code>rule - ...</code></div>
+          <div class="muted" style="margin-top:8px;">Add rules by saying: <code>rule - ...</code></div>
         </div> <!-- /rulesBody -->
       </div>
 

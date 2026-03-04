@@ -6453,11 +6453,11 @@ app.get('/', (req, res) => {
     #debug{ margin-top: 4px !important; }
 
     /* Composer textarea: shorter by default (closer to pre-mic) */
-    #msg { width: 100%; height: 120px; min-height: 120px; max-height: 240px; overflow:auto; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
+    #msg { width: 100%; height: 120px; min-height: 120px; max-height: 240px; overflow:auto; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); /* visually narrow by ~20px */ margin-right: 20px; }
 
     /* Action buttons: tighter + uniform */
     #mic,#plan,#send,#iterate{ height: 36px; padding: 6px 10px; font-size: 13px; white-space: nowrap; }
-    #mic{ font-size: 15px; padding: 6px 0; width: 44px; }
+    #mic{ font-size: 15px; padding: 6px 10px; width: auto; }
     #micStatus{ font-size:12px; min-height: 16px; }
     /* #pasteHint removed (replaced by ClawdSnap) */
     .preview { display:flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }

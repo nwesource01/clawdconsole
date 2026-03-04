@@ -2780,9 +2780,9 @@ app.get('/api/ops/secret/status', (req, res) => {
 });
 
 app.post('/api/ops/secret/store', express.json({ limit: '50kb' }), (req, res) => {
+  // These endpoints are already behind the global auth middleware.
+  // Do NOT require session cookie here; basic-auth users should be able to use it immediately.
   res.setHeader('Cache-Control', 'no-store');
-  const sess = getSessionFromReq(req);
-  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
   const v = String(req.body?.value || '').trim();
   if (!v) return res.status(400).json({ ok:false, error:'empty' });
   if (v.length > 8000) return res.status(400).json({ ok:false, error:'too_large' });
@@ -2793,8 +2793,6 @@ app.post('/api/ops/secret/store', express.json({ limit: '50kb' }), (req, res) =>
 
 app.post('/api/ops/secret/clear', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  const sess = getSessionFromReq(req);
-  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
   secretClear();
   logWork('secret.cleared', {});
   res.json({ ok:true });
@@ -2802,8 +2800,6 @@ app.post('/api/ops/secret/clear', (req, res) => {
 
 app.post('/api/ops/secret/apply/together', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  const sess = getSessionFromReq(req);
-  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
   if (!secretPresent()) return res.status(400).json({ ok:false, error:'no_secret' });
   const next = writeTogetherCfg({ apiKey: secretBox.value });
   secretClear();

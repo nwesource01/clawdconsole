@@ -4541,7 +4541,7 @@ function renderModulePage(key){
                 return '<div style="border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; background: rgba(255,255,255,0.03);">'
                   + '<div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline; flex-wrap:wrap;">'
                   + '<div style="font-weight:900;">' + esc(b.title) + '</div>'
-                  + '<button class="pill" type="button" data-copy="' + copy + '">Copy</button>'
+                  + '<button class="pill" type="button" data-copyj="' + esc(JSON.stringify(raw)).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '">Copy</button>'
                   + '</div>'
                   + '<pre style="margin-top:8px; white-space:pre-wrap;"><code>' + code + '</code></pre>'
                   + '</div>';

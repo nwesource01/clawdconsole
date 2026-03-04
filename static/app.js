@@ -898,7 +898,7 @@
         html += '<div class="md_code">'
           + '<div class="md_codebar">'
           +   '<span class="muted">Command</span>'
-          +   '<button type="button" class="md_copy" data-copy="' + codeEsc.replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '">Copy</button>'
+          +   '<button type="button" class="md_copy" data-copyj="' + esc(JSON.stringify(codeRaw)).replace(/"/g,'&quot;') + '">Copy</button>'
           + '</div>'
           + '<pre><code>' + codeEsc + '</code></pre>'
           + '</div>';
@@ -915,9 +915,23 @@
       if (btn.dataset.wired === '1') return;
       btn.dataset.wired = '1';
       btn.addEventListener('click', async () => {
-        const txt = btn.getAttribute('data-copy') || '';
+        let txt = '';
+        const cj = btn.getAttribute('data-copyj');
+        if (cj) {
+          try { txt = JSON.parse(cj); } catch { txt = ''; }
+        } else {
+          // legacy
+          txt = btn.getAttribute('data-copy') || '';
+          // decode HTML entities safely
+          try {
+            const ta = document.createElement('textarea');
+            ta.innerHTML = txt;
+            txt = ta.value;
+          } catch {}
+        }
+
         try {
-          await navigator.clipboard.writeText(txt.replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>'));
+          await navigator.clipboard.writeText(String(txt || ''));
           btn.textContent = 'Copied';
           setTimeout(() => (btn.textContent = 'Copy'), 900);
         } catch {

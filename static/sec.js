@@ -5,9 +5,20 @@
       if (btn.dataset.wired === '1') return;
       btn.dataset.wired = '1';
       btn.addEventListener('click', async () => {
-        const txt = btn.getAttribute('data-copy') || '';
+        let txt = '';
+        const cj = btn.getAttribute('data-copyj');
+        if (cj) {
+          try { txt = JSON.parse(cj); } catch { txt = ''; }
+        } else {
+          txt = btn.getAttribute('data-copy') || '';
+          try {
+            const ta = document.createElement('textarea');
+            ta.innerHTML = txt;
+            txt = ta.value;
+          } catch {}
+        }
         try {
-          await navigator.clipboard.writeText(txt);
+          await navigator.clipboard.writeText(String(txt || ''));
           const old = btn.textContent;
           btn.textContent = 'Copied';
           setTimeout(() => (btn.textContent = old), 900);

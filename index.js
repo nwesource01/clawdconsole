@@ -1161,6 +1161,7 @@ app.post('/api/ops/codex/reconnect', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const sess = getSessionFromReq(req);
   if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  logAction('gateway.reconnect', { url: GATEWAY_WS_URL, sessionKey: CONSOLE_SESSION_KEY });
   try { gw.ws && gw.ws.close && gw.ws.close(); } catch {}
   setTimeout(connectGateway, 50);
   logWork('ops.codex.reconnect', {});
@@ -1255,6 +1256,7 @@ app.post('/api/ops/ui-theme', express.json({ limit: '50kb' }), (req, res) => {
   }
   if (anim) patch.anim = anim.slice(0, 16);
 
+  logAction('ui.theme.save', { preset: patch.preset || '(unchanged)', anim: patch.anim || '(unchanged)' });
   const next = writeUiTheme(patch);
   if (!next) return res.status(500).json({ ok:false, error:'write_failed' });
   logWork('ui.theme.saved', { preset: next.preset, anim: next.anim, overlayAlpha: next.overlayAlpha });
@@ -6255,6 +6257,8 @@ app.post('/api/ops/bridge/pair', express.json({ limit:'50kb' }), (req, res) => {
   const peerUrl = String(req.body?.peerUrl || '').trim();
   const peerToken = String(req.body?.peerToken || '').trim();
 
+  logAction('bridge.pair', { hasToken: !!token, hasPeerUrl: !!peerUrl, hasPeerToken: !!peerToken });
+
   if (token) {
     const ok = writeBridgeTokenFile(token);
     if (!ok) return res.status(500).json({ ok:false, error:'write_token_failed' });
@@ -6269,6 +6273,7 @@ app.post('/api/ops/bridge/pair', express.json({ limit:'50kb' }), (req, res) => {
   }
 
   logWork('bridge.paired', { hasToken: !!readBridgeToken(), peerUrl: (readBridgePeer().url || '') });
+  logAction('bridge.paired', { peerUrl: (readBridgePeer().url || '') });
   res.json({ ok:true });
 });
 
@@ -6280,13 +6285,20 @@ app.post('/api/ops/bridge/test-peer', express.json({ limit:'20kb' }), async (req
   if (!url) return res.status(400).json({ ok:false, error:'no_peer_url' });
   if (!tok) return res.status(400).json({ ok:false, error:'no_peer_token' });
 
+  logAction('bridge.test', { url: url.replace(/\/+$/,'') });
+
   try {
     const u = url.replace(/\/+$/,'') + '/api/ops/bridge/outbox';
     const r = await fetch(u, { headers: { 'X-Clawd-Bridge-Token': tok }, cache:'no-store' });
     const j = await r.json().catch(() => null);
-    if (!r.ok || !j || !j.ok) return res.status(400).json({ ok:false, error:'peer_failed', http: r.status, body: j });
+    if (!r.ok || !j || !j.ok) {
+      logAction('bridge.test.fail', { http: r.status });
+      return res.status(400).json({ ok:false, error:'peer_failed', http: r.status, body: j });
+    }
+    logAction('bridge.test.ok', {});
     res.json({ ok:true });
   } catch (e) {
+    logAction('bridge.test.exception', { message: String(e) });
     res.status(500).json({ ok:false, error:'exception', message: String(e) });
   }
 });

@@ -370,7 +370,13 @@
       const line = document.createElement('div');
       line.style.padding = '6px 4px';
       line.style.borderBottom = '1px solid rgba(255,255,255,0.08)';
-      line.innerHTML = '<span class="muted">' + esc(e.ts) + '</span> ' + esc(e.event) + (e.data ? (' <span class="muted">' + esc(JSON.stringify(e.data)) + '</span>') : '');
+
+      const ev = String(e.event || '');
+      const isAct = ev.startsWith('act.') || ev.startsWith('action.');
+      const tag = isAct ? ('<span class="pill" style="padding:2px 8px; font-size:11px; border-color: rgba(154,208,255,0.35); background: rgba(154,208,255,0.08); color: rgba(231,231,231,0.92); margin-right:6px;">ACT</span>') : '';
+      const evHtml = isAct ? ('<span style="font-weight:900;">' + esc(ev) + '</span>') : esc(ev);
+
+      line.innerHTML = '<span class="muted">' + esc(e.ts) + '</span> ' + tag + evHtml + (e.data ? (' <span class="muted">' + esc(JSON.stringify(e.data)) + '</span>') : '');
       worklogEl.appendChild(line);
     }
 

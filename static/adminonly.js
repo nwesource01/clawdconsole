@@ -5,6 +5,7 @@
   const tabCRM = document.getElementById('admTabCRM');
   const tabChangelog = document.getElementById('admTabChangelog');
   const tabFeatures = document.getElementById('admTabFeatures');
+  const tabBranding = document.getElementById('admTabBranding');
 
   const panelSitemap = document.getElementById('admPanelSitemap');
   const panelApps = document.getElementById('admPanelApps');
@@ -12,6 +13,12 @@
   const panelCRM = document.getElementById('admPanelCRM');
   const panelChangelog = document.getElementById('admPanelChangelog');
   const panelFeatures = document.getElementById('admPanelFeatures');
+  const panelBranding = document.getElementById('admPanelBranding');
+
+  const brandMenuCss = document.getElementById('brandMenuCss');
+  const brandMenuSave = document.getElementById('brandMenuSave');
+  const brandMenuReset = document.getElementById('brandMenuReset');
+  const brandMenuSaved = document.getElementById('brandMenuSaved');
 
   const crmList = document.getElementById('crmList');
   const crmCount = document.getElementById('crmCount');
@@ -35,6 +42,7 @@
     { key: 'crm', tab: tabCRM, panel: panelCRM },
     { key: 'changelog', tab: tabChangelog, panel: panelChangelog },
     { key: 'features', tab: tabFeatures, panel: panelFeatures },
+    { key: 'branding', tab: tabBranding, panel: panelBranding },
   ];
 
   function setTab(k){
@@ -46,6 +54,7 @@
     if (k === 'crm') loadCRM();
     if (k === 'adoption') loadAdoption();
     if (k === 'changelog') loadChangelog();
+    if (k === 'branding') loadBrandingMenu();
   }
 
   function esc(s){
@@ -197,13 +206,56 @@
     }
   }
 
+  async function loadBrandingMenu(){
+    if (!panelBranding) return;
+    if (brandMenuSaved) brandMenuSaved.textContent = '';
+    try {
+      const res = await fetch('/admin/api/branding/menu', { credentials: 'include', cache: 'no-store' });
+      const j = await res.json();
+      if (!j || !j.ok) throw new Error('bad');
+      const css = (j.branding && typeof j.branding.cssOverrides === 'string') ? j.branding.cssOverrides : '';
+      if (brandMenuCss) brandMenuCss.value = css;
+      if (brandMenuSaved) brandMenuSaved.textContent = j.branding && j.branding.updatedAt ? ('Loaded: ' + j.branding.updatedAt) : 'Loaded.';
+    } catch {
+      if (brandMenuSaved) brandMenuSaved.textContent = 'Failed to load.';
+    }
+  }
+
+  async function saveBrandingMenu(){
+    try {
+      if (brandMenuSaved) brandMenuSaved.textContent = 'Saving…';
+      const payload = { cssOverrides: String(brandMenuCss && brandMenuCss.value || '') };
+      const res = await fetch('/admin/api/branding/menu', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload)
+      });
+      const j = await res.json();
+      if (!j || !j.ok) throw new Error('bad');
+      if (brandMenuSaved) brandMenuSaved.textContent = 'Saved.';
+      // menu css is served from /static/apps-menu.css with no-store, so a reload shows it everywhere
+    } catch {
+      if (brandMenuSaved) brandMenuSaved.textContent = 'Save failed.';
+    }
+  }
+
+  function resetBrandingMenu(){
+    if (brandMenuCss) brandMenuCss.value = '';
+    if (brandMenuSaved) brandMenuSaved.textContent = 'Reset (not saved yet).';
+  }
+
   if (tabSitemap) tabSitemap.addEventListener('click', () => setTab('sitemap'));
   if (tabApps) tabApps.addEventListener('click', () => setTab('apps'));
   if (tabAdoption) tabAdoption.addEventListener('click', () => setTab('adoption'));
   if (tabCRM) tabCRM.addEventListener('click', () => setTab('crm'));
   if (tabChangelog) tabChangelog.addEventListener('click', () => setTab('changelog'));
   if (tabFeatures) tabFeatures.addEventListener('click', () => setTab('features'));
+  if (tabBranding) tabBranding.addEventListener('click', () => setTab('branding'));
   if (crmRefresh) crmRefresh.addEventListener('click', loadCRM);
+
+  if (brandMenuSave) brandMenuSave.addEventListener('click', saveBrandingMenu);
+  if (brandMenuReset) brandMenuReset.addEventListener('click', resetBrandingMenu);
 
   const chgRefresh = document.getElementById('chgRefresh');
   const chgUpdate = document.getElementById('chgUpdate');

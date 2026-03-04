@@ -432,15 +432,26 @@
     return url;
   }
 
+  const LS_APPURL = 'cc_code_app_url_v1';
+
   function applyAppUrl(u){
     const url = normalizePreviewUrl(u);
     if (!url) return;
     if (appUrl) appUrl.value = url;
     if (appFrame) appFrame.src = url;
     setAppMsg('Loading…');
+    try { localStorage.setItem(LS_APPURL, url); } catch {}
   }
 
+  // restore last used preview URL
+  try {
+    const last = localStorage.getItem(LS_APPURL) || '';
+    if (last && appUrl) appUrl.value = last;
+    if (last && appFrame) appFrame.src = normalizePreviewUrl(last);
+  } catch {}
+
   if (appGo) appGo.addEventListener('click', () => applyAppUrl(appUrl && appUrl.value));
+  if (appUrl) appUrl.addEventListener('change', () => applyAppUrl(appUrl.value));
   if (appFrame) {
     appFrame.addEventListener('load', () => setAppMsg(''));
     appFrame.addEventListener('error', () => setAppMsg('Failed to load.'));

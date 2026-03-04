@@ -5139,12 +5139,22 @@ function connectGateway() {
   });
 }
 
-function acceptMessage({ text, attachments }) {
-  const msg = makeMsg({ text, attachments });
+function acceptMessage({ text, attachments, noList }) {
+  // Allow UI to mark messages as "no list extraction" (e.g. Quick Chat button payloads).
+  // Also allow an inline marker to survive copy/paste:
+  //   [[NO_CLAWDLIST]]
+  let t = typeof text === 'string' ? text : '';
+  let skipList = !!noList;
+  if (/^\s*\[\[NO_CLAWDLIST\]\]\s*$/mi.test(t)) {
+    skipList = true;
+    t = t.replace(/^\s*\[\[NO_CLAWDLIST\]\]\s*\r?\n?/gmi, '');
+  }
+
+  const msg = makeMsg({ text: t, attachments });
   appendJsonl(MSG_FILE, msg);
 
   // Dynamic Execution List extraction: if user message contains a 3+ item list.
-  const items = extractChecklist(msg.text);
+  const items = skipList ? null : extractChecklist(msg.text);
   if (items) {
     const state = loadDEState();
     const de = {
@@ -5223,11 +5233,11 @@ function acceptMessage({ text, attachments }) {
 }
 
 app.post('/api/message', (req, res) => {
-  const { text, attachments } = req.body || {};
+  const { text, attachments, noList } = req.body || {};
   if (typeof text !== 'string' && !Array.isArray(attachments)) {
     return res.status(400).json({ ok: false, error: 'Expected {text, attachments}' });
   }
-  const msg = acceptMessage({ text, attachments });
+  const msg = acceptMessage({ text, attachments, noList: !!noList });
   res.json({ ok: true, message: msg });
 });
 

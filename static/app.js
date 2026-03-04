@@ -1730,6 +1730,7 @@
     if (!ta) return;
     // Per transcript: Catch up inserts a prompt so user can decide before sending.
     const insert = [
+      '[[NO_CLAWDLIST]]',
       'Catch up:',
       '0) Paths vary by deployment. If a file path below does not exist, locate the equivalent file on this host and continue (do not complain about ENOENT).',
       '',
@@ -1771,7 +1772,7 @@
   const btnRecent = document.getElementById('btnReviewRecent');
   if (btnRecent) btnRecent.addEventListener('click', () => {
     if (!ta) return;
-    const insert = 'Review Recent: Please review the last 100 messages from *me* in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.';
+    const insert = '[[NO_CLAWDLIST]]\nReview Recent: Please review the last 100 messages from *me* in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.';
     const cur = ta.value || '';
     ta.value = insert + (cur ? ('\n\n' + cur) : '');
     ta.focus();
@@ -1780,7 +1781,7 @@
   const btnWeek = document.getElementById('btnReviewWeek');
   if (btnWeek) btnWeek.addEventListener('click', () => {
     if (!ta) return;
-    const insert = 'Review Week: Please review all messages from the last 7 days in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.';
+    const insert = '[[NO_CLAWDLIST]]\nReview Week: Please review all messages from the last 7 days in this session and list any requests/tasks I asked for that do not appear completed yet. Keep it as a checklist of TODOs; don\'t start doing them until I confirm.';
     const cur = ta.value || '';
     ta.value = insert + (cur ? ('\n\n' + cur) : '');
     ta.focus();
@@ -1806,6 +1807,7 @@
   if (btnGitCommit) btnGitCommit.addEventListener('click', () => {
     if (!ta) return;
     const insert = [
+      '[[NO_CLAWDLIST]]',
       'GitCommit: Please commit the current changes in /home/master/clawd/apps/console.',
       '- Use: git status → review diff → git add -A → git commit -m "<message>"',
       '- If you are unsure of message, propose 2-3 options and wait for confirmation.'

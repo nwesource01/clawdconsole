@@ -26,9 +26,11 @@ h1{ margin:0; font-size:20px; letter-spacing:.2px; }
   flex:1;
   display:grid;
   grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
+  /* Let corners grow to fit expanded menus (not locked to 4 equal quadrants) */
+  grid-template-rows: auto auto;
   gap: 14px;
   padding: 14px;
+  overflow: visible;
 }
 
 .menuBox{
@@ -44,7 +46,7 @@ h1{ margin:0; font-size:20px; letter-spacing:.2px; }
 /* Bring the active corner above its neighbors so the open menu isn't clipped */
 .menuBox.open{ z-index: 6; }
 
-.inner{ position:absolute; inset:0; padding:18px; display:flex; flex-direction:column; }
+.inner{ position:relative; padding:18px; display:flex; flex-direction:column; overflow: visible; }
 
 .tag{ font-weight:900; font-size:12px; letter-spacing:.3px; color: rgba(255,255,255,.78); }
 .title{ font-weight:1000; font-size:20px; margin-top:6px; }

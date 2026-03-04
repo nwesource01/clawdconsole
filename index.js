@@ -569,7 +569,11 @@ app.use((req, res, next) => {
   // set session cookie so fetch() works without Authorization header
   // IMPORTANT: only mark Secure when we're actually on HTTPS (otherwise browser won't store it).
   const token = newToken();
-  sessions.set(token, { exp: Date.now() + SESS_TTL_MS, unlocks: {} });
+  const sessObj = { exp: Date.now() + SESS_TTL_MS, unlocks: {} };
+  sessions.set(token, sessObj);
+  // Also attach to this request so ops endpoints can work on the first call
+  // (before the browser stores the cookie).
+  req._clawdSess = sessObj;
 
   const xfProto = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
   const isHttps = !!(req.secure || xfProto === 'https');
@@ -1980,6 +1984,10 @@ function codeModeFor(rel, abs){
 }
 
 function getSessionFromReq(req){
+  // If auth middleware validated basic auth on this request, it may have created
+  // an in-memory session even before the browser stores the cookie.
+  if (req && req._clawdSess && typeof req._clawdSess === 'object') return req._clawdSess;
+
   const cookies = parseCookies(req);
   const tok = cookies[SESS_COOKIE];
   if (!tok) return null;

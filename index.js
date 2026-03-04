@@ -1167,6 +1167,68 @@ app.post('/api/ops/codex/reconnect', (req, res) => {
   res.json({ ok:true });
 });
 
+// --- Bundle builder (server-side) ---
+const childProcess = require('child_process');
+
+function safeBundleName(s){
+  const n = String(s||'').trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]{1,32}$/.test(n)) return null;
+  return n;
+}
+
+function buildConsoleBundle({ name, domainDefault }){
+  const nm = safeBundleName(name);
+  if (!nm) throw new Error('bad_name');
+
+  const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'clawd-bundle-'));
+  const root = path.join(tmp, 'root');
+  const con = path.join(root, 'console');
+  fs.mkdirSync(con, { recursive: true });
+
+  // export tracked console files
+  // (if .git absent, fallback to rsync-like copy from __dirname)
+  const hasGit = fs.existsSync(path.join(__dirname, '.git'));
+  if (hasGit) {
+    // git archive -> tar extract
+    const tarPath = path.join(tmp, 'console.tar');
+    childProcess.execFileSync('git', ['-C', __dirname, 'archive', '--format=tar', 'HEAD', '-o', tarPath], { stdio:'ignore' });
+    childProcess.execFileSync('tar', ['-xf', tarPath, '-C', con], { stdio:'ignore' });
+  } else {
+    // minimal best-effort copy
+    childProcess.execFileSync('bash', ['-lc', `cd ${JSON.stringify(__dirname)} && tar -cf - --exclude node_modules --exclude .git --exclude console-data . | tar -xf - -C ${JSON.stringify(con)}`], { stdio:'ignore' });
+  }
+
+  const quick = `# ${nm} Console — Quickstart\n\nThis bundle installs **Clawd Console** as a systemd service.\n\n## Install\n\n\`\`\`bash\nsudo systemctl stop ${nm}-console.service || true\nsudo rm -rf /opt/${nm}\nsudo mkdir -p /opt/${nm}\ncd /opt/${nm}\n# copy ${nm}-bundle.tar.gz here\nsudo tar -xzf ${nm}-bundle.tar.gz\nsudo bash install.sh\n\`\`\`\n\nOpen:\n\nhttp://<SERVER_IP>:21337\n\nCredentials:\n\n/etc/${nm}-console.env\n\n## Domain + SSL (optional)\n\nTell the Console chat what domain you want (default: **${domainDefault || (nm + '.nwesource.com')}**) and it will generate exact Nginx + certbot commands.\n\n## Bridge pairing\n\nOn the boss box (claw), open **/apps/ops → ClawdBridge** and click **Copy**.\nOn the new box, paste into **Peer token**, set Peer URL to the boss, and click **Save**.\n`;
+
+  const install = `#!/usr/bin/env bash\nset -euo pipefail\n\nNAME=${nm}\nAPP_DIR=/opt/${nm}\nCONSOLE_DIR=\"$APP_DIR/console\"\nENV_FILE=/etc/${nm}-console.env\nUNIT_FILE=/etc/systemd/system/${nm}-console.service\nDATA_DIR_DEFAULT=/var/lib/${nm}/console-data\n\nif [ \"$(id -u)\" != \"0\" ]; then\n  echo \"Run as root.\" >&2\n  exit 1\nfi\n\nif ! command -v node >/dev/null 2>&1; then\n  echo \"Node.js not found. Install Node 22+ first, then rerun.\" >&2\n  exit 1\nfi\n\nmkdir -p \"$APP_DIR\"\n\necho \"[1/4] Installing console code…\"\n# console dir is shipped in the bundle\n\necho \"[2/4] Installing npm deps…\"\ncd \"$CONSOLE_DIR\"\nnpm ci --omit=dev\n\necho \"[3/4] Writing env file…\"\nif [ ! -f \"$ENV_FILE\" ]; then\n  PASS=$(openssl rand -hex 12)\n  cat > \"$ENV_FILE\" <<EOF\n# ${nm} Console env\nPORT=21337\nBIND=0.0.0.0\nDATA_DIR=$DATA_DIR_DEFAULT\nAUTH_USER=nwesource\nAUTH_PASS=$PASS\nADMINONLY_ENABLED=1\n\n# Default domain hint (used in first-run prompts)\nDEFAULT_DOMAIN=${domainDefault || (nm + '.nwesource.com')}\n\n# Boss bridge (defaults; can be changed in /apps/ops → ClawdBridge)\nBRIDGE_PEER_URL=https://claw.nwesource.com\nEOF\n  echo \"Created $ENV_FILE\"\n  echo \"Login: nwesource / $PASS\"\nelse\n  echo \"Env file exists: $ENV_FILE (leaving as-is)\"\nfi\n\nmkdir -p \"$DATA_DIR_DEFAULT\"\n\necho \"[4/4] Installing systemd unit…\"\ncat > \"$UNIT_FILE\" <<EOF\n[Unit]\nDescription=${nm} Console\nAfter=network.target\n\n[Service]\nType=simple\nEnvironmentFile=$ENV_FILE\nWorkingDirectory=$CONSOLE_DIR\nExecStart=/usr/bin/node $CONSOLE_DIR/index.js\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=multi-user.target\nEOF\n\nsystemctl daemon-reload\nsystemctl enable --now ${nm}-console.service\n\necho \"Done. Open: http://$(hostname -I | awk '{print $1}'):21337\"\n`;
+
+  fs.writeFileSync(path.join(root, 'QUICKSTART.md'), quick, 'utf8');
+  fs.writeFileSync(path.join(root, 'install.sh'), install, 'utf8');
+  fs.chmodSync(path.join(root, 'install.sh'), 0o755);
+
+  const outName = `${nm}-bundle.tar.gz`;
+  const outAbs = path.join(UPLOAD_DIR, outName);
+  childProcess.execFileSync('tar', ['-czf', outAbs, '-C', root, '.'], { stdio:'ignore' });
+
+  try { fs.rmSync(tmp, { recursive:true, force:true }); } catch {}
+
+  return { filename: outName, url: '/uploads/' + encodeURIComponent(outName) };
+}
+
+app.post('/api/ops/bundle/build', express.json({ limit:'50kb' }), (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const name = safeBundleName(req.body?.name || '');
+  const domainDefault = String(req.body?.domainDefault || '').trim();
+  if (!name) return res.status(400).json({ ok:false, error:'bad_name' });
+  try {
+    const r = buildConsoleBundle({ name, domainDefault });
+    logWork('bundle.built', { name, filename: r.filename });
+    res.json({ ok:true, bundle: r });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:'build_failed', message: String(e) });
+  }
+});
+
 // --- UI Theme Ops integration ---
 app.get('/api/ops/ui-theme', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -4528,6 +4590,19 @@ function renderModulePage(key){
           <div style="font-weight:900; margin-bottom:8px;">Repeated questions (best-effort)</div>
           <div class="muted" style="margin-bottom:8px;">Scans transcript assistant messages for repeated question lines so we can turn them into rules or defaults.</div>
           <div id="opsRepeated" style="max-height: 50vh; overflow:auto; padding-right:6px;"></div>
+        </div>
+
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="font-weight:900; margin-bottom:8px;">Bundles</div>
+          <div class="muted" style="margin-bottom:10px;">One-click newborn bundle builder (no more tar drama).</div>
+          <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
+            <label class="muted">Name <input id="bundleName" class="inp" value="clawdius" style="width:160px;" /></label>
+            <label class="muted">Default domain <input id="bundleDomain" class="inp" value="clawdius.nwesource.com" style="width:260px;" /></label>
+            <button class="pill" id="bundleBuild" type="button">Build bundle</button>
+            <span class="muted" id="bundleMsg"></span>
+          </div>
+          <div class="muted" style="margin-top:10px;">Download: <a id="bundleLink" href="#" target="_blank" rel="noopener" style="display:none;">bundle</a><span id="bundleLinkHint">(build first)</span></div>
+          <pre id="bundleCmd" style="margin-top:10px; white-space:pre-wrap; border:1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.12); border-radius:12px; padding:10px; max-height: 280px; overflow:auto;"></pre>
         </div>
 
         </div><!-- /opsTabQuestionnaire -->

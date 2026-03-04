@@ -12,6 +12,15 @@
   const hydIcon = $('opsHydrationIcon');
   const list = $('opsRepeated');
 
+  // Bundles
+  const bundleName = $('bundleName');
+  const bundleDomain = $('bundleDomain');
+  const bundleBuild = $('bundleBuild');
+  const bundleMsg = $('bundleMsg');
+  const bundleLink = $('bundleLink');
+  const bundleLinkHint = $('bundleLinkHint');
+  const bundleCmd = $('bundleCmd');
+
   function setMsg(t){ if (msg) msg.textContent = t || ''; }
 
   async function load(){
@@ -127,6 +136,51 @@
       setMsg('Scan failed: ' + String(e));
     }
   }
+
+  async function buildBundle(){
+    try {
+      if (bundleMsg) bundleMsg.textContent = 'Building…';
+      const name = bundleName ? String(bundleName.value||'').trim() : '';
+      const domainDefault = bundleDomain ? String(bundleDomain.value||'').trim() : '';
+      const res = await fetch('/api/ops/bundle/build', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        body: JSON.stringify({ name, domainDefault }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j || !j.ok) throw new Error((j && (j.message || j.error)) ? (j.message || j.error) : ('http ' + res.status));
+      const url = j.bundle && j.bundle.url ? String(j.bundle.url) : '';
+      if (bundleLink) {
+        bundleLink.href = url || '#';
+        bundleLink.textContent = url ? url.split('/').slice(-1)[0] : 'bundle';
+        bundleLink.style.display = url ? '' : 'none';
+      }
+      if (bundleLinkHint) bundleLinkHint.textContent = url ? '' : '(build failed)';
+
+      const fname = url ? url.split('/').slice(-1)[0] : (name + '-bundle.tar.gz');
+      const cmd = [
+        '# On the newborn box:',
+        `sudo mkdir -p /opt/${name} && cd /opt/${name}`,
+        '# Download from boss (requires boss console auth):',
+        `sudo curl -fL --basic -u <BOSS_USER>:<BOSS_PASS> -o ${fname} https://claw.nwesource.com${url}`,
+        `sudo tar -xzf ${fname}`,
+        'sudo bash install.sh',
+        '',
+        '# Then open:',
+        'http://<NEWBORN_IP>:21337',
+        '',
+        '# Pair bridge (no sudo): /apps/ops → ClawdBridge',
+      ].join('\n');
+      if (bundleCmd) bundleCmd.textContent = cmd;
+      if (bundleMsg) bundleMsg.textContent = 'Built.';
+      setTimeout(() => { if (bundleMsg) bundleMsg.textContent = ''; }, 1000);
+    } catch (e) {
+      if (bundleMsg) bundleMsg.textContent = 'Build failed: ' + String(e);
+    }
+  }
+
+  if (bundleBuild) bundleBuild.addEventListener('click', buildBundle);
 
   if (btnSave) btnSave.addEventListener('click', save);
   if (btnCommit) btnCommit.addEventListener('click', commit);

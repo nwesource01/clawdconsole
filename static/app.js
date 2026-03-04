@@ -1708,6 +1708,105 @@
     ta.focus();
   });
 
+  // Mic (push-to-talk): records audio locally and transcribes on-box (pastes text into composer)
+  const micBtn = document.getElementById('mic');
+  const micStatus = document.getElementById('micStatus');
+  let micStream = null;
+  let micRec = null;
+  let micChunks = [];
+  let micActive = false;
+
+  function setMicStatus(t){
+    if (micStatus) micStatus.textContent = String(t || '');
+  }
+
+  async function micStart(){
+    if (micActive) return;
+    micActive = true;
+    setMicStatus('Recording…');
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const opts = {};
+      try {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) opts.mimeType = 'audio/webm;codecs=opus';
+        else if (MediaRecorder.isTypeSupported('audio/webm')) opts.mimeType = 'audio/webm';
+        else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) opts.mimeType = 'audio/ogg;codecs=opus';
+      } catch {}
+
+      micChunks = [];
+      micRec = new MediaRecorder(micStream, opts);
+      micRec.ondataavailable = (e) => {
+        if (e && e.data && e.data.size) micChunks.push(e.data);
+      };
+      micRec.onstop = async () => {
+        try {
+          // stop tracks
+          try { micStream && micStream.getTracks && micStream.getTracks().forEach(t => t.stop()); } catch {}
+          micStream = null;
+
+          const blob = new Blob(micChunks, { type: (micRec && micRec.mimeType) ? micRec.mimeType : 'audio/webm' });
+          micChunks = [];
+          if (!blob || !blob.size) { setMicStatus('No audio captured.'); return; }
+
+          setMicStatus('Transcribing…');
+          const fd = new FormData();
+          const ext = (blob.type && blob.type.includes('ogg')) ? 'ogg' : 'webm';
+          fd.append('audio', blob, 'mic.' + ext);
+
+          const res = await fetch(apiUrl('/api/stt'), { method: 'POST', credentials: 'include', body: fd });
+          const txt = await res.text();
+          let j = null;
+          try { j = JSON.parse(txt); } catch {}
+          if (!res.ok || !j || !j.ok) {
+            setMicStatus('STT failed.');
+            dbg('stt http ' + res.status + ' ' + (txt || '').slice(0, 120));
+            return;
+          }
+
+          const out = String(j.text || '').trim();
+          if (!out) { setMicStatus('No speech detected.'); return; }
+
+          if (ta) {
+            const cur = String(ta.value || '');
+            ta.value = cur ? (cur.replace(/\s*$/,'') + '\n' + out + '\n') : (out + '\n');
+            ta.focus();
+          }
+          setMicStatus('');
+        } finally {
+          micActive = false;
+          try { micBtn && (micBtn.textContent = '🎙 Hold'); } catch {}
+        }
+      };
+
+      micRec.start();
+      try { micBtn && (micBtn.textContent = '● Rec'); } catch {}
+    } catch (e) {
+      micActive = false;
+      setMicStatus('Mic blocked/unavailable.');
+      dbg('mic error: ' + String(e));
+      try { micBtn && (micBtn.textContent = '🎙 Hold'); } catch {}
+      try { micStream && micStream.getTracks && micStream.getTracks().forEach(t => t.stop()); } catch {}
+      micStream = null;
+    }
+  }
+
+  async function micStop(){
+    if (!micActive) return;
+    setMicStatus('Stopping…');
+    try { micRec && micRec.state !== 'inactive' && micRec.stop(); } catch {}
+  }
+
+  if (micBtn) {
+    // mouse
+    micBtn.addEventListener('mousedown', (e) => { e.preventDefault(); micStart(); });
+    micBtn.addEventListener('mouseup', (e) => { e.preventDefault(); micStop(); });
+    micBtn.addEventListener('mouseleave', (e) => { if (micActive) micStop(); });
+
+    // touch
+    micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); micStart(); }, { passive:false });
+    micBtn.addEventListener('touchend', (e) => { e.preventDefault(); micStop(); }, { passive:false });
+  }
+
   // Send button: single-click send (the explicit second step)
   if (sendBtn) {
     try { sendBtn.removeEventListener('click', sendMessage); } catch {}

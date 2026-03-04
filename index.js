@@ -2739,6 +2739,66 @@ app.get('/api/messages', (req, res) => {
   res.json({ ok: true, messages: readLastJsonl(MSG_FILE, limit) });
 });
 
+// --- Speech-to-text (local, on-box) ---
+const STT_TMP_DIR = path.join(DATA_DIR, 'tmp');
+try { fs.mkdirSync(STT_TMP_DIR, { recursive: true }); } catch {}
+
+const sttStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, STT_TMP_DIR),
+  filename: (req, file, cb) => {
+    const safeBase = path.basename(file.originalname || 'audio').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    cb(null, `${stamp}__${safeBase}`);
+  }
+});
+
+const sttUpload = multer({
+  storage: sttStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+});
+
+app.post('/api/stt', sttUpload.single('audio'), async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  if (!req.file) return res.status(400).json({ ok:false, error:'no_audio' });
+
+  const inPath = req.file.path;
+  const model = String(process.env.STT_MODEL || 'small');
+  const py = process.env.STT_PYTHON || '/opt/clawdconsole/stt-venv/bin/python3';
+  const script = path.join(__dirname, 'scripts', 'stt.py');
+
+  const startedAt = Date.now();
+
+  function safeUnlink(p){ try { fs.unlinkSync(p); } catch {} }
+
+  try {
+    // If venv python isn't there, fall back to system python3.
+    const pyPath = (py && fs.existsSync(py)) ? py : 'python3';
+
+    const out = await new Promise((resolve, reject) => {
+      execFile(pyPath, [script, '--model', model, inPath], { timeout: 60_000, maxBuffer: 3 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) {
+          const msg = (stderr && String(stderr).trim()) ? String(stderr).trim() : String(err);
+          return reject(new Error(msg));
+        }
+        resolve(String(stdout || '').trim());
+      });
+    });
+
+    let j = null;
+    try { j = JSON.parse(out); } catch {}
+    if (!j || !j.ok) return res.status(500).json({ ok:false, error:'stt_failed', detail: j && j.error ? String(j.error) : null });
+
+    res.json({ ok:true, text: String(j.text || ''), ms: Date.now() - startedAt, model });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:'stt_exception', detail: String(e) });
+  } finally {
+    // Privacy default: delete the recorded audio.
+    safeUnlink(inPath);
+  }
+});
+
 // --- Dynamic Execution List (DEL) ---
 const DE_FILE = path.join(DATA_DIR, 'dynamic-exec.json');
 function loadDEState() {
@@ -6584,9 +6644,11 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         <div id="composer" style="margin-top: 12px;">
           <textarea id="msg" placeholder="Type a message. Paste images/screenshots here (Ctrl+V) ..."></textarea>
           <div style="display:flex; flex-direction:column; gap:8px; align-items: stretch;">
+            <button id="mic" type="button" title="Hold to talk">🎙 Hold</button>
             <button id="plan" type="button">Plan</button>
             <button id="send" type="button">Send</button>
             <button id="iterate" type="button">Iterate</button>
+            <div class="muted" id="micStatus" style="font-size:12px; min-height:16px;"></div>
           </div>
         </div>
 

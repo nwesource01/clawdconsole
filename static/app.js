@@ -1344,11 +1344,12 @@
       bg0 = '#0b0f14'; bg1 = '#0e141c'; bg2 = '#121a26'; accent = 'rgba(170,190,255,0.08)';
     } else if (preset === 'custom') {
       const rgb = hexToRgb(color) || { r:11, g:15, b:26 };
-      // derive a slightly lighter top and a deeper bottom
-      bg0 = rgbToHex(mix(rgb.r, 0, 0.15), mix(rgb.g, 0, 0.15), mix(rgb.b, 0, 0.15));
-      bg1 = rgbToHex(mix(rgb.r, 255, 0.06), mix(rgb.g, 255, 0.06), mix(rgb.b, 255, 0.06));
-      bg2 = rgbToHex(mix(rgb.r, 40, 0.10), mix(rgb.g, 60, 0.10), mix(rgb.b, 120, 0.10));
-      accent = `rgba(${rgb.r},${rgb.g},${rgb.b},0.16)`;
+      // Make the chosen color actually show up.
+      // bg0 = base, bg1 = slightly lighter top, bg2 = deeper accent.
+      bg0 = rgbToHex(rgb.r, rgb.g, rgb.b);
+      bg1 = rgbToHex(mix(rgb.r, 255, 0.12), mix(rgb.g, 255, 0.12), mix(rgb.b, 255, 0.12));
+      bg2 = rgbToHex(mix(rgb.r, 0, 0.22), mix(rgb.g, 0, 0.22), mix(rgb.b, 0, 0.22));
+      accent = `rgba(${rgb.r},${rgb.g},${rgb.b},0.38)`;
     }
 
     const root = document.documentElement;

@@ -6487,10 +6487,30 @@ app.get('/', (req, res) => {
       padding: 18px;
       line-height: 1.35;
       color: var(--text);
+      background: linear-gradient(180deg, var(--bg1), var(--bg0));
+      background-attachment: fixed;
+    }
+
+    /* animated accent layer (subtle; makes custom colors pop) */
+    body::before{
+      content:"";
+      position: fixed;
+      inset: 0;
+      pointer-events:none;
+      z-index: -1;
       background:
         radial-gradient(1200px 700px at 12% 8%, var(--bgAccent), transparent 60%),
-        linear-gradient(180deg, var(--bg1), var(--bg0));
-      background-attachment: fixed;
+        radial-gradient(900px 520px at 82% 18%, rgba(154,208,255,0.10), transparent 62%),
+        radial-gradient(800px 520px at 55% 92%, rgba(34,198,198,0.08), transparent 60%);
+      opacity: 0.95;
+      filter: saturate(1.05);
+      animation: bgFloat 18s ease-in-out infinite;
+      transform: translateZ(0);
+    }
+    @keyframes bgFloat{
+      0%{ transform: translate3d(0,0,0) scale(1); }
+      50%{ transform: translate3d(0,-10px,0) scale(1.03); }
+      100%{ transform: translate3d(0,0,0) scale(1); }
     }
 
     /* brand: dark scrollbars everywhere (including textarea/pre) */

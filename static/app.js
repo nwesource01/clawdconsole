@@ -1748,12 +1748,16 @@
           micChunks = [];
           if (!blob || !blob.size) { setMicStatus('No audio captured.'); return; }
 
-          setMicStatus('Transcribing…');
+          setMicStatus('Uploading…');
           const fd = new FormData();
           const ext = (blob.type && blob.type.includes('ogg')) ? 'ogg' : 'webm';
           fd.append('audio', blob, 'mic.' + ext);
 
-          const res = await fetch(apiUrl('/api/stt'), { method: 'POST', credentials: 'include', body: fd });
+          const ctrl = new AbortController();
+          const to = setTimeout(() => { try { ctrl.abort(); } catch {} }, 240000);
+          setMicStatus('Transcribing…');
+          const res = await fetch(apiUrl('/api/stt'), { method: 'POST', credentials: 'include', body: fd, signal: ctrl.signal });
+          clearTimeout(to);
           const txt = await res.text();
           let j = null;
           try { j = JSON.parse(txt); } catch {}
@@ -1779,7 +1783,8 @@
         }
       };
 
-      micRec.start();
+      // Use a small timeslice so dataavailable fires regularly; helps avoid "stuck on stop" on some browsers.
+      micRec.start(250);
       try { micBtn && (micBtn.textContent = '● Rec'); } catch {}
     } catch (e) {
       micActive = false;
@@ -1794,7 +1799,17 @@
   async function micStop(){
     if (!micActive) return;
     setMicStatus('Stopping…');
-    try { micRec && micRec.state !== 'inactive' && micRec.stop(); } catch {}
+    try {
+      if (micRec && micRec.state !== 'inactive') {
+        // Flush any buffered audio first.
+        try { micRec.requestData(); } catch {}
+        // Some browsers can hang; force-stop after a short grace window.
+        setTimeout(() => {
+          try { if (micRec && micRec.state !== 'inactive') micRec.stop(); } catch {}
+        }, 800);
+        micRec.stop();
+      }
+    } catch {}
   }
 
   if (micBtn) {

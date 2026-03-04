@@ -1387,8 +1387,8 @@
 
   if (homeRestart) {
     homeRestart.addEventListener('click', async () => {
-      const ok = prompt('Type RESTART to restart the Console service:');
-      if (String(ok || '').trim().toUpperCase() !== 'RESTART') return;
+      const ok = confirm('Restart the Console service now?');
+      if (!ok) return;
       clearCaughtUp();
       try { refreshHomeHydration(); } catch {}
       homeRestart.disabled = true;

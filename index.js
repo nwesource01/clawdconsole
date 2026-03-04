@@ -6444,16 +6444,18 @@ app.get('/', (req, res) => {
     .md_copy:hover{border-color: rgba(34,198,198,.65)}
 
     /* Composer: grid so left (textarea+quick buttons) and right (actions) never overlap */
-    #composer { display:grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items:start; }
+    /* Fix action column width so the left side can never overlap it */
+    #composer { display:grid; grid-template-columns: minmax(0,1fr) 96px; gap: 10px; align-items:start; }
     .composerLeft{ min-width:0; display:flex; flex-direction:column; gap:10px; overflow:hidden; }
-    .composerActions{ display:flex; flex-direction:column; gap:8px; align-items:stretch; justify-content:flex-start; }
+    .composerActions{ width:96px; display:flex; flex-direction:column; gap:8px; align-items:stretch; justify-content:flex-start; }
 
     #quickbar{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-start; align-items:center; margin:0; overflow:hidden; }
     #quickButtons{ margin:0; padding:0; gap:10px; max-width:100%; }
     #debug{ margin-top: 4px !important; }
 
     /* Composer textarea: shorter by default (closer to pre-mic) */
-    #msg { width: 100%; height: 120px; min-height: 120px; max-height: 240px; overflow:auto; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); /* visually narrow by ~20px */ margin-right: 20px; }
+    /* Narrow the textarea so it doesn't visually collide with the action stack */
+    #msg { width: calc(100% - 40px); height: 120px; min-height: 120px; max-height: 240px; overflow:auto; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
 
     /* Action buttons: tighter + uniform */
     #mic,#plan,#send,#iterate{ height: 36px; padding: 6px 10px; font-size: 13px; white-space: nowrap; min-width: 74px; }

@@ -176,6 +176,8 @@
 
   // Together.ai panel
   const tgBase = $('togetherBaseUrl');
+  const tgPick = $('togetherModelPick');
+  const tgPickRef = $('togetherModelRefresh');
   const tgModel = $('togetherModel');
   const tgKey = $('togetherApiKey');
   const tgSave = $('togetherSave');
@@ -229,6 +231,49 @@
   function setTgTestMsg(t){ if (tgTestMsg) tgTestMsg.textContent = t || ''; }
   function safeJson(x){ try { return JSON.stringify(x, null, 2); } catch { return String(x); } }
 
+  async function refreshTogetherModels(){
+    if (!tgPick) return;
+    try {
+      if (tgPickRef) tgPickRef.disabled = true;
+      tgPick.innerHTML = '<option value="">Loading…</option>';
+      const res = await fetch('/api/ops/together/serverless-models', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
+      const models = Array.isArray(j.models) ? j.models : [];
+
+      // Prefer coder-ish models near the top if present.
+      const pref = [
+        'Qwen/Qwen3-Coder-Next-FP8',
+        'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+        'deepseek-ai/DeepSeek-V3.1',
+      ];
+      const uniq = Array.from(new Set(models));
+      uniq.sort((a,b) => {
+        const ia = pref.indexOf(a);
+        const ib = pref.indexOf(b);
+        const aPref = ia !== -1;
+        const bPref = ib !== -1;
+        if (aPref && bPref) return ia - ib;
+        if (aPref) return -1;
+        if (bPref) return 1;
+        return a.localeCompare(b);
+      });
+
+      tgPick.innerHTML = '<option value="">(pick a serverless model)</option>' + uniq
+        .map(m => '<option value="' + String(m).replace(/"/g,'&quot;') + '">' + String(m).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</option>')
+        .join('');
+
+      // Default select if empty
+      if (tgModel && !String(tgModel.value||'').trim()) tgModel.value = 'Qwen/Qwen3-Coder-Next-FP8';
+      if (tgPick && tgModel) tgPick.value = String(tgModel.value||'').trim();
+    } catch (e) {
+      tgPick.innerHTML = '<option value="">(failed to load list)</option>';
+      setTgMsg('Model list load failed: ' + String(e));
+    } finally {
+      if (tgPickRef) tgPickRef.disabled = false;
+    }
+  }
+
   async function loadTogether(){
     if (!tgBase && !tgModel) return;
     setTgMsg('Loading…');
@@ -240,11 +285,13 @@
       if (tgBase) tgBase.value = String(cfg.baseUrl || 'https://api.together.xyz');
       // Normalize common mistake: pasting a dedicated endpoint URL (/models/...).
       if (tgBase && /api\.together\.(ai|xyz)\/models\//i.test(tgBase.value)) tgBase.value = 'https://api.together.xyz';
-      if (tgModel) tgModel.value = String(cfg.model || 'Qwen/Qwen2.5-Coder-32B-Instruct');
+      if (tgModel) tgModel.value = String(cfg.model || 'Qwen/Qwen3-Coder-Next-FP8');
+      if (tgPick && tgModel) tgPick.value = String(tgModel.value||'').trim();
       // never populate key field from server
       if (tgKey) tgKey.value = '';
       setTgMsg('Loaded' + (cfg.hasKey ? ' (key set)' : ' (no key)') + '.');
       setTimeout(() => setTgMsg(''), 1200);
+      refreshTogetherModels();
     } catch (e) {
       setTgMsg('Load failed: ' + String(e));
     }
@@ -327,6 +374,12 @@
       setTgTestMsg('Failed.');
     }
   }
+
+  if (tgPick) tgPick.addEventListener('change', () => {
+    const v = String(tgPick.value || '').trim();
+    if (v && tgModel) tgModel.value = v;
+  });
+  if (tgPickRef) tgPickRef.addEventListener('click', refreshTogetherModels);
 
   if (tgSave) tgSave.addEventListener('click', saveTogether);
   if (tgClear) tgClear.addEventListener('click', clearTogetherKey);

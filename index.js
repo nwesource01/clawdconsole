@@ -42,7 +42,7 @@ function readTogetherCfg(){
   const j = readJson(TOGETHER_CFG_FILE, null) || {};
   return {
     baseUrl: String(j.baseUrl || 'https://api.together.xyz').trim() || 'https://api.together.xyz',
-    model: String(j.model || 'Qwen/Qwen2.5-Coder-32B-Instruct').trim() || 'Qwen/Qwen2.5-Coder-32B-Instruct',
+    model: String(j.model || 'Qwen/Qwen3-Coder-Next-FP8').trim() || 'Qwen/Qwen3-Coder-Next-FP8',
     apiKey: (typeof j.apiKey === 'string') ? j.apiKey : '',
     updatedAt: j.updatedAt || null,
   };
@@ -1073,6 +1073,36 @@ app.post('/api/ops/together', express.json({ limit: '50kb' }), (req, res) => {
 
   logWork('ops.together.saved', { baseUrl: next.baseUrl, model: next.model, hasKey: !!next.apiKey });
   res.json({ ok:true, config: { baseUrl: next.baseUrl, model: next.model, hasKey: !!next.apiKey, updatedAt: next.updatedAt || null } });
+});
+
+app.get('/api/ops/together/serverless-models', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+
+  // Best-effort scrape from Together docs (no auth). Cached lightly by client anyway.
+  const url = 'https://docs.together.ai/docs/serverless-models';
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': 'clawd-console' } });
+    const html = await r.text();
+    // Extract likely "API Model String" tokens: org/model with no spaces.
+    const out = new Set();
+    const re = /\b[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\b/g;
+    let m;
+    while ((m = re.exec(html))) {
+      const s = m[0];
+      // Filter obvious non-model paths.
+      if (s.includes('/docs') || s.includes('/api') || s.includes('/assets')) continue;
+      // Heuristic: ignore overly short or non-LLM tokens.
+      if (s.length < 6) continue;
+      out.add(s);
+      if (out.size > 250) break;
+    }
+    const models = Array.from(out).sort();
+    return res.json({ ok:true, url, models });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e), url });
+  }
 });
 
 app.post('/api/ops/together/test', express.json({ limit: '50kb' }), async (req, res) => {
@@ -4224,7 +4254,12 @@ function renderModulePage(key){
                 <div class="muted" style="margin-top:6px;">Serverless uses <code>https://api.together.xyz</code>. Don’t paste a <code>/models/…</code> dedicated-endpoint URL.</div>
 
                 <div class="muted" style="margin-top:10px; margin-bottom:6px;">Model</div>
-                <input id="togetherModel" class="inp" placeholder="Qwen/Qwen2.5-Coder-32B-Instruct" style="width:100%; max-width: 640px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />
+                <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
+                  <select id="togetherModelPick" class="inp" style="flex:1; min-width: 260px; max-width: 640px;"></select>
+                  <button class="pill" id="togetherModelRefresh" type="button">Refresh list</button>
+                </div>
+                <div class="muted" style="margin-top:6px;">Or type a model override:</div>
+                <input id="togetherModel" class="inp" placeholder="Qwen/Qwen3-Coder-Next-FP8" style="width:100%; max-width: 640px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />
 
                 <div class="muted" style="margin-top:10px; margin-bottom:6px;">API key</div>
                 <input id="togetherApiKey" class="inp" type="password" placeholder="together_..." style="width:100%; max-width: 640px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />

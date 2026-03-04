@@ -1213,6 +1213,29 @@ app.get('/adminonly', (req, res) => {
     .muted { color: var(--muted); font-size: 13px; }
     code { background: rgba(255,255,255,0.08); padding:2px 6px; border-radius:6px; }
     ul { margin: 10px 0 0 18px; color: rgba(231,231,231,0.88); }
+
+    /* Layout safety: prevent overlap by forcing responsive flow */
+    *{ box-sizing: border-box; }
+    textarea,input,select{ max-width:100%; }
+
+    .admGrid2{ display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:12px; align-items:start; }
+    @media (max-width: 980px){ .admGrid2{ grid-template-columns: 1fr; } }
+
+    .admSubCard{ background: rgba(0,0,0,0.12); }
+    .admFieldLabel{ margin-bottom:6px; }
+    .admTextarea{
+      width:100%;
+      min-height:240px;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,0.14);
+      background:#0d1426;
+      color:var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size:12px;
+      line-height:1.35;
+    }
+    .admRow{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
   </style>
 </head>
 <body>
@@ -1438,25 +1461,25 @@ app.get('/adminonly', (req, res) => {
           <div class="muted">Shared UI primitives</div>
         </div>
 
-        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.12);">
+        <div class="card admSubCard" style="margin-top:12px;">
           <div style="font-weight:900;">Menus</div>
           <div class="muted" style="margin-top:6px;">This controls the shared <b>ClawdApps</b> dropdown style for all apps pages.</div>
 
-          <div style="margin-top:12px; display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:start;">
-            <div>
-              <div class="muted" style="margin-bottom:6px;">CSS overrides</div>
-              <textarea id="brandMenuCss" style="width:100%; min-height:240px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:#0d1426; color:var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px;"></textarea>
-              <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+          <div class="admGrid2" style="margin-top:12px;">
+            <div style="min-width:0;">
+              <div class="muted admFieldLabel">CSS overrides</div>
+              <textarea id="brandMenuCss" class="admTextarea"></textarea>
+              <div class="admRow" style="margin-top:10px;">
                 <button id="brandMenuSave" class="tabbtn" type="button" style="width:auto;">Save</button>
                 <button id="brandMenuReset" class="tabbtn" type="button" style="width:auto;">Reset</button>
                 <span class="muted" id="brandMenuSaved"></span>
               </div>
             </div>
 
-            <div>
-              <div class="muted" style="margin-bottom:6px;">Preview</div>
-              <div style="border:1px solid rgba(255,255,255,0.10); border-radius:14px; padding:12px; background: rgba(255,255,255,0.03);">
-                <div style="display:flex; justify-content:flex-end;">${appsMenuHtml('/adminonly')}</div>
+            <div style="min-width:0;">
+              <div class="muted admFieldLabel">Preview</div>
+              <div class="card" style="background: rgba(255,255,255,0.03); box-shadow:none;">
+                <div style="display:flex; justify-content:flex-end; flex-wrap:wrap; gap:10px;">${appsMenuHtml('/adminonly')}</div>
                 <div class="muted" style="margin-top:12px;">Note: base menu CSS is fixed; this textarea is for overrides only.</div>
               </div>
             </div>

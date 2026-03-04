@@ -10,7 +10,7 @@ const http = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
 const crypto = require('crypto');
 const dns = require('dns');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const https = require('https');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
@@ -2757,45 +2757,108 @@ const sttUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
 
+// Warm STT worker (loads model once)
+let sttWorker = null;
+let sttWorkerBuf = '';
+const sttPending = new Map(); // id -> { resolve, reject, t }
+let sttBusy = false;
+
+function ensureSttWorker(){
+  if (sttWorker && !sttWorker.killed) return;
+
+  const py = process.env.STT_PYTHON || '/opt/clawdconsole/stt-venv/bin/python3';
+  const pyPath = (py && fs.existsSync(py)) ? py : 'python3';
+  const script = path.join(__dirname, 'scripts', 'stt_worker.py');
+
+  sttWorker = spawn(pyPath, [script], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      STT_MODEL: String(process.env.STT_MODEL || 'tiny.en'),
+      STT_DEVICE: String(process.env.STT_DEVICE || 'cpu'),
+      STT_COMPUTE_TYPE: String(process.env.STT_COMPUTE_TYPE || 'int8'),
+    }
+  });
+
+  sttWorkerBuf = '';
+
+  sttWorker.stdout.on('data', (chunk) => {
+    sttWorkerBuf += chunk.toString('utf8');
+    while (true){
+      const idx = sttWorkerBuf.indexOf('\n');
+      if (idx < 0) break;
+      const line = sttWorkerBuf.slice(0, idx).trim();
+      sttWorkerBuf = sttWorkerBuf.slice(idx + 1);
+      if (!line) continue;
+      let msg = null;
+      try { msg = JSON.parse(line); } catch { continue; }
+      const id = String(msg.id || '');
+      const p = sttPending.get(id);
+      if (!p) continue;
+      sttPending.delete(id);
+      if (msg.ok) p.resolve(msg);
+      else p.reject(new Error(String(msg.error || 'stt_failed')));
+    }
+  });
+
+  sttWorker.on('exit', (code, sig) => {
+    const err = new Error('stt_worker_exit ' + String(code) + ' ' + String(sig || ''));
+    for (const [id, p] of sttPending.entries()){
+      try { p.reject(err); } catch {}
+      sttPending.delete(id);
+    }
+    sttWorker = null;
+    sttBusy = false;
+  });
+}
+
+function sttTranscribeViaWorker(inPath, timeoutMs){
+  ensureSttWorker();
+  const id = 'stt_' + crypto.randomBytes(10).toString('hex');
+  const payload = JSON.stringify({ id, path: inPath }) + '\n';
+
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => {
+      sttPending.delete(id);
+      reject(new Error('stt_timeout'));
+    }, timeoutMs || 120000);
+
+    sttPending.set(id, {
+      resolve: (msg) => { clearTimeout(t); resolve(msg); },
+      reject: (e) => { clearTimeout(t); reject(e); },
+      t
+    });
+
+    try {
+      sttWorker.stdin.write(payload);
+    } catch (e) {
+      clearTimeout(t);
+      sttPending.delete(id);
+      reject(e);
+    }
+  });
+}
+
 app.post('/api/stt', sttUpload.single('audio'), async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const sess = getSessionFromReq(req);
   if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
   if (!req.file) return res.status(400).json({ ok:false, error:'no_audio' });
 
+  if (sttBusy) return res.status(429).json({ ok:false, error:'stt_busy' });
+  sttBusy = true;
+
   const inPath = req.file.path;
-  // Default to fastest local model; override with STT_MODEL (e.g. base, small)
-  const model = String(process.env.STT_MODEL || 'tiny.en');
-  const py = process.env.STT_PYTHON || '/opt/clawdconsole/stt-venv/bin/python3';
-  const script = path.join(__dirname, 'scripts', 'stt.py');
-
   const startedAt = Date.now();
-
   function safeUnlink(p){ try { fs.unlinkSync(p); } catch {} }
 
   try {
-    // If venv python isn't there, fall back to system python3.
-    const pyPath = (py && fs.existsSync(py)) ? py : 'python3';
-
-    const out = await new Promise((resolve, reject) => {
-      execFile(pyPath, [script, '--model', model, inPath], { timeout: 180_000, maxBuffer: 3 * 1024 * 1024 }, (err, stdout, stderr) => {
-        if (err) {
-          const msg = (stderr && String(stderr).trim()) ? String(stderr).trim() : String(err);
-          return reject(new Error(msg));
-        }
-        resolve(String(stdout || '').trim());
-      });
-    });
-
-    let j = null;
-    try { j = JSON.parse(out); } catch {}
-    if (!j || !j.ok) return res.status(500).json({ ok:false, error:'stt_failed', detail: j && j.error ? String(j.error) : null });
-
-    res.json({ ok:true, text: String(j.text || ''), ms: Date.now() - startedAt, model });
+    const msg = await sttTranscribeViaWorker(inPath, 120000);
+    res.json({ ok:true, text: String(msg.text || ''), ms: Date.now() - startedAt, model: String(process.env.STT_MODEL || 'tiny.en') });
   } catch (e) {
     res.status(500).json({ ok:false, error:'stt_exception', detail: String(e) });
   } finally {
-    // Privacy default: delete the recorded audio.
+    sttBusy = false;
     safeUnlink(inPath);
   }
 });
@@ -6380,7 +6443,7 @@ app.get('/', (req, res) => {
     .md_copy{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 999px; padding:6px 10px; cursor:pointer; font-size:12px}
     .md_copy:hover{border-color: rgba(34,198,198,.65)}
 
-    #composer { display:flex; gap: 10px; align-items: flex-end; }
+    #composer { display:flex; gap: 10px; align-items: flex-start; }
     #quickbar{ margin-top: 6px !important; margin-bottom: 0 !important; padding-bottom: 0 !important; }
     #quickButtons{ margin: 0 !important; padding: 0 !important; }
     #debug{ margin-top: 4px !important; }

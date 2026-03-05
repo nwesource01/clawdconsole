@@ -1,9 +1,9 @@
 // Clawd Console frontend
 (() => {
   // Avoid small browser "remembered scroll" bumps on reload.
+  // NOTE: do not force window scroll to top; operators expect the chat panel to open at most-recent.
   try {
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-    window.scrollTo(0, 0);
   } catch {}
 
   // BUILD is served by the backend so we have a single source of truth.
@@ -1214,6 +1214,15 @@
       return;
     }
     renderMessages(j.messages);
+    // Ensure we land at most-recent after refresh (images/layout can change height after render).
+    if (!didInitialChatScroll && chatlog) {
+      try {
+        const bump = () => { try { chatlog.scrollTop = chatlog.scrollHeight; } catch {} };
+        setTimeout(bump, 0);
+        setTimeout(bump, 60);
+        setTimeout(bump, 220);
+      } catch {}
+    }
   }
 
   async function uploadBlob(blob, filename) {

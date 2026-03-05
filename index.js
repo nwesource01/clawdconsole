@@ -7517,12 +7517,23 @@ app.get('/', (req, res) => {
     #debug{ margin-top: 4px !important; }
 
     /* Composer textarea: shorter by default (closer to pre-mic) */
-    /* Narrow the textarea so it doesn't visually collide with the action stack */
-    #msg { width: calc(100% - 40px); height: 120px; min-height: 120px; max-height: 240px; overflow:auto; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); }
+    #msg { width: 100%; height: 120px; min-height: 120px; max-height: 240px; overflow:auto; padding: 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; background: #0d1426; color: var(--text); box-sizing:border-box; }
 
     /* Action buttons: tighter + uniform */
     #mic,#plan,#send,#iterate{ height: 36px; padding: 6px 10px; font-size: 13px; white-space: nowrap; min-width: 74px; }
     #mic{ font-size: 15px; display:flex; align-items:center; justify-content:center; }
+
+    /* Tight vertical space: shrink textarea + 2x2 action grid */
+    @media (max-height: 900px){
+      #composer { grid-template-columns: minmax(0,1fr) 170px; }
+      #msg { height: 60px; min-height: 60px; max-height: 140px; }
+      .composerActions{ width:170px; display:grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      /* Place buttons: Speak TL, Send TR, Plan BL, Iterate BR */
+      #mic{ grid-column: 1; grid-row: 1; }
+      #send{ grid-column: 2; grid-row: 1; }
+      #plan{ grid-column: 1; grid-row: 2; }
+      #iterate{ grid-column: 2; grid-row: 2; }
+    }
     #micStatus{ font-size:12px; min-height: 16px; }
     /* #pasteHint removed (replaced by ClawdSnap) */
     .preview { display:flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }

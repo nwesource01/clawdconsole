@@ -323,6 +323,21 @@ const APPS_MENU_BASE_JS = `
 const AUTH_USER = process.env.AUTH_USER || 'nwesource';
 const AUTH_PASS = process.env.AUTH_PASS || '';
 
+// Optional: allowlist IPs that bypass auth entirely (comma-separated).
+// Intended for box-to-box access (stable droplet IPs), not wide ranges.
+const ALLOW_IPS = String(process.env.ALLOW_IPS || '').split(',').map(s => s.trim()).filter(Boolean);
+
+function clientIp(req){
+  // We are commonly behind nginx; honor X-Real-IP / X-Forwarded-For.
+  const xr = String(req.headers['x-real-ip'] || '').trim();
+  if (xr) return xr;
+  const xff = String(req.headers['x-forwarded-for'] || '').trim();
+  if (xff) return xff.split(',')[0].trim();
+  const ra = (req.socket && req.socket.remoteAddress) ? String(req.socket.remoteAddress) : '';
+  // Normalize IPv6-mapped IPv4.
+  return ra.startsWith('::ffff:') ? ra.slice('::ffff:'.length) : ra;
+}
+
 // lightweight session cookie so browser fetch() works reliably
 const SESS_COOKIE = 'claw_console_sess';
 const sessions = new Map(); // token -> expiresAtMs
@@ -612,6 +627,12 @@ app.use((req, res, next) => {
 
   // allow telemetry collector endpoints without auth (hosted collector)
   if (req.path.startsWith('/api/telemetry/v1/')) return next();
+
+  // 0) IP allowlist bypass (no session cookie needed)
+  if (ALLOW_IPS.length) {
+    const ip = clientIp(req);
+    if (ip && ALLOW_IPS.includes(ip)) return next();
+  }
 
   // 1) session cookie
   const cookies = parseCookies(req);

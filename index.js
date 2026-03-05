@@ -1494,6 +1494,7 @@ app.get('/adminonly', (req, res) => {
       <button id="admTabChangelog" class="tabbtn" type="button" style="margin-top:10px;">Changelog</button>
       <button id="admTabFeatures" class="tabbtn" type="button" style="margin-top:10px;">Features</button>
       <button id="admTabBranding" class="tabbtn" type="button" style="margin-top:10px;">Branding</button>
+      <button id="admTabResolutions" class="tabbtn" type="button" style="margin-top:10px;">Resolutions</button>
       <div class="muted" style="margin-top:10px;">Default tab: Sitemap</div>
     </aside>
 
@@ -1728,6 +1729,22 @@ app.get('/adminonly', (req, res) => {
         </div>
       </div>
 
+      <div id="admPanelResolutions" class="card" style="display:none;">
+        <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline; flex-wrap:wrap;">
+          <h1 style="margin:0; font-size:18px;">Resolutions</h1>
+          <div class="muted">Recurring issues + the known fix</div>
+        </div>
+        <div class="muted" style="margin-top:8px;">Source: <code>${DATA_DIR}/resolutions.json</code></div>
+
+        <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button id="resRefresh" class="tabbtn" type="button" style="width:auto;">Refresh</button>
+          <span class="muted" id="resCount"></span>
+        </div>
+
+        <div id="resList" style="margin-top:12px;"></div>
+        <div class="muted" style="margin-top:12px;">These are intentionally "collapsed" cards. Click a title to open.</div>
+      </div>
+
       <div class="muted" style="margin-top:12px;">More admin tabs coming.</div>
     </main>
   </div>
@@ -1739,6 +1756,24 @@ app.get('/adminonly', (req, res) => {
 });
 
 // Branding menu API (adminonly)
+app.get('/admin/api/resolutions', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!ADMINONLY_ENABLED) return res.status(404).json({ ok:false, error:'disabled' });
+  const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+  if (host && host !== 'claw.nwesource.com') return res.status(404).json({ ok:false, error:'not_found' });
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+
+  try {
+    if (!fs.existsSync(RESOLUTIONS_FILE)) seedResolutions();
+    const j = fs.existsSync(RESOLUTIONS_FILE) ? JSON.parse(fs.readFileSync(RESOLUTIONS_FILE, 'utf8')) : { version: 1, items: [] };
+    const items = Array.isArray(j.items) ? j.items : [];
+    return res.json({ ok:true, version: j.version || 1, updatedAt: j.updatedAt || null, items });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 app.get('/admin/api/branding/menu', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   if (!ADMINONLY_ENABLED) return res.status(404).json({ ok:false, error:'disabled' });
@@ -1766,6 +1801,89 @@ app.post('/admin/api/branding/menu', express.json({ limit: '200kb' }), (req, res
   logWork('branding.menu.saved', { bytes: cssOverrides.length });
   res.json({ ok:true, branding: next });
 });
+
+const RESOLUTIONS_FILE = path.join(DATA_DIR, 'resolutions.json');
+function seedResolutions(){
+  if (fs.existsSync(RESOLUTIONS_FILE)) return;
+  const now = new Date().toISOString();
+  const items = [
+    {
+      id: 'ws-1006-bounce',
+      title: 'WS closed: 1006 (UI bounce / reconnect churn)',
+      categories: ['console-ui','realtime'],
+      tags: ['websocket','ux','reconnect'],
+      issue: 'In the Console UI, the debug line flashes and the page "bumps" when the WebSocket closes (code 1006).',
+      solution: 'Reserve a fixed height for the debug slot so visibility toggles don\'t shift layout. Implemented by adding min-height/line-height to the #debug element. (Committed.)',
+      refs: ['static/app.js dbg()', 'adminonly Resolutions']
+    },
+    {
+      id: 'oauth-localhost-1455',
+      title: 'Codex OAuth spins forever (localhost:1455 callback not reachable)',
+      categories: ['auth','codex','networking'],
+      tags: ['oauth','ssh-tunnel','localhost','1455'],
+      issue: 'Codex login opens a URL but never completes after Google/OpenAI auth; redirect goes to http://localhost:1455/auth/callback on the machine running codex.',
+      solution: 'Run an SSH local port forward from your browser machine to the server: ssh -N -L 1455:127.0.0.1:1455 root@<server>. Keep it open while you authenticate.',
+      refs: ['codex login']
+    },
+    {
+      id: 'ssh-permission-denied-wrong-key',
+      title: 'SSH Permission denied (publickey) during tunnels (wrong key offered)',
+      categories: ['ssh','auth'],
+      tags: ['windows','openssh','identityfile'],
+      issue: 'Windows OpenSSH only tries default key names. Custom keys like clawdia1 are not offered automatically, leading to Permission denied (publickey).',
+      solution: 'Specify the key explicitly: ssh -i %USERPROFILE%\\.ssh\\clawdia1 ... (and/or add Host entry in ~/.ssh/config).',
+      refs: ['netstat :1455 showed ssh.exe listening']
+    },
+    {
+      id: 'dns-proxy-handshake',
+      title: 'ui.* domains show TLS handshake failure (Cloudflare proxy/dns mismatch)',
+      categories: ['dns','tls','nginx'],
+      tags: ['cloudflare','certbot','proxy'],
+      issue: 'ui.<box>.nwesource.com resolves to Cloudflare edge IPs; direct origin cert exists but client sees handshake failure.',
+      solution: 'Set A record to the origin IP and temporarily grey-cloud (DNS only) until verified. Then decide whether to proxy.',
+      refs: ['ui.clawdia.nwesource.com']
+    },
+    {
+      id: 'gateway-token-missing',
+      title: 'Baby Console not connected to gateway (missing GATEWAY_TOKEN)',
+      categories: ['gateway','console','config'],
+      tags: ['token','ws','18789'],
+      issue: 'Console can reach ws://127.0.0.1:18789 but cannot authenticate; gateway events show not connected.',
+      solution: 'Put the clawdbot gateway token into the console env (GATEWAY_TOKEN=...) and restart the console service.',
+      refs: ['/etc/<name>-console.env', 'gateway-events.jsonl']
+    },
+    {
+      id: 'adminonly-scope',
+      title: '/adminonly should only exist on Boss box (hostname-gated)',
+      categories: ['security','admin'],
+      tags: ['adminonly','routing'],
+      issue: 'Admin surfaces should not be exposed on baby boxes.',
+      solution: 'Keep ADMINONLY_ENABLED=1 only on boss; additionally hostname-gate /adminonly to claw.nwesource.com. Babies should return 404 for /adminonly.',
+      refs: ['/adminonly', 'ADMINONLY_ENABLED']
+    },
+    {
+      id: 'console-basic-auth',
+      title: 'Need to reset Baby Console password',
+      categories: ['console','ops'],
+      tags: ['basic-auth','env'],
+      issue: 'Forgotten Console basic-auth credentials block access.',
+      solution: 'Edit /etc/<name>-console.env (AUTH_USER/AUTH_PASS) and restart <name>-console.service.',
+      refs: ['/etc/clawdwell-console.env']
+    },
+    {
+      id: 'ip-allowlist',
+      title: 'Allow box-to-box access without passwords (no IP ranges)',
+      categories: ['security','ops'],
+      tags: ['allowlist','auth'],
+      issue: 'You want each box to see other consoles without typing creds, but no wide IP ranges.',
+      solution: 'Use ALLOW_IPS="ip1,ip2,..." in console env; Console bypasses auth for exact matches (uses X-Real-IP/X-Forwarded-For).',
+      refs: ['ALLOW_IPS']
+    }
+  ];
+  const doc = { version: 1, updatedAt: now, items };
+  try { fs.writeFileSync(RESOLUTIONS_FILE, JSON.stringify(doc, null, 2), 'utf8'); } catch {}
+}
+seedResolutions();
 
 const ADOPTION_FILE = path.join(DATA_DIR, 'adoption.json');
 function readAdoption(){

@@ -6,6 +6,7 @@
   const tabChangelog = document.getElementById('admTabChangelog');
   const tabFeatures = document.getElementById('admTabFeatures');
   const tabBranding = document.getElementById('admTabBranding');
+  const tabResolutions = document.getElementById('admTabResolutions');
 
   const panelSitemap = document.getElementById('admPanelSitemap');
   const panelApps = document.getElementById('admPanelApps');
@@ -14,6 +15,7 @@
   const panelChangelog = document.getElementById('admPanelChangelog');
   const panelFeatures = document.getElementById('admPanelFeatures');
   const panelBranding = document.getElementById('admPanelBranding');
+  const panelResolutions = document.getElementById('admPanelResolutions');
 
   const brandMenuCss = document.getElementById('brandMenuCss');
   const brandMenuSave = document.getElementById('brandMenuSave');
@@ -43,6 +45,7 @@
     { key: 'changelog', tab: tabChangelog, panel: panelChangelog },
     { key: 'features', tab: tabFeatures, panel: panelFeatures },
     { key: 'branding', tab: tabBranding, panel: panelBranding },
+    { key: 'resolutions', tab: tabResolutions, panel: panelResolutions },
   ];
 
   function setTab(k){
@@ -55,6 +58,7 @@
     if (k === 'adoption') loadAdoption();
     if (k === 'changelog') loadChangelog();
     if (k === 'branding') loadBrandingMenu();
+    if (k === 'resolutions') loadResolutions();
   }
 
   function esc(s){
@@ -221,6 +225,56 @@
     }
   }
 
+  async function loadResolutions(){
+    const list = document.getElementById('resList');
+    const count = document.getElementById('resCount');
+    if (!list) return;
+    list.innerHTML = '<div class="muted">Loading…</div>';
+    try {
+      const res = await fetch('/admin/api/resolutions', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      const items = (j && j.ok && Array.isArray(j.items)) ? j.items : [];
+      if (count) count.textContent = items.length ? (items.length + ' card(s)') : 'No cards yet';
+      if (!items.length) { list.innerHTML = '<div class="muted">No resolutions yet.</div>'; return; }
+
+      function pill(txt){
+        if (!txt) return '';
+        return '<span style="display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);font-size:12px;">' + esc(txt) + '</span>';
+      }
+
+      list.innerHTML = items.map(it => {
+        const title = esc(it.title || '(untitled)');
+        const cats = Array.isArray(it.categories) ? it.categories : [];
+        const tags = Array.isArray(it.tags) ? it.tags : [];
+        const issue = esc(it.issue || '');
+        const sol = esc(it.solution || '');
+        const refs = Array.isArray(it.refs) ? it.refs : [];
+        const meta = [
+          ...cats.map(c => pill('cat: ' + c)),
+          ...tags.map(t => pill('#' + t)),
+        ].join(' ');
+
+        const refHtml = refs.length ? ('<div class="muted" style="margin-top:10px;">Refs: ' + refs.map(r => '<code>' + esc(r) + '</code>').join(' ') + '</div>') : '';
+
+        return `
+          <details style="border:1px solid rgba(255,255,255,0.10); border-radius:14px; padding:12px; background: rgba(255,255,255,0.03); margin-top:10px;">
+            <summary style="cursor:pointer; font-weight:900;">${title}</summary>
+            <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">${meta}</div>
+            ${issue ? ('<div class="muted" style="margin-top:10px;"><b>Issue:</b><div style="white-space:pre-wrap; margin-top:6px;">' + issue + '</div></div>') : ''}
+            ${sol ? ('<div class="muted" style="margin-top:10px;"><b>Resolution:</b><div style="white-space:pre-wrap; margin-top:6px;">' + sol + '</div></div>') : ''}
+            ${refHtml}
+          </details>
+        `;
+      }).join('');
+    } catch {
+      list.innerHTML = '<div class="muted">Failed to load.</div>';
+    }
+  }
+
+  const resRefresh = document.getElementById('resRefresh');
+  if (resRefresh) resRefresh.addEventListener('click', loadResolutions);
+
+
   async function saveBrandingMenu(){
     try {
       if (brandMenuSaved) brandMenuSaved.textContent = 'Saving…';
@@ -252,6 +306,7 @@
   if (tabChangelog) tabChangelog.addEventListener('click', () => setTab('changelog'));
   if (tabFeatures) tabFeatures.addEventListener('click', () => setTab('features'));
   if (tabBranding) tabBranding.addEventListener('click', () => setTab('branding'));
+  if (tabResolutions) tabResolutions.addEventListener('click', () => setTab('resolutions'));
   if (crmRefresh) crmRefresh.addEventListener('click', loadCRM);
 
   if (brandMenuSave) brandMenuSave.addEventListener('click', saveBrandingMenu);

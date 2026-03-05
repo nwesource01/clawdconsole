@@ -6666,13 +6666,40 @@ async function bridgeChatPost(targetUrl, payload){
   if (!r.ok) throw new Error('bridge_chat_http_' + r.status);
 }
 
+// Dedupe bridged messages (prevent loops and accidental double-post)
+const BRIDGE_SEEN = new Map(); // msgId -> ts
+function bridgeSeenHas(id){
+  if (!id) return false;
+  const now = Date.now();
+  const ts = BRIDGE_SEEN.get(id);
+  if (ts && (now - ts) < (10 * 60 * 1000)) return true; // 10 min
+  return false;
+}
+function bridgeSeenMark(id){
+  if (!id) return;
+  const now = Date.now();
+  BRIDGE_SEEN.set(id, now);
+  // lazy cleanup
+  if (BRIDGE_SEEN.size > 5000) {
+    for (const [k, ts] of BRIDGE_SEEN.entries()) {
+      if ((now - ts) > (12 * 60 * 1000)) BRIDGE_SEEN.delete(k);
+    }
+  }
+}
+
 // token-auth: receive bridged chat and inject into our message stream.
 app.post('/api/ops/bridge/chat', express.json({ limit:'200kb' }), (req, res) => {
   if (!bridgeAuthOk(req)) return res.status(401).type('text/plain').send('Auth required');
   const from = String(req.body?.from || '').trim().slice(0, 48) || 'Remote';
   const to = String(req.body?.to || '').trim().slice(0, 48) || 'Local';
   const text = String(req.body?.text || '').trim();
+  const msgId = String(req.body?.msgId || '').trim().slice(0, 120);
   if (!text) return res.status(400).json({ ok:false, error:'missing_text' });
+
+  if (msgId) {
+    if (bridgeSeenHas(msgId)) return res.json({ ok:true, dup:true });
+    bridgeSeenMark(msgId);
+  }
 
   // Fleet status report messages (boss-only behavior)
   try {
@@ -7092,24 +7119,39 @@ app.post('/api/message', (req, res) => {
   const rawText = (typeof text === 'string') ? text : '';
   const nm = selfName();
 
-  // Two-way chat bridge behavior:
-  // - Babies: only forward to boss when explicitly requested (copyBoss=true).
-  // - Boss: if message begins with "<self> -> <Peer>: ..." and peer is in BRIDGE_CHAT_PEERS, route it.
+  // Mesh chat routing (explicit only; prevents duplication/loops)
+  // - Default: local-only
+  // - copyBoss=true: send a copy to Boss
+  // - Explicit route syntax:
+  //   - TO: <Peer>: <text>
+  //   - <Self> -> <Peer>: <text>   (only routes if <Self> matches our assistant name)
   try {
-    // Explicit "copy Boss" (baby convenience)
+    const msgId = 'brmsg_' + Date.now().toString(16) + '_' + Math.random().toString(16).slice(2);
+
+    // Explicit "copy Boss" (convenience)
     if (copyBoss) {
-      // Prefer explicit BRIDGE_CHAT_BOSS_URL; otherwise fall back to paired bridge peer url.
       const peer = readBridgePeer();
       const bossUrl = (BRIDGE_CHAT_BOSS_URL || String(peer?.url || '')).trim().replace(/\/+$/,'');
       if (bossUrl) {
-        // Inject locally as a normal message (no prefix) but send a copy upstream.
         const msg = acceptMessage({ text: rawText, attachments, noList: !!noList });
-        bridgeChatPost(bossUrl, { from: nm, to: 'Boss', text: rawText }).catch(() => {});
+        bridgeChatPost(bossUrl, { from: nm, to: 'Boss', text: rawText, msgId }).catch(() => {});
         return res.json({ ok: true, message: msg, bridged: true, copiedBoss: true });
       }
     }
 
-    // Boss routing (only when peers configured)
+    // Route: TO: <Peer>: <text>
+    const mTo = rawText.match(/^\s*TO\s*:\s*([^\n]{1,48})\s*:\s*([\s\S]*)$/i);
+    if (mTo) {
+      const to = String(mTo[1] || '').trim();
+      const body = String(mTo[2] || '').trim();
+      if (to && body && BRIDGE_CHAT_PEERS_MAP[to]) {
+        const msg = acceptMessage({ text: `${nm} -> ${to}: ${body}`, attachments, noList: !!noList });
+        bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from: nm, to, text: body, msgId }).catch(() => {});
+        return res.json({ ok: true, message: msg, bridged: true });
+      }
+    }
+
+    // Route: <Self> -> <Peer>: <text>
     const m = rawText.match(/^\s*([^\n]{1,48})\s*->\s*([^\n]{1,48})\s*:\s*([\s\S]*)$/);
     if (m) {
       const from = String(m[1] || '').trim();
@@ -7117,7 +7159,7 @@ app.post('/api/message', (req, res) => {
       const body = String(m[3] || '').trim();
       if (from && body && from.toLowerCase() === nm.toLowerCase() && BRIDGE_CHAT_PEERS_MAP[to]) {
         const msg = acceptMessage({ text: `${from} -> ${to}: ${body}`, attachments, noList: !!noList });
-        bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from, to, text: body }).catch(() => {});
+        bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from, to, text: body, msgId }).catch(() => {});
         return res.json({ ok: true, message: msg, bridged: true });
       }
     }

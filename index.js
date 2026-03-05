@@ -4337,6 +4337,16 @@ app.get(['/ClawdDocs/mine','/TeamClawd/docs','/team/docs'], (req, res) => {
           <div>Index: <span id="docsWho">${isTeam ? 'Team' : escHtml(selfName())}</span></div>
           <div class="muted">Click a doc to open</div>
         </div>
+
+        <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <input id="docsQ" class="inp" placeholder="Filter…" style="flex:1; min-width:180px;" />
+          <button id="docsClear" type="button" class="wlbtn">Clear</button>
+        </div>
+        <div id="docsFilters" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">
+          <div id="docsFilterCats" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
+          <div id="docsFilterMembers" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
+        </div>
+
         <div id="docsList" style="margin-top:10px;"></div>
       </div>
       <div class="card" style="padding:12px; min-height: 420px; display:flex; flex-direction:column;">

@@ -1668,6 +1668,7 @@ app.get('/adminonly', (req, res) => {
           <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
             <button id="chgUpdate" class="tabbtn" type="button" style="width:auto;">Update Changelog</button>
             <button id="chgRebuild" class="tabbtn" type="button" style="width:auto;">Rebuild</button>
+            <button id="chgPostTeam" class="tabbtn" type="button" style="width:auto;">Post → Team Docs</button>
             <span class="muted" id="chgSaved"></span>
           </div>
         </div>
@@ -2103,6 +2104,50 @@ app.post('/api/changelog', (req, res) => {
   const saved = appendChangelog({ title, body });
   logWork('changelog.saved', { id: saved.id, build: saved.build });
   res.json({ ok: true, entry: saved });
+});
+
+// Publish console changelog into Team Docs (Boss only)
+app.post('/api/admin/changelog/post-team', (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  try {
+    const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+    const isBoss = (host === 'claw.nwesource.com') || ADMINONLY_ENABLED;
+    if (!isBoss) return res.status(403).json({ ok:false, error:'boss_only' });
+
+    // Build a markdown doc containing recent changelog entries.
+    const entries = readChangelog(200);
+    const lines = [];
+    lines.push('---');
+    lines.push('title: Console Changelog');
+    lines.push('member: Clawdrey');
+    lines.push('categories: [process, changelog, console]');
+    lines.push('updated: ' + new Date().toISOString().slice(0,10));
+    lines.push('---');
+    lines.push('');
+    lines.push('This page is generated from `console-data/changelog.jsonl` (Boss).');
+    lines.push('');
+
+    for (const e of entries){
+      const ts = String(e.ts || '');
+      const title = String(e.title || '(untitled)');
+      const build = e.build ? (' (build ' + String(e.build) + ')') : '';
+      lines.push('## ' + title + build);
+      if (ts) lines.push(ts);
+      lines.push('');
+      const body = String(e.body || '').trim();
+      if (body) lines.push(body);
+      lines.push('');
+    }
+
+    const dir = docsMineDir();
+    try { fs.mkdirSync(dir, { recursive:true }); } catch {}
+    const outPath = path.join(dir, 'console-changelog.md');
+    fs.writeFileSync(outPath, lines.join('\n'), 'utf8');
+    logWork('docs.team.changelog.posted', { path: outPath, entries: entries.length });
+    res.json({ ok:true, path: outPath, entries: entries.length });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:String(e) });
+  }
 });
 
 // --- ClawdPub: published artifacts index ---

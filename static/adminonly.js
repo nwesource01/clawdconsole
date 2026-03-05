@@ -30,6 +30,8 @@
 
   const adoptRefresh = document.getElementById('adoptRefresh');
   const adoptSave = document.getElementById('adoptSave');
+
+  const chgPostTeam = document.getElementById('chgPostTeam');
   const adoptSaved = document.getElementById('adoptSaved');
   const adoptTotal = document.getElementById('adoptTotal');
   const adoptClawdbot = document.getElementById('adoptClawdbot');
@@ -172,6 +174,25 @@
       loadChangelog();
     } catch {
       if (saved) saved.textContent = 'Update failed.';
+    }
+  }
+
+  async function postChangelogToTeamDocs(){
+    const saved = document.getElementById('chgSaved');
+    try {
+      if (saved) saved.textContent = 'Posting to Team Docs…';
+      const res = await fetch('/api/admin/changelog/post-team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({})
+      });
+      const txt = await res.text();
+      let j=null; try { j = JSON.parse(txt); } catch {}
+      if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status + ' ' + (txt||'').slice(0,120));
+      if (saved) saved.textContent = 'Posted to Team Docs (' + String(j.entries || 0) + ' entries).';
+    } catch {
+      if (saved) saved.textContent = 'Post failed.';
     }
   }
 
@@ -383,9 +404,11 @@
   const chgRefresh = document.getElementById('chgRefresh');
   const chgUpdate = document.getElementById('chgUpdate');
   const chgRebuild = document.getElementById('chgRebuild');
+  const chgPostTeamBtn = document.getElementById('chgPostTeam');
   if (chgRefresh) chgRefresh.addEventListener('click', loadChangelog);
   if (chgUpdate) chgUpdate.addEventListener('click', () => updateChangelog('append'));
   if (chgRebuild) chgRebuild.addEventListener('click', () => updateChangelog('rebuild'));
+  if (chgPostTeamBtn) chgPostTeamBtn.addEventListener('click', postChangelogToTeamDocs);
 
   if (adoptRefresh) adoptRefresh.addEventListener('click', loadAdoption);
   if (adoptSave) adoptSave.addEventListener('click', saveAdoption);

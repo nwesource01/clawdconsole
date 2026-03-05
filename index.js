@@ -3971,6 +3971,7 @@ function appsIcon(kind){
     build: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l7-7 3 3 6-6"/><path d="M20 7v6h-6"/></svg>',
     queue: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10M7 12h10M7 17h10"/><path d="M4 7h0M4 12h0M4 17h0"/></svg>',
     code: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l-4-6 4-6"/><path d="M15 6l4 6-4 6"/><path d="M13 5l-2 14"/></svg>',
+    docs: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"/><path d="M15 3v4h4"/><path d="M8 11h8M8 14h8M8 17h6"/></svg>',
   };
   return common[kind] || common.repo;
 }
@@ -4129,6 +4130,7 @@ app.get('/apps', (req, res) => {
     { k:'pub', title:'ClawdPub', href:'/apps/pub', desc:'Published artifacts + SOP.' },
     { k:'build', title:'ClawdBuild', href:'/apps/build', desc:'Build/health/queue/commits/changelog surface.' },
     { k:'queue', title:'ClawdQueue', href:'/apps/queue', desc:'Serial execution rail (PM-backed) + autorun.' },
+    { k:'docs', title:'ClawdDocs', href:'/ClawdDocs', desc:'Docs: Mine + Team index (file-backed, filterable).' },
   ];
 
   const bodyHtml = `
@@ -4155,6 +4157,245 @@ app.get('/apps', (req, res) => {
     activePath: '/apps',
   }));
 });
+
+// --- Apps Menu Lab (4 concepts, one per corner) ---
+// --- ClawdDocs (docs: mine + team) ---
+function parseFrontmatter(md){
+  const out = { meta: {}, body: md };
+  const m = String(md||'').match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
+  if (!m) return out;
+  const raw = m[1] || '';
+  const meta = {};
+  for (const line of raw.split(/\r?\n/)){
+    const mm = line.match(/^([A-Za-z0-9_\-]+)\s*:\s*(.*)$/);
+    if (!mm) continue;
+    const k = String(mm[1]||'').trim();
+    let v = String(mm[2]||'').trim();
+    // parse simple arrays: [a, b]
+    if (/^\[.*\]$/.test(v)){
+      try {
+        v = v.replace(/^\[/,'').replace(/\]$/,'');
+        v = v.split(',').map(x => x.trim()).filter(Boolean);
+      } catch {}
+    }
+    meta[k] = v;
+  }
+  out.meta = meta;
+  out.body = String(md||'').slice(m[0].length);
+  return out;
+}
+
+function docsMineDir(){
+  const nm = String(selfName()||'').toLowerCase();
+  const cand = [];
+  // preferred on Boss
+  cand.push('/home/master/clawd/apps/docs/mine');
+  // baby option (state)
+  cand.push(`/var/lib/${nm}/apps/docs/mine`);
+  cand.push(`/opt/${nm}/apps/docs/mine`);
+  // fallback
+  cand.push(path.join(DATA_DIR, 'docs-mine'));
+  for (const p of cand){
+    try { if (fs.existsSync(p)) return p; } catch {}
+  }
+  // ensure preferred exists
+  const p = cand[0];
+  try { fs.mkdirSync(p, { recursive:true }); } catch {}
+  return p;
+}
+
+function listDocsInDir(dir){
+  const items = [];
+  try {
+    const files = fs.readdirSync(dir);
+    for (const f of files){
+      if (!/\.md$/i.test(f)) continue;
+      const slug = f.replace(/\.md$/i,'');
+      const abs = path.join(dir, f);
+      let md = '';
+      try { md = String(fs.readFileSync(abs,'utf8')); } catch { md=''; }
+      const fm = parseFrontmatter(md);
+      const title = fm.meta.title || fm.meta.Title || slug;
+      const member = fm.meta.member || fm.meta.Member || String(selfName()||'');
+      const categories = Array.isArray(fm.meta.categories) ? fm.meta.categories : (typeof fm.meta.categories === 'string' ? fm.meta.categories.split(',').map(s=>s.trim()).filter(Boolean) : []);
+      const updated = fm.meta.updated || null;
+      items.push({ slug, title, member, categories, updated });
+    }
+  } catch {}
+  // sort alpha by title
+  items.sort((a,b) => String(a.title||'').localeCompare(String(b.title||'')));
+  return items;
+}
+
+function readDocBySlug(dir, slug){
+  const safe = String(slug||'').trim().replace(/[^a-zA-Z0-9._-]/g,'');
+  const abs = path.join(dir, safe + '.md');
+  if (!abs.startsWith(dir)) return null;
+  if (!fs.existsSync(abs)) return null;
+  const md = String(fs.readFileSync(abs,'utf8'));
+  const fm = parseFrontmatter(md);
+  return {
+    slug: safe,
+    title: fm.meta.title || safe,
+    member: fm.meta.member || String(selfName()||''),
+    categories: Array.isArray(fm.meta.categories) ? fm.meta.categories : [],
+    updated: fm.meta.updated || null,
+    body: String(fm.body||'').trim(),
+  };
+}
+
+// Marketable entry point
+app.get('/ClawdDocs', (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  res.redirect(302, '/ClawdDocs/mine');
+});
+
+app.get(['/ClawdDocs/mine','/ClawdDocs/team'], (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  const isTeam = String(req.path||'').endsWith('/team');
+
+  const bodyHtml = `
+    <div class="subcard">
+      <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
+        <div>
+          <div style="font-weight:950;">ClawdDocs</div>
+          <div class="muted" style="margin-top:6px;">File-backed docs • frontmatter categories • ${isTeam ? 'Team index (live)' : 'Mine'}</div>
+        </div>
+        <div class="row" style="gap:8px;">
+          <button id="docsTabMine" type="button" class="pill">Mine</button>
+          <button id="docsTabTeam" type="button" class="pill">Team</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2" style="display:grid; grid-template-columns: 360px 1fr; gap:12px;">
+      <div class="card" style="padding:12px;">
+        <div class="muted" style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+          <div>Index: <span id="docsWho">${isTeam ? 'Team' : escHtml(selfName())}</span></div>
+          <div class="muted">Click a doc to open</div>
+        </div>
+        <div id="docsList" style="margin-top:10px;"></div>
+      </div>
+      <div class="card" style="padding:12px; min-height: 420px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+          <div style="font-weight:950;" id="docsViewTitle">Select a doc</div>
+          <div class="muted" id="docsViewMeta"></div>
+        </div>
+        <pre id="docsView" style="margin-top:10px; white-space:pre-wrap; overflow:auto; flex:1; min-height:0; background: rgba(0,0,0,0.10); border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px;"></pre>
+      </div>
+    </div>
+
+    <style>
+      .docRow{ border:1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 10px; background: rgba(255,255,255,0.03); cursor:pointer; }
+      .docRow:hover{ background: rgba(255,255,255,0.06); border-color: rgba(34,198,198,0.35); }
+      .chip{ display:inline-flex; align-items:center; gap:8px; border:1px solid rgba(255,255,255,0.18); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
+      .pill.on{ border-color: rgba(34,198,198,.55) !important; background: rgba(34,198,198,.12) !important; }
+      @media (max-width: 980px){ .grid2{ grid-template-columns: 1fr !important; } }
+    </style>
+
+    <script src="/static/docs.js"></script>
+  `;
+
+  res.type('text/html; charset=utf-8').send(appsPageShell({
+    title: 'ClawdDocs',
+    subtitle: 'Mine + Team (live) docs index',
+    bodyHtml,
+    activePath: '/ClawdDocs',
+  }));
+});
+
+// Mine index
+app.get('/api/docs/mine/index', (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  const dir = docsMineDir();
+  const items = listDocsInDir(dir);
+  res.json({ ok:true, me: String(selfName()||''), dir, items });
+});
+
+app.get('/api/docs/mine/doc', (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  const slug = String(req.query.slug||'').trim();
+  const dir = docsMineDir();
+  const doc = readDocBySlug(dir, slug);
+  if (!doc) return res.status(404).json({ ok:false, error:'not_found' });
+  res.json({ ok:true, ...doc });
+});
+
+// Ops endpoints for team federation (bridge token required)
+app.get('/api/ops/docs/index', (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  if (!bridgeAuthOk(req)) return res.status(401).type('text/plain').send('Auth required');
+  const dir = docsMineDir();
+  const items = listDocsInDir(dir);
+  res.json({ ok:true, name: String(selfName()||''), items });
+});
+
+app.get('/api/ops/docs/doc', (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  if (!bridgeAuthOk(req)) return res.status(401).type('text/plain').send('Auth required');
+  const slug = String(req.query.slug||'').trim();
+  const dir = docsMineDir();
+  const doc = readDocBySlug(dir, slug);
+  if (!doc) return res.status(404).json({ ok:false, error:'not_found' });
+  res.json({ ok:true, ...doc });
+});
+
+// Team index (Boss aggregates live; non-boss shows local only)
+app.get('/api/docs/team/index', async (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+  const isBoss = (host === 'claw.nwesource.com') || ADMINONLY_ENABLED;
+
+  // always include local
+  const local = listDocsInDir(docsMineDir()).map(x => ({...x, box: String(selfName()||'') }));
+  if (!isBoss) return res.json({ ok:true, me: String(selfName()||''), items: local });
+
+  const tok = readBridgeToken();
+  const peers = Object.entries(BRIDGE_CHAT_PEERS_MAP || {});
+  const all = [...local];
+
+  for (const [peerName, url] of peers){
+    try {
+      const u = String(url||'').replace(/\/+$/,'') + '/api/ops/docs/index';
+      const r = await fetch(u, { headers: { 'X-CLAWD-BRIDGE-TOKEN': tok }, cache:'no-store' });
+      if (!r.ok) continue;
+      const j = await r.json();
+      const items = (j && j.ok && Array.isArray(j.items)) ? j.items : [];
+      for (const it of items){ all.push({ ...it, box: peerName, member: it.member || peerName }); }
+    } catch {}
+  }
+
+  // sort by title
+  all.sort((a,b) => String(a.title||'').localeCompare(String(b.title||'')));
+  res.json({ ok:true, me: String(selfName()||''), items: all });
+});
+
+app.get('/api/docs/team/doc', async (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  const slug = String(req.query.slug||'').trim();
+  const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+  const isBoss = (host === 'claw.nwesource.com') || ADMINONLY_ENABLED;
+
+  // local try first
+  const local = readDocBySlug(docsMineDir(), slug);
+  if (local) return res.json({ ok:true, ...local });
+
+  if (!isBoss) return res.status(404).json({ ok:false, error:'not_found' });
+  const tok = readBridgeToken();
+  const peers = Object.entries(BRIDGE_CHAT_PEERS_MAP || {});
+  for (const [peerName, url] of peers){
+    try {
+      const u = String(url||'').replace(/\/+$/,'') + '/api/ops/docs/doc?slug=' + encodeURIComponent(slug);
+      const r = await fetch(u, { headers: { 'X-CLAWD-BRIDGE-TOKEN': tok }, cache:'no-store' });
+      if (!r.ok) continue;
+      const j = await r.json();
+      if (j && j.ok) return res.json(j);
+    } catch {}
+  }
+  res.status(404).json({ ok:false, error:'not_found' });
+});
+
+app.get('/apps/docs', (req, res) => res.redirect(302, '/ClawdDocs'));
 
 // --- Apps Menu Lab (4 concepts, one per corner) ---
 app.get('/apps/menu-lab', (req, res) => {

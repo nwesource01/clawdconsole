@@ -7366,6 +7366,26 @@ app.get('/', (req, res) => {
 
     /* layout */
     .wrap { display: grid; grid-template-columns: 300px 1.25fr 0.75fr; gap: 14px; max-width: 1920px; height: calc(100vh - 36px); overflow: hidden; }
+
+    /* Sidebar collapse: icon-only rail + keep ClawdApps Open visible */
+    body.sidebarCollapsed .wrap{ grid-template-columns: 72px 1.25fr 0.75fr; }
+    body.sidebarCollapsed .sidebar{ overflow: visible; }
+    body.sidebarCollapsed #titleCard{ padding: 10px; }
+    body.sidebarCollapsed #titleCard .titleMeta{ display:none !important; }
+    body.sidebarCollapsed #titleCard #uiGear{ display:none !important; }
+    body.sidebarCollapsed #titleCard #status{ display:none !important; }
+    body.sidebarCollapsed #titleCard .titleStorageRow{ display:none !important; }
+
+    body.sidebarCollapsed #appsCard{ padding: 10px; }
+    body.sidebarCollapsed #appsCard h2{ display:none !important; }
+    body.sidebarCollapsed #appsToggle{ display:none !important; }
+    body.sidebarCollapsed #appsCard #appsBody{ display:none !important; }
+    body.sidebarCollapsed #appsCard .appsHeaderLeft{ display:none !important; }
+
+    body.sidebarCollapsed #rulesCard,
+    body.sidebarCollapsed #toolsCard,
+    body.sidebarCollapsed #readmeCard,
+    body.sidebarCollapsed #snapCard{ display:none !important; }
     .sidebar { position: sticky; top: 0; align-self: start; max-height: 100%; overflow: hidden; }
     .main { min-width: 0; max-height: 100%; overflow: hidden; display:flex; flex-direction:column; gap:14px; }
     .right { min-width: 0; display:flex; flex-direction:column; gap:14px; height: 100%; overflow: hidden; }
@@ -7592,10 +7612,10 @@ app.get('/', (req, res) => {
   </div>
   <div class="wrap">
     <div class="sidebar">
-      <div class="card">
+      <div class="card" id="titleCard">
         <div class="row" style="justify-content: space-between; align-items: center;">
           <div class="row" style="gap: 10px;">
-            <div style="width:36px;height:36px;border-radius:10px;background:rgba(34,198,198,.10);border:1px solid rgba(34,198,198,.35);display:flex;align-items:center;justify-content:center;">
+            <div id="sidebarToggle" title="Collapse sidebar" style="width:36px;height:36px;border-radius:10px;background:rgba(34,198,198,.10);border:1px solid rgba(34,198,198,.35);display:flex;align-items:center;justify-content:center; cursor:pointer; user-select:none;">
               <svg width="24" height="24" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Clawd Console">
                 <path d="M46 18H26c-4.4 0-8 3.6-8 8v12c0 4.4 3.6 8 8 8H46" stroke="rgba(34,198,198,.95)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
                 <rect x="26" y="23" width="16" height="8" rx="4" fill="rgba(34,198,198,.22)" stroke="rgba(34,198,198,.55)" stroke-width="2"/>
@@ -7603,7 +7623,7 @@ app.get('/', (req, res) => {
                 <path d="M46 28l8 4-8 4" stroke="rgba(34,198,198,.95)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </div>
-            <div>
+            <div class="titleMeta">
               <div style="font-weight:700; font-size: 16px;">Clawd Console</div>
               <div class="muted">Your command deck</div>
             </div>
@@ -7614,8 +7634,8 @@ app.get('/', (req, res) => {
           </button>
         </div>
         <div class="pill" id="status" style="margin-top: 10px;">Connecting…</div>
-        <div class="muted" style="margin-top: 8px;">Build: <code title="If UI looks stale, hard refresh. Build is server-tracked.">${BUILD}</code></div>
-        <div class="muted" style="margin-top: 10px; display:flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+        <div class="muted titleStorageRow" style="margin-top: 8px;">Build: <code title="If UI looks stale, hard refresh. Build is server-tracked.">${BUILD}</code></div>
+        <div class="muted titleStorageRow" style="margin-top: 10px; display:flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
           <span>Storage: <code>${DATA_DIR}</code></span>
           <div class="row" style="gap:8px; justify-content:flex-end; align-items:center; margin-left:auto;">
             <a class="scriptBtn" href="/transcript" target="_blank" rel="noopener">ClawdScript - View Entire Chat</a>
@@ -7626,7 +7646,7 @@ app.get('/', (req, res) => {
 
       <div class="card" style="margin-top: 14px;" id="appsCard">
         <div class="statusline" style="justify-content: space-between; align-items:center;">
-          <div class="row" style="gap:10px; align-items:center;">
+          <div class="row appsHeaderLeft" style="gap:10px; align-items:center;">
             <h2 style="margin:0">ClawdApps</h2>
           </div>
           <div class="row" style="gap:8px; align-items:center;">

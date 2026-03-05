@@ -25,6 +25,27 @@
   const schedTabEmail = document.getElementById('schedTabEmail');
   const schedTabDocs = document.getElementById('schedTabDocs');
 
+  // --- Sidebar collapse (icon-only rail) ---
+  const sidebarToggle = document.getElementById('sidebarToggle');
+  const SIDEBAR_LS_KEY = 'cc_sidebar_collapsed';
+  function applySidebarCollapsed(on){
+    try { document.body.classList.toggle('sidebarCollapsed', !!on); } catch {}
+    try {
+      if (sidebarToggle) sidebarToggle.title = on ? 'Expand sidebar' : 'Collapse sidebar';
+    } catch {}
+  }
+  try {
+    const v = localStorage.getItem(SIDEBAR_LS_KEY);
+    if (v === '1') applySidebarCollapsed(true);
+  } catch {}
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', () => {
+      const on = !document.body.classList.contains('sidebarCollapsed');
+      applySidebarCollapsed(on);
+      try { localStorage.setItem(SIDEBAR_LS_KEY, on ? '1' : '0'); } catch {}
+    });
+  }
+
   // Cache last loaded messages for quick actions (Repeat Last, etc.)
   let messageCache = [];
   let lastUserText = '';

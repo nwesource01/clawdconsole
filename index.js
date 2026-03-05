@@ -6344,6 +6344,62 @@ app.post('/api/ops/bridge/post', express.json({ limit:'200kb' }), (req, res) => 
   res.json({ ok: !!ok, entry });
 });
 
+// --- Console-to-Console Chat Bridge (two-way via Boss) ---
+// Babies forward chat to the boss; boss can route replies to a specific baby.
+//
+// Env:
+// - BRIDGE_CHAT_BOSS_URL=https://claw.nwesource.com   (set on babies)
+// - BRIDGE_CHAT_PEERS=Clawdia=https://clawdia.nwesource.com,Clawdwell=https://clawdwell.nwesource.com   (set on boss)
+// - BRIDGE_TOKEN must match across boxes (already used for /api/ops/bridge/* endpoints)
+const BRIDGE_CHAT_BOSS_URL = String(process.env.BRIDGE_CHAT_BOSS_URL || '').trim().replace(/\/+$/,'');
+const BRIDGE_CHAT_PEERS = String(process.env.BRIDGE_CHAT_PEERS || '').trim();
+function parseBridgePeers(s){
+  const out = {};
+  for (const part of String(s||'').split(',')){
+    const p = part.trim();
+    if (!p) continue;
+    const idx = p.indexOf('=');
+    if (idx < 0) continue;
+    const k = p.slice(0, idx).trim();
+    const v = p.slice(idx+1).trim().replace(/\/+$/,'');
+    if (k && v) out[k] = v;
+  }
+  return out;
+}
+const BRIDGE_CHAT_PEERS_MAP = parseBridgePeers(BRIDGE_CHAT_PEERS);
+
+function selfName(){
+  try { return readBrand().assistantName || 'Console'; } catch { return 'Console'; }
+}
+
+async function bridgeChatPost(targetUrl, payload){
+  const tok = String(readBridgeToken() || process.env.BRIDGE_TOKEN || '').trim();
+  if (!tok) throw new Error('bridge_token_missing');
+  const u = String(targetUrl||'').replace(/\/+$/,'') + '/api/ops/bridge/chat';
+  const r = await fetch(u, {
+    method:'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CLAWD-BRIDGE-TOKEN': tok,
+    },
+    body: JSON.stringify(payload || {}),
+  });
+  if (!r.ok) throw new Error('bridge_chat_http_' + r.status);
+}
+
+// token-auth: receive bridged chat and inject into our message stream.
+app.post('/api/ops/bridge/chat', express.json({ limit:'200kb' }), (req, res) => {
+  if (!bridgeAuthOk(req)) return res.status(401).type('text/plain').send('Auth required');
+  const from = String(req.body?.from || '').trim().slice(0, 48) || 'Remote';
+  const to = String(req.body?.to || '').trim().slice(0, 48) || 'Local';
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ ok:false, error:'missing_text' });
+  const full = `${from} -> ${to}: ${text}`;
+  const msg = acceptMessage({ text: full, attachments: [], noList: true });
+  try { logWork('bridge.chat.recv', { from, to, bytes: text.length }); } catch {}
+  return res.json({ ok:true, message: msg });
+});
+
 // --- Agent bridge (Gateway chat.send) ---
 let gw = {
   ws: null,
@@ -6714,7 +6770,37 @@ app.post('/api/message', (req, res) => {
   if (typeof text !== 'string' && !Array.isArray(attachments)) {
     return res.status(400).json({ ok: false, error: 'Expected {text, attachments}' });
   }
-  const msg = acceptMessage({ text, attachments, noList: !!noList });
+
+  const rawText = (typeof text === 'string') ? text : '';
+  const nm = selfName();
+
+  // Two-way chat bridge behavior:
+  // - Babies: forward *everything* to boss (if configured), inject locally as "<self> -> Boss: ...".
+  // - Boss: if message begins with "<self> -> <Peer>: ..." and peer is in BRIDGE_CHAT_PEERS, route it.
+  try {
+    if (BRIDGE_CHAT_BOSS_URL) {
+      const full = `${nm} -> Boss: ${rawText}`;
+      const msg = acceptMessage({ text: full, attachments, noList: !!noList });
+      // async forward; don't block UI send
+      bridgeChatPost(BRIDGE_CHAT_BOSS_URL, { from: nm, to: 'Boss', text: rawText }).catch(() => {});
+      return res.json({ ok: true, message: msg, bridged: true });
+    }
+
+    // Boss routing (only when peers configured)
+    const m = rawText.match(/^\s*([^\n]{1,48})\s*->\s*([^\n]{1,48})\s*:\s*([\s\S]*)$/);
+    if (m) {
+      const from = String(m[1] || '').trim();
+      const to = String(m[2] || '').trim();
+      const body = String(m[3] || '').trim();
+      if (from && body && from.toLowerCase() === nm.toLowerCase() && BRIDGE_CHAT_PEERS_MAP[to]) {
+        const msg = acceptMessage({ text: `${from} -> ${to}: ${body}`, attachments, noList: !!noList });
+        bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from, to, text: body }).catch(() => {});
+        return res.json({ ok: true, message: msg, bridged: true });
+      }
+    }
+  } catch {}
+
+  const msg = acceptMessage({ text: rawText, attachments, noList: !!noList });
   res.json({ ok: true, message: msg });
 });
 

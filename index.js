@@ -323,6 +323,9 @@ const APPS_MENU_BASE_JS = `
 const AUTH_USER = process.env.AUTH_USER || 'nwesource';
 const AUTH_PASS = process.env.AUTH_PASS || '';
 
+// Team apps surface (Boss / team deployments)
+const TEAM_ENABLED = String(process.env.TEAM_ENABLED || '').trim() === '1';
+
 // Optional: allowlist IPs that bypass auth entirely (comma-separated).
 // Intended for box-to-box access (stable droplet IPs), not wide ranges.
 const ALLOW_IPS = String(process.env.ALLOW_IPS || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -4250,9 +4253,23 @@ app.get('/ClawdDocs', (req, res) => {
   res.redirect(302, '/ClawdDocs/mine');
 });
 
-app.get(['/ClawdDocs/mine','/ClawdDocs/team'], (req, res) => {
+// Back-compat: old team docs route
+app.get('/ClawdDocs/team', (req, res) => {
   res.setHeader('Cache-Control','no-store');
-  const isTeam = String(req.path||'').endsWith('/team');
+  const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+  const isBoss = (host === 'claw.nwesource.com') || ADMINONLY_ENABLED;
+  const okTeam = TEAM_ENABLED || isBoss;
+  if (!okTeam) return res.status(404).type('text/plain').send('Team features disabled');
+  return res.redirect(302, '/TeamClawd/docs');
+});
+
+app.get(['/ClawdDocs/mine','/TeamClawd/docs','/team/docs'], (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+  const isBoss = (host === 'claw.nwesource.com') || ADMINONLY_ENABLED;
+  const okTeam = TEAM_ENABLED || isBoss;
+  const isTeam = (req.path === '/TeamClawd/docs') || (req.path === '/team/docs');
+  if (isTeam && !okTeam) return res.status(404).type('text/plain').send('Team features disabled');
 
   const bodyHtml = `
     <div class="subcard">
@@ -4297,10 +4314,47 @@ app.get(['/ClawdDocs/mine','/ClawdDocs/team'], (req, res) => {
   `;
 
   res.type('text/html; charset=utf-8').send(appsPageShell({
-    title: 'ClawdDocs',
-    subtitle: 'Mine + Team (live) docs index',
+    title: isTeam ? 'TeamClawd Docs' : 'ClawdDocs',
+    subtitle: isTeam ? 'Team index (live federation)' : 'Mine docs',
     bodyHtml,
-    activePath: '/ClawdDocs',
+    activePath: isTeam ? '/TeamClawd/docs' : '/ClawdDocs/mine',
+  }));
+});
+
+// TeamClawd landing page (cards)
+app.get(['/TeamClawd','/team'], (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+  const isBoss = (host === 'claw.nwesource.com') || ADMINONLY_ENABLED;
+  const okTeam = TEAM_ENABLED || isBoss;
+  if (!okTeam) return res.status(404).type('text/plain').send('Team features disabled');
+
+  const cards = [
+    { title:'Docs', href:'/TeamClawd/docs', desc:'Team docs index (live federation) + filters (coming).' },
+  ];
+
+  const bodyHtml = `
+    <div class="subcard">
+      <div style="font-weight:950;">TeamClawd</div>
+      <div class="muted" style="margin-top:6px;">Team apps surface. Disable on solo deployments with TEAM_ENABLED=0.</div>
+    </div>
+    <div class="grid">${cards.map(c => `
+      <a class="card app" href="${c.href}" target="_blank" rel="noopener">
+        <div class="ico">${appsIcon('repo')}</div>
+        <div style="min-width:0;">
+          <div class="appTitle">${escHtml(c.title)}</div>
+          <div class="appDesc">${escHtml(c.desc)}</div>
+          <div class="appRoute"><code>${escHtml(c.href)}</code></div>
+        </div>
+      </a>
+    `).join('')}</div>
+  `;
+
+  res.type('text/html; charset=utf-8').send(appsPageShell({
+    title: 'TeamClawd',
+    subtitle: 'Team apps (marketable URL surface)',
+    bodyHtml,
+    activePath: '/TeamClawd',
   }));
 });
 
@@ -4341,10 +4395,12 @@ app.get('/api/ops/docs/doc', (req, res) => {
 });
 
 // Team index (Boss aggregates live; non-boss shows local only)
-app.get('/api/docs/team/index', async (req, res) => {
+app.get(['/api/docs/team/index','/api/team/docs/index'], async (req, res) => {
   res.setHeader('Cache-Control','no-store');
   const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
   const isBoss = (host === 'claw.nwesource.com') || ADMINONLY_ENABLED;
+  const okTeam = TEAM_ENABLED || isBoss;
+  if (!okTeam) return res.status(404).json({ ok:false, error:'team_disabled' });
 
   // always include local
   const local = listDocsInDir(docsMineDir()).map(x => ({...x, box: String(selfName()||'') }));
@@ -4370,11 +4426,13 @@ app.get('/api/docs/team/index', async (req, res) => {
   res.json({ ok:true, me: String(selfName()||''), items: all });
 });
 
-app.get('/api/docs/team/doc', async (req, res) => {
+app.get(['/api/docs/team/doc','/api/team/docs/doc'], async (req, res) => {
   res.setHeader('Cache-Control','no-store');
   const slug = String(req.query.slug||'').trim();
   const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
   const isBoss = (host === 'claw.nwesource.com') || ADMINONLY_ENABLED;
+  const okTeam = TEAM_ENABLED || isBoss;
+  if (!okTeam) return res.status(404).json({ ok:false, error:'team_disabled' });
 
   // local try first
   const local = readDocBySlug(docsMineDir(), slug);

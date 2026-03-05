@@ -11,13 +11,14 @@
   const teamBtn = document.getElementById('docsTabTeam');
   const whoEl = document.getElementById('docsWho');
 
-  let mode = (window.location.pathname || '').includes('/team') ? 'team' : 'mine';
+  // Determine mode from marketable routes.
+  let mode = (window.location.pathname || '').includes('/TeamClawd/') ? 'team' : ((window.location.pathname || '').includes('/team') ? 'team' : 'mine');
 
   function setMode(m){
     mode = m;
     try { mineBtn && mineBtn.classList.toggle('on', mode==='mine'); } catch {}
     try { teamBtn && teamBtn.classList.toggle('on', mode==='team'); } catch {}
-    const base = '/ClawdDocs/' + (mode === 'team' ? 'team' : 'mine');
+    const base = (mode === 'team') ? '/TeamClawd/docs' : '/ClawdDocs/mine';
     if (!window.location.pathname.startsWith(base)) history.replaceState({}, '', base);
     loadList();
   }
@@ -25,7 +26,7 @@
   async function loadList(){
     if (!listEl) return;
     listEl.innerHTML = '<div class="muted">Loading…</div>';
-    const endpoint = (mode === 'team') ? '/api/docs/team/index' : '/api/docs/mine/index';
+    const endpoint = (mode === 'team') ? '/api/team/docs/index' : '/api/docs/mine/index';
     try {
       const res = await fetch(apiUrl(endpoint), { credentials: 'include', cache: 'no-store' });
       const j = await res.json();
@@ -67,7 +68,7 @@
   async function loadDoc(slug){
     if (!viewEl) return;
     viewEl.textContent = 'Loading…';
-    const endpoint = (mode === 'team') ? ('/api/docs/team/doc?slug=' + encodeURIComponent(slug)) : ('/api/docs/mine/doc?slug=' + encodeURIComponent(slug));
+    const endpoint = (mode === 'team') ? ('/api/team/docs/doc?slug=' + encodeURIComponent(slug)) : ('/api/docs/mine/doc?slug=' + encodeURIComponent(slug));
     try {
       const res = await fetch(apiUrl(endpoint), { credentials: 'include', cache: 'no-store' });
       const j = await res.json();

@@ -1709,6 +1709,20 @@ app.get('/adminonly', (req, res) => {
         </div>
 
         <div class="card admSubCard" style="margin-top:12px;">
+          <div style="font-weight:900;">Standard Filters (tri-state)</div>
+          <div class="muted" style="margin-top:6px;">Rule: filters are always <b>tri-state</b>: <b>off → in → out</b> (gray/green/orange). Use for all new filter UIs (Docs, ClawdWork, etc.).</div>
+          <div class="muted" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <button type="button" class="pill off">off</button>
+            <button type="button" class="pill in">in</button>
+            <button type="button" class="pill out">out</button>
+            <span class="muted">(click behavior: cycle off→in→out→off)</span>
+          </div>
+          <div class="muted" style="margin-top:10px;">
+            CSS classes: <code>.pill.off</code> <code>.pill.in</code> <code>.pill.out</code>
+          </div>
+        </div>
+
+        <div class="card admSubCard" style="margin-top:12px;">
           <div style="font-weight:900;">Menus</div>
           <div class="muted" style="margin-top:6px;">This controls the shared <b>ClawdApps</b> dropdown style for all apps pages.</div>
 

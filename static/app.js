@@ -1284,6 +1284,7 @@
   const gwRestartBtn = document.getElementById('gwRestart');
 
   const fleetLight = document.getElementById('fleetLight');
+  const fleetLightDot = document.getElementById('fleetLightDot') || fleetLight;
   let lastFleet = null;
 
   async function updateFleetLight(){
@@ -1299,14 +1300,16 @@
       // avoid layout churn
       if (lastFleet === st) return;
       lastFleet = st;
-      fleetLight.style.background = (st === 'green') ? 'rgba(80,255,160,0.95)'
+      // color the inner dot; keep the outer pill aligned with the gear sizing
+      fleetLightDot.style.background = (st === 'green') ? 'rgba(80,255,160,0.95)'
         : (st === 'red') ? 'rgba(255,80,80,0.95)'
         : (st === 'yellow') ? 'rgba(255,210,80,0.95)'
         : 'rgba(255,255,255,0.10)';
-      fleetLight.style.borderColor = (st === 'green') ? 'rgba(80,255,160,0.65)'
+      fleetLightDot.style.borderColor = (st === 'green') ? 'rgba(80,255,160,0.65)'
         : (st === 'red') ? 'rgba(255,80,80,0.65)'
         : (st === 'yellow') ? 'rgba(255,210,80,0.65)'
         : 'rgba(255,255,255,0.25)';
+      // glow on container
       fleetLight.style.boxShadow = (st === 'green') ? '0 0 0 4px rgba(80,255,160,0.12)'
         : (st === 'red') ? '0 0 0 4px rgba(255,80,80,0.12)'
         : (st === 'yellow') ? '0 0 0 4px rgba(255,210,80,0.12)'

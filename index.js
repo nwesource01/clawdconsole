@@ -7575,7 +7575,7 @@ app.get('/', (req, res) => {
           <span>Storage: <code>${DATA_DIR}</code></span>
           <div class="row" style="gap:8px; justify-content:flex-end; align-items:center;">
             <a class="scriptBtn" href="/transcript" target="_blank" rel="noopener">ClawdScript - View Entire Chat</a>
-            <span id="fleetLight" title="Fleet status" style="display:inline-flex; width:12px; height:12px; border-radius:999px; border:1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.10);"></span>
+            <span id="fleetLight" title="Fleet status" style="display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:12px; border:1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.10); box-sizing:border-box;"><span id="fleetLightDot" style="display:inline-block; width:12px; height:12px; border-radius:999px; border:1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.10);"></span></span>
           </div>
         </div>
       </div>

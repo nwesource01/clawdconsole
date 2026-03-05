@@ -972,9 +972,23 @@
     });
   }
 
+  function boxLabel(){
+    try {
+      const h = String(window.location.hostname || '').trim().toLowerCase();
+      if (!h) return 'unknown';
+      // e.g. clawdia.nwesource.com -> clawdia
+      const left = h.split('.')[0] || h;
+      // Boss host is claw.nwesource.com
+      if (left === 'claw') return 'clawdrey';
+      return left;
+    } catch {
+      return 'unknown';
+    }
+  }
+
   function pasteMsgId(msgid){
     if (!ta) return;
-    const tag = '[message_id: ' + String(msgid || '').trim() + ']';
+    const tag = '[message_id: ' + boxLabel() + ': ' + String(msgid || '').trim() + ']';
     // Append on a new line if there's existing content
     const cur = ta.value || '';
     ta.value = cur ? (cur.replace(/\s*$/,'') + '\n' + tag + '\n') : (tag + '\n');

@@ -4362,7 +4362,10 @@ app.get(['/ClawdDocs/mine','/TeamClawd/docs','/team/docs'], (req, res) => {
       .docRow{ border:1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 10px; background: rgba(255,255,255,0.03); cursor:pointer; }
       .docRow:hover{ background: rgba(255,255,255,0.06); border-color: rgba(34,198,198,0.35); }
       .chip{ display:inline-flex; align-items:center; gap:8px; border:1px solid rgba(255,255,255,0.18); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
-      .pill.on{ border-color: rgba(34,198,198,.55) !important; background: rgba(34,198,198,.12) !important; }
+      /* Standard tri-state filters: off (gray), in (green), out (orange) */
+      .pill.off{ border-color: rgba(255,255,255,0.16) !important; background: rgba(255,255,255,0.05) !important; color: rgba(255,255,255,0.88) !important; }
+      .pill.in{ border-color: rgba(80,255,160,0.70) !important; background: rgba(80,255,160,0.16) !important; color: rgba(220,255,236,0.98) !important; }
+      .pill.out{ border-color: rgba(255,170,60,0.80) !important; background: rgba(255,170,60,0.18) !important; color: rgba(255,240,220,0.98) !important; }
       @media (max-width: 980px){ .grid2{ grid-template-columns: 1fr !important; } }
     </style>
 

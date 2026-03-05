@@ -29,7 +29,19 @@
   }
 
   let allItems = [];
-  let filt = { q:'', cat:'', member:'' };
+
+  // Tri-state filters (standard): off -> in -> out
+  // - IN (green): include matches
+  // - OUT (orange): exclude matches
+  // - OFF (gray): ignore
+  let filt = { q:'', cats:{}, members:{} };
+
+  function triNext(st){
+    const s = String(st||'off');
+    if (s === 'off') return 'in';
+    if (s === 'in') return 'out';
+    return 'off';
+  }
 
   function norm(s){ return String(s||'').trim().toLowerCase(); }
 
@@ -55,13 +67,16 @@
 
     if (catsEl) {
       catsEl.innerHTML = catList.map(([c,n]) => {
-        const on = (filt.cat === c);
-        return `<button type="button" class="pill ${on?'on':''}" data-cat="${esc(c)}">${esc(c)} <span class="muted">(${n})</span></button>`;
+        const st = (filt.cats && filt.cats[c]) ? filt.cats[c] : 'off';
+        return `<button type="button" class="pill ${esc(st)}" data-cat="${esc(c)}" data-state="${esc(st)}">${esc(c)} <span class="muted">(${n})</span></button>`;
       }).join('');
       Array.from(catsEl.querySelectorAll('button[data-cat]')).forEach(btn => {
         btn.addEventListener('click', () => {
           const c = btn.getAttribute('data-cat') || '';
-          filt.cat = (filt.cat === c) ? '' : c;
+          const cur = btn.getAttribute('data-state') || 'off';
+          const nxt = triNext(cur);
+          filt.cats[c] = nxt;
+          if (nxt === 'off') delete filt.cats[c];
           applyFilters();
         });
       });
@@ -71,13 +86,16 @@
     if (memEl) {
       if (mode !== 'team') { memEl.innerHTML = ''; return; }
       memEl.innerHTML = memList.map(([m,n]) => {
-        const on = (filt.member === m);
-        return `<button type="button" class="pill ${on?'on':''}" data-mem="${esc(m)}">${esc(m)} <span class="muted">(${n})</span></button>`;
+        const st = (filt.members && filt.members[m]) ? filt.members[m] : 'off';
+        return `<button type="button" class="pill ${esc(st)}" data-mem="${esc(m)}" data-state="${esc(st)}">${esc(m)} <span class="muted">(${n})</span></button>`;
       }).join('');
       Array.from(memEl.querySelectorAll('button[data-mem]')).forEach(btn => {
         btn.addEventListener('click', () => {
           const m = btn.getAttribute('data-mem') || '';
-          filt.member = (filt.member === m) ? '' : m;
+          const cur = btn.getAttribute('data-state') || 'off';
+          const nxt = triNext(cur);
+          filt.members[m] = nxt;
+          if (nxt === 'off') delete filt.members[m];
           applyFilters();
         });
       });
@@ -114,17 +132,33 @@
 
   function applyFilters(){
     const q = norm(filt.q);
-    const cat = String(filt.cat||'').trim();
-    const mem = String(filt.member||'').trim();
+
+    const catIn = [];
+    const catOut = [];
+    for (const [k,v] of Object.entries(filt.cats || {})){
+      if (v === 'in') catIn.push(k);
+      else if (v === 'out') catOut.push(k);
+    }
+
+    const memIn = [];
+    const memOut = [];
+    for (const [k,v] of Object.entries(filt.members || {})){
+      if (v === 'in') memIn.push(k);
+      else if (v === 'out') memOut.push(k);
+    }
 
     const out = allItems.filter(it => {
-      if (cat) {
-        const arr = Array.isArray(it.categories) ? it.categories : [];
-        if (!arr.map(a => String(a||'').trim()).includes(cat)) return false;
-      }
-      if (mode === 'team' && mem) {
-        if (String(it.member||'').trim() !== mem) return false;
-      }
+      const arr = Array.isArray(it.categories) ? it.categories.map(a => String(a||'').trim()) : [];
+      const member = String(it.member||'').trim();
+
+      // OUT exclusions first
+      if (catOut.length && catOut.some(c => arr.includes(c))) return false;
+      if (mode === 'team' && memOut.length && memOut.includes(member)) return false;
+
+      // IN inclusions (OR semantics)
+      if (catIn.length && !catIn.some(c => arr.includes(c))) return false;
+      if (mode === 'team' && memIn.length && !memIn.includes(member)) return false;
+
       if (q) {
         const hay = [it.slug, it.title, it.member, Array.isArray(it.categories)?it.categories.join(' '):''].map(norm).join(' ');
         if (!hay.includes(q)) return false;
@@ -132,7 +166,7 @@
       return true;
     });
 
-    // Update the on/off classes after state changes
+    // Re-render pills (colors) and list
     renderFilterButtons(allItems);
     renderList(out);
   }
@@ -193,7 +227,7 @@
     applyFilters();
   });
   if (clearEl) clearEl.addEventListener('click', () => {
-    filt = { q:'', cat:'', member:'' };
+    filt = { q:'', cats:{}, members:{} };
     if (qEl) qEl.value = '';
     applyFilters();
   });

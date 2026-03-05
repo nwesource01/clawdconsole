@@ -1283,6 +1283,37 @@
 
   const gwRestartBtn = document.getElementById('gwRestart');
 
+  const fleetLight = document.getElementById('fleetLight');
+  let lastFleet = null;
+
+  async function updateFleetLight(){
+    if (!fleetLight) return;
+    try {
+      const res = await fetch(apiUrl('/api/fleet/status'), { credentials:'include', cache:'no-store' });
+      const txt = await res.text();
+      let j; try { j = JSON.parse(txt); } catch { j = null; }
+      if (!res.ok || !j || !j.ok) return;
+      const st = String(j.status || 'unknown');
+      const tip = String(j.tooltip || '');
+      if (tip) fleetLight.title = tip;
+      // avoid layout churn
+      if (lastFleet === st) return;
+      lastFleet = st;
+      fleetLight.style.background = (st === 'green') ? 'rgba(80,255,160,0.95)'
+        : (st === 'red') ? 'rgba(255,80,80,0.95)'
+        : (st === 'yellow') ? 'rgba(255,210,80,0.95)'
+        : 'rgba(255,255,255,0.10)';
+      fleetLight.style.borderColor = (st === 'green') ? 'rgba(80,255,160,0.65)'
+        : (st === 'red') ? 'rgba(255,80,80,0.65)'
+        : (st === 'yellow') ? 'rgba(255,210,80,0.65)'
+        : 'rgba(255,255,255,0.25)';
+      fleetLight.style.boxShadow = (st === 'green') ? '0 0 0 4px rgba(80,255,160,0.12)'
+        : (st === 'red') ? '0 0 0 4px rgba(255,80,80,0.12)'
+        : (st === 'yellow') ? '0 0 0 4px rgba(255,210,80,0.12)'
+        : 'none';
+    } catch {}
+  }
+
   async function updateStatus() {
     if (!statusEl) return;
     try {
@@ -2290,13 +2321,17 @@
   loadClawdRules();
 
   setThinking('Idle');
-  Promise.all([loadBuild(), loadBrand()]).then(updateStatus);
+  Promise.all([loadBuild(), loadBrand()]).then(async () => {
+    try { await updateStatus(); } catch {}
+    try { await updateFleetLight(); } catch {}
+  });
   refresh();
   refreshWorklog();
   refreshDE();
   refreshScheduled();
   connectWs();
-  setInterval(updateStatus, 5000);
+  setInterval(() => { try { updateStatus(); } catch {} }, 5000);
+  setInterval(() => { try { updateFleetLight(); } catch {} }, 7000);
 
   // Polling fallback only when WS is not connected (prevents periodic re-render scroll "burps").
   setInterval(() => {

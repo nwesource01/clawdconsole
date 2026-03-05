@@ -3731,6 +3731,69 @@ app.get('/api/worklog', (req, res) => {
   res.json({ ok: true, entries: readLastJsonl(WORK_FILE, limit) });
 });
 
+// --- Fleet status (boss-only UI helper) ---
+app.get('/api/fleet/status', (req, res) => {
+  try {
+    const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+    const isBoss = (host === 'claw.nwesource.com') || ADMINONLY_ENABLED;
+    if (!isBoss) return res.json({ ok:true, status:'unknown', tooltip:'Fleet status only on Boss.' });
+
+    const TARGET_NAMES = ['Clawdia','Clawdwell','Clawdius'];
+    const FLEET_FILE = path.join(DATA_DIR, 'fleet-reports.json');
+    let fleet = { updatedAt: null, reports: {} };
+    try { fleet = JSON.parse(fs.readFileSync(FLEET_FILE, 'utf8')) || fleet; } catch {}
+
+    // Determine target commit (current boss console git sha if available)
+    let targetCommit = null;
+    try {
+      // apps/console is a git repo on boss; best-effort
+      const { execSync } = require('child_process');
+      targetCommit = String(execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio:['ignore','pipe','ignore'] }) || '').trim();
+    } catch {}
+
+    const now = Date.now();
+    const maxAgeMs = 30 * 60 * 1000;
+    const reports = fleet && fleet.reports && typeof fleet.reports === 'object' ? fleet.reports : {};
+
+    let missing = [];
+    let stale = [];
+    let behind = [];
+    let redFlags = [];
+
+    for (const name of TARGET_NAMES) {
+      const r = reports[name];
+      if (!r) { missing.push(name); continue; }
+      const ts = Date.parse(r.ts || '') || 0;
+      if (!ts || (now - ts) > maxAgeMs) stale.push(name);
+      if (targetCommit && r.commit && String(r.commit).slice(0, targetCommit.length) !== targetCommit) behind.push(name);
+      const a = r.audit || null;
+      if (a && (Number(a.critical||0) > 0 || Number(a.moderate||0) > 0)) redFlags.push(name + ': audit');
+      if (r.service && String(r.service).toLowerCase() !== 'active') redFlags.push(name + ': service');
+    }
+
+    let status = 'green';
+    // green criteria: all present + fresh + up-to-date + no critical/moderate
+    if (missing.length || stale.length) status = 'yellow';
+    if (behind.length) status = 'yellow';
+    // red: any critical/moderate or service down
+    if (redFlags.length) status = 'red';
+
+    const tooltip = [
+      'Fleet status: ' + status.toUpperCase(),
+      targetCommit ? ('Target commit: ' + targetCommit) : 'Target commit: (unknown)',
+      missing.length ? ('Missing: ' + missing.join(', ')) : null,
+      stale.length ? ('Stale (>30m): ' + stale.join(', ')) : null,
+      behind.length ? ('Not latest git: ' + behind.join(', ')) : null,
+      redFlags.length ? ('RED flags: ' + redFlags.join(', ')) : null,
+      'Green = latest git everywhere + 0 critical/moderate vulns.'
+    ].filter(Boolean).join('\n');
+
+    return res.json({ ok:true, status, tooltip });
+  } catch (e) {
+    return res.json({ ok:true, status:'unknown', tooltip:'Fleet status error: ' + String(e) });
+  }
+});
+
 app.get('/api/scheduled', (req, res) => {
   const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
   res.setHeader('Cache-Control', 'no-store');
@@ -6610,6 +6673,45 @@ app.post('/api/ops/bridge/chat', express.json({ limit:'200kb' }), (req, res) => 
   const to = String(req.body?.to || '').trim().slice(0, 48) || 'Local';
   const text = String(req.body?.text || '').trim();
   if (!text) return res.status(400).json({ ok:false, error:'missing_text' });
+
+  // Fleet status report messages (boss-only behavior)
+  try {
+    const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+    const isBoss = (host === 'claw.nwesource.com') || ADMINONLY_ENABLED;
+    if (isBoss && String(to || '').toLowerCase() === 'boss') {
+      const m = text.match(/^\s*FLEET_REPORT\s*:\s*([\s\S]{1,5000})$/i);
+      if (m) {
+        const payloadRaw = String(m[1] || '').trim();
+        let rep = null;
+        try { rep = JSON.parse(payloadRaw); } catch { rep = null; }
+        if (rep && typeof rep === 'object') {
+          const FLEET_FILE = path.join(DATA_DIR, 'fleet-reports.json');
+          const nowIso = new Date().toISOString();
+          const key = String(rep.name || rep.host || from || '').trim().slice(0, 48) || from;
+          const safe = {
+            name: key,
+            ts: rep.ts || nowIso,
+            commit: String(rep.commit || '').trim().slice(0, 40) || null,
+            service: String(rep.service || '').trim().slice(0, 24) || null,
+            audit: rep.audit && typeof rep.audit === 'object' ? {
+              critical: Number(rep.audit.critical || 0),
+              moderate: Number(rep.audit.moderate || 0),
+              high: Number(rep.audit.high || 0),
+              total: Number(rep.audit.total || 0),
+            } : null,
+          };
+          let fleet = { updatedAt: nowIso, reports: {} };
+          try { fleet = JSON.parse(fs.readFileSync(FLEET_FILE, 'utf8')) || fleet; } catch {}
+          fleet.updatedAt = nowIso;
+          fleet.reports = fleet.reports && typeof fleet.reports === 'object' ? fleet.reports : {};
+          fleet.reports[key] = safe;
+          try { fs.writeFileSync(FLEET_FILE, JSON.stringify(fleet, null, 2), 'utf8'); } catch {}
+          try { logWork('fleet.report', { from: key }); } catch {}
+        }
+      }
+    }
+  } catch {}
+
   const full = `${from} -> ${to}: ${text}`;
   const msg = acceptMessage({ text: full, attachments: [], noList: true });
   try { logWork('bridge.chat.recv', { from, to, bytes: text.length }); } catch {}
@@ -7471,7 +7573,10 @@ app.get('/', (req, res) => {
         <div class="muted" style="margin-top: 8px;">Build: <code title="If UI looks stale, hard refresh. Build is server-tracked.">${BUILD}</code></div>
         <div class="muted" style="margin-top: 10px; display:flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
           <span>Storage: <code>${DATA_DIR}</code></span>
-          <div class="row" style="gap:8px; justify-content:flex-end;"><a class="scriptBtn" href="/transcript" target="_blank" rel="noopener">ClawdScript - View Entire Chat</a></div>
+          <div class="row" style="gap:8px; justify-content:flex-end; align-items:center;">
+            <a class="scriptBtn" href="/transcript" target="_blank" rel="noopener">ClawdScript - View Entire Chat</a>
+            <span id="fleetLight" title="Fleet status" style="display:inline-flex; width:12px; height:12px; border-radius:999px; border:1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.10);"></span>
+          </div>
         </div>
       </div>
 

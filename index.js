@@ -4133,7 +4133,8 @@ app.get('/apps', (req, res) => {
     { k:'pub', title:'ClawdPub', href:'/apps/pub', desc:'Published artifacts + SOP.' },
     { k:'build', title:'ClawdBuild', href:'/apps/build', desc:'Build/health/queue/commits/changelog surface.' },
     { k:'queue', title:'ClawdQueue', href:'/apps/queue', desc:'Serial execution rail (PM-backed) + autorun.' },
-    { k:'docs', title:'ClawdDocs', href:'/ClawdDocs', desc:'Docs: Mine + Team index (file-backed, filterable).' },
+    { k:'docs', title:'ClawdDocs', href:'/ClawdDocs/mine', desc:'Docs: Mine + Team (via TeamClawd). File-backed + filterable.' },
+    { k:'team', title:'TeamClawd', href:'/TeamClawd', desc:'Team apps surface (docs/fleet/etc). Disable on solo consoles.' },
   ];
 
   const bodyHtml = `

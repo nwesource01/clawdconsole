@@ -7126,7 +7126,8 @@ app.post('/api/message', (req, res) => {
   //   - TO: <Peer>: <text>
   //   - <Self> -> <Peer>: <text>   (only routes if <Self> matches our assistant name)
   try {
-    const msgId = 'brmsg_' + Date.now().toString(16) + '_' + Math.random().toString(16).slice(2);
+    const xid = nm.toLowerCase().replace(/[^a-z0-9]+/g,'').slice(0, 12) + '@' + new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d{3}Z$/,'Z') + '#' + Math.random().toString(16).slice(2, 8);
+    const msgId = 'brmsg_' + xid;
 
     // Explicit "copy Boss" (convenience)
     if (copyBoss) {
@@ -7134,7 +7135,7 @@ app.post('/api/message', (req, res) => {
       const bossUrl = (BRIDGE_CHAT_BOSS_URL || String(peer?.url || '')).trim().replace(/\/+$/,'');
       if (bossUrl) {
         const msg = acceptMessage({ text: rawText, attachments, noList: !!noList });
-        bridgeChatPost(bossUrl, { from: nm, to: 'Boss', text: rawText, msgId }).catch(() => {});
+        bridgeChatPost(bossUrl, { from: nm, to: 'Boss', text: `[${xid}] ${rawText}`, msgId }).catch(() => {});
         return res.json({ ok: true, message: msg, bridged: true, copiedBoss: true });
       }
     }
@@ -7146,7 +7147,7 @@ app.post('/api/message', (req, res) => {
       const body = String(mTo[2] || '').trim();
       if (to && body && BRIDGE_CHAT_PEERS_MAP[to]) {
         const msg = acceptMessage({ text: `${nm} -> ${to}: ${body}`, attachments, noList: !!noList });
-        bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from: nm, to, text: body, msgId }).catch(() => {});
+        bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from: nm, to, text: `[${xid}] ${body}`, msgId }).catch(() => {});
         return res.json({ ok: true, message: msg, bridged: true });
       }
     }
@@ -7159,7 +7160,7 @@ app.post('/api/message', (req, res) => {
       const body = String(m[3] || '').trim();
       if (from && body && from.toLowerCase() === nm.toLowerCase() && BRIDGE_CHAT_PEERS_MAP[to]) {
         const msg = acceptMessage({ text: `${from} -> ${to}: ${body}`, attachments, noList: !!noList });
-        bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from, to, text: body, msgId }).catch(() => {});
+        bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from, to, text: `[${xid}] ${body}`, msgId }).catch(() => {});
         return res.json({ ok: true, message: msg, bridged: true });
       }
     }

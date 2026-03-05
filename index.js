@@ -6741,7 +6741,8 @@ app.post('/api/ops/bridge/chat', express.json({ limit:'200kb' }), (req, res) => 
 
   const full = `${from} -> ${to}: ${text}`;
   // Show bridged inbound messages in the main chat list (so Boss messages are visible).
-  const msg = acceptMessage({ text: full, attachments: [], noList: false, meta: { bridge: true, from, to } });
+  // Bridged teammate comms should never generate ClawdList/DEL, but should be visible in chat.
+  const msg = acceptMessage({ text: full, attachments: [], noList: true });
   try { logWork('bridge.chat.recv', { from, to, bytes: text.length }); } catch {}
   return res.json({ ok:true, message: msg });
 });
@@ -7135,7 +7136,8 @@ app.post('/api/message', (req, res) => {
       const peer = readBridgePeer();
       const bossUrl = (BRIDGE_CHAT_BOSS_URL || String(peer?.url || '')).trim().replace(/\/+$/,'');
       if (bossUrl) {
-        const msg = acceptMessage({ text: rawText, attachments, noList: !!noList });
+        // Routed teammate comms should never generate ClawdList/DEL.
+        const msg = acceptMessage({ text: rawText, attachments, noList: true });
         bridgeChatPost(bossUrl, { from: nm, to: 'Boss', text: `[${xid}] ${rawText}`, msgId }).catch(() => {});
         return res.json({ ok: true, message: msg, bridged: true, copiedBoss: true });
       }
@@ -7147,7 +7149,8 @@ app.post('/api/message', (req, res) => {
       const to = String(mTo[1] || '').trim();
       const body = String(mTo[2] || '').trim();
       if (to && body && BRIDGE_CHAT_PEERS_MAP[to]) {
-        const msg = acceptMessage({ text: `${nm} -> ${to}: ${body}`, attachments, noList: !!noList });
+        // Routed teammate comms should never generate ClawdList/DEL.
+        const msg = acceptMessage({ text: `${nm} -> ${to}: ${body}`, attachments, noList: true });
         bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from: nm, to, text: `[${xid}] ${body}`, msgId }).catch(() => {});
         return res.json({ ok: true, message: msg, bridged: true });
       }
@@ -7160,7 +7163,8 @@ app.post('/api/message', (req, res) => {
       const to = String(m[2] || '').trim();
       const body = String(m[3] || '').trim();
       if (from && body && from.toLowerCase() === nm.toLowerCase() && BRIDGE_CHAT_PEERS_MAP[to]) {
-        const msg = acceptMessage({ text: `${from} -> ${to}: ${body}`, attachments, noList: !!noList });
+        // Routed teammate comms should never generate ClawdList/DEL.
+        const msg = acceptMessage({ text: `${from} -> ${to}: ${body}`, attachments, noList: true });
         bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from, to, text: `[${xid}] ${body}`, msgId }).catch(() => {});
         return res.json({ ok: true, message: msg, bridged: true });
       }

@@ -7573,7 +7573,7 @@ app.get('/', (req, res) => {
         <div class="muted" style="margin-top: 8px;">Build: <code title="If UI looks stale, hard refresh. Build is server-tracked.">${BUILD}</code></div>
         <div class="muted" style="margin-top: 10px; display:flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
           <span>Storage: <code>${DATA_DIR}</code></span>
-          <div class="row" style="gap:8px; justify-content:flex-end; align-items:center;">
+          <div class="row" style="gap:8px; justify-content:flex-end; align-items:center; margin-left:auto;">
             <a class="scriptBtn" href="/transcript" target="_blank" rel="noopener">ClawdScript - View Entire Chat</a>
             <span id="fleetLight" title="Fleet status" style="display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:12px; border:1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.10); box-sizing:border-box;"><span id="fleetLightDot" style="display:inline-block; width:12px; height:12px; border-radius:999px; border:1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.10);"></span></span>
           </div>

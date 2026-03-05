@@ -7617,13 +7617,14 @@ app.get('/', (req, res) => {
       <div class="card" id="titleCard">
         <div class="row" style="justify-content: space-between; align-items: center;">
           <div class="row" style="gap: 10px;">
-            <div id="sidebarToggle" title="Collapse sidebar" style="width:36px;height:36px;border-radius:10px;background:rgba(34,198,198,.10);border:1px solid rgba(34,198,198,.35);display:flex;align-items:center;justify-content:center; cursor:pointer; user-select:none;">
+            <div id="sidebarToggle" title="Collapse sidebar" style="width:36px;height:36px;border-radius:10px;background:rgba(34,198,198,.10);border:1px solid rgba(34,198,198,.35);display:flex;align-items:center;justify-content:center; cursor:pointer; user-select:none; position:relative;">
               <svg width="24" height="24" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Clawd Console">
                 <path d="M46 18H26c-4.4 0-8 3.6-8 8v12c0 4.4 3.6 8 8 8H46" stroke="rgba(34,198,198,.95)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
                 <rect x="26" y="23" width="16" height="8" rx="4" fill="rgba(34,198,198,.22)" stroke="rgba(34,198,198,.55)" stroke-width="2"/>
                 <rect x="26" y="35" width="16" height="8" rx="4" fill="rgba(34,198,198,.12)" stroke="rgba(34,198,198,.40)" stroke-width="2"/>
                 <path d="M46 28l8 4-8 4" stroke="rgba(34,198,198,.95)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
+              <button id="sidebarToggleBtn" type="button" class="wlbtn" title="Collapse sidebar" style="position:absolute; right:-10px; bottom:-10px; width:22px; height:22px; padding:0; border-radius:999px; display:flex; align-items:center; justify-content:center; font-size:12px; line-height:1; border-color: rgba(34,198,198,.30); background: rgba(0,0,0,0.22);">▸</button>
             </div>
             <div class="titleMeta">
               <div style="font-weight:700; font-size: 16px;">Clawd Console</div>

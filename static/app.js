@@ -27,6 +27,7 @@
 
   // --- Sidebar collapse (icon-only rail) ---
   const sidebarToggle = document.getElementById('sidebarToggle');
+  const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
   const SIDEBAR_LS_KEY = 'cc_sidebar_collapsed';
   function applySidebarCollapsed(on){
     try { document.body.classList.toggle('sidebarCollapsed', !!on); } catch {}
@@ -38,14 +39,14 @@
     const v = localStorage.getItem(SIDEBAR_LS_KEY);
     if (v === '1') applySidebarCollapsed(true);
   } catch {}
-  if (sidebarToggle) {
-    sidebarToggle.addEventListener('click', () => {
-      const on = !document.body.classList.contains('sidebarCollapsed');
-      applySidebarCollapsed(on);
-      try { localStorage.setItem(SIDEBAR_LS_KEY, on ? '1' : '0'); } catch {}
-      try { dbg('sidebarCollapsed=' + (on ? '1' : '0')); } catch {}
-    });
+  function sidebarToggleFlip(){
+    const on = !document.body.classList.contains('sidebarCollapsed');
+    applySidebarCollapsed(on);
+    try { localStorage.setItem(SIDEBAR_LS_KEY, on ? '1' : '0'); } catch {}
+    try { dbg('sidebarCollapsed=' + (on ? '1' : '0')); } catch {}
   }
+  if (sidebarToggle) sidebarToggle.addEventListener('click', sidebarToggleFlip);
+  if (sidebarToggleBtn) sidebarToggleBtn.addEventListener('click', (e) => { try { e.preventDefault(); e.stopPropagation(); } catch {} sidebarToggleFlip(); });
 
   // Cache last loaded messages for quick actions (Repeat Last, etc.)
   let messageCache = [];

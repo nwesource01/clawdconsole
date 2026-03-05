@@ -6740,7 +6740,8 @@ app.post('/api/ops/bridge/chat', express.json({ limit:'200kb' }), (req, res) => 
   } catch {}
 
   const full = `${from} -> ${to}: ${text}`;
-  const msg = acceptMessage({ text: full, attachments: [], noList: true });
+  // Show bridged inbound messages in the main chat list (so Boss messages are visible).
+  const msg = acceptMessage({ text: full, attachments: [], noList: false, meta: { bridge: true, from, to } });
   try { logWork('bridge.chat.recv', { from, to, bytes: text.length }); } catch {}
   return res.json({ ok:true, message: msg });
 });

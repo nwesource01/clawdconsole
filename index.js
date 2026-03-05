@@ -7388,7 +7388,7 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         </div>
 
         <!-- preview moved to ClawdSnap -->
-        <div class="muted" id="debug" style="margin-top: 10px;"></div>
+        <div class="muted" id="debug" style="margin-top: 10px; min-height: 18px; line-height: 18px;"></div>
       </div>
     </div>
 

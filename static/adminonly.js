@@ -6,6 +6,7 @@
   const tabChangelog = document.getElementById('admTabChangelog');
   const tabFeatures = document.getElementById('admTabFeatures');
   const tabBranding = document.getElementById('admTabBranding');
+  const tabBossJobs = document.getElementById('admTabBossJobs');
   const tabResolutions = document.getElementById('admTabResolutions');
 
   const panelSitemap = document.getElementById('admPanelSitemap');
@@ -15,6 +16,7 @@
   const panelChangelog = document.getElementById('admPanelChangelog');
   const panelFeatures = document.getElementById('admPanelFeatures');
   const panelBranding = document.getElementById('admPanelBranding');
+  const panelBossJobs = document.getElementById('admPanelBossJobs');
   const panelResolutions = document.getElementById('admPanelResolutions');
 
   const brandMenuCss = document.getElementById('brandMenuCss');
@@ -45,6 +47,7 @@
     { key: 'changelog', tab: tabChangelog, panel: panelChangelog },
     { key: 'features', tab: tabFeatures, panel: panelFeatures },
     { key: 'branding', tab: tabBranding, panel: panelBranding },
+    { key: 'bossjobs', tab: tabBossJobs, panel: panelBossJobs },
     { key: 'resolutions', tab: tabResolutions, panel: panelResolutions },
   ];
 
@@ -58,6 +61,7 @@
     if (k === 'adoption') loadAdoption();
     if (k === 'changelog') loadChangelog();
     if (k === 'branding') loadBrandingMenu();
+    if (k === 'bossjobs') loadBossJobs();
     if (k === 'resolutions') loadResolutions();
   }
 
@@ -274,6 +278,69 @@
   const resRefresh = document.getElementById('resRefresh');
   if (resRefresh) resRefresh.addEventListener('click', loadResolutions);
 
+  async function loadBossJobs(){
+    const list = document.getElementById('bossJobsList');
+    const msg = document.getElementById('bossJobsMsg');
+    if (msg) msg.textContent = '';
+    if (!list) return;
+    list.innerHTML = '<div class="muted">Loading…</div>';
+    try {
+      const res = await fetch('/admin/api/boss-jobs', { credentials: 'include', cache: 'no-store' });
+      const j = await res.json();
+      const items = (j && j.ok && Array.isArray(j.items)) ? j.items : [];
+      if (!items.length) { list.innerHTML = '<div class="muted">No jobs yet.</div>'; return; }
+
+      list.innerHTML = items.map(it => {
+        const id = esc(it.id || '');
+        const title = esc(it.title || it.id || '');
+        const target = esc(it.target || '');
+        const notes = esc(it.notes || '');
+        const enabled = it.enabled !== false;
+        const body = esc(it.body || '');
+        return `
+          <div style="border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; margin-bottom:10px; background: rgba(255,255,255,0.03);">
+            <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+              <div><b>${title}</b> <span class="muted">${enabled ? '' : '(disabled)'}</span></div>
+              <div class="muted">${target ? ('to: ' + target) : ''}</div>
+            </div>
+            ${notes ? ('<div class="muted" style="margin-top:6px; white-space:pre-wrap;">' + notes + '</div>') : ''}
+            <div class="muted" style="margin-top:10px; white-space:pre-wrap;">${body}</div>
+            <div class="admRow" style="margin-top:10px;">
+              <button class="tabbtn" type="button" style="width:auto;" data-run-bossjob="${id}">Run now</button>
+              <span class="muted" data-run-msg="${id}"></span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      Array.from(list.querySelectorAll('button[data-run-bossjob]')).forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-run-bossjob') || '';
+          const out = list.querySelector('[data-run-msg="' + id.replace(/"/g,'') + '"]');
+          try {
+            if (out) out.textContent = 'Running…';
+            const r = await fetch('/admin/api/boss-jobs/run', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ id })
+            });
+            const jr = await r.json();
+            if (!r.ok || !jr || !jr.ok) throw new Error((jr && jr.error) ? jr.error : ('http ' + r.status));
+            if (out) out.textContent = 'Sent.';
+            setTimeout(() => { if (out) out.textContent = ''; }, 1800);
+          } catch (e) {
+            if (out) out.textContent = 'Failed: ' + String(e);
+          }
+        });
+      });
+    } catch {
+      list.innerHTML = '<div class="muted">Failed to load.</div>';
+    }
+  }
+
+  const bossJobsRefresh = document.getElementById('bossJobsRefresh');
+  if (bossJobsRefresh) bossJobsRefresh.addEventListener('click', loadBossJobs);
 
   async function saveBrandingMenu(){
     try {
@@ -306,6 +373,7 @@
   if (tabChangelog) tabChangelog.addEventListener('click', () => setTab('changelog'));
   if (tabFeatures) tabFeatures.addEventListener('click', () => setTab('features'));
   if (tabBranding) tabBranding.addEventListener('click', () => setTab('branding'));
+  if (tabBossJobs) tabBossJobs.addEventListener('click', () => setTab('bossjobs'));
   if (tabResolutions) tabResolutions.addEventListener('click', () => setTab('resolutions'));
   if (crmRefresh) crmRefresh.addEventListener('click', loadCRM);
 

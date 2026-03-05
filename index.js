@@ -1494,6 +1494,7 @@ app.get('/adminonly', (req, res) => {
       <button id="admTabChangelog" class="tabbtn" type="button" style="margin-top:10px;">Changelog</button>
       <button id="admTabFeatures" class="tabbtn" type="button" style="margin-top:10px;">Features</button>
       <button id="admTabBranding" class="tabbtn" type="button" style="margin-top:10px;">Branding</button>
+      <button id="admTabBossJobs" class="tabbtn" type="button" style="margin-top:10px;">Boss Jobs</button>
       <button id="admTabResolutions" class="tabbtn" type="button" style="margin-top:10px;">Resolutions</button>
       <div class="muted" style="margin-top:10px;">Default tab: Sitemap</div>
     </aside>
@@ -1729,6 +1730,22 @@ app.get('/adminonly', (req, res) => {
         </div>
       </div>
 
+      <div id="admPanelBossJobs" class="card" style="display:none;">
+        <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline; flex-wrap:wrap;">
+          <h1 style="margin:0; font-size:18px;">Boss Jobs</h1>
+          <div class="muted">Operator scheduler list (run buttons + notes)</div>
+        </div>
+        <div class="muted" style="margin-top:8px;">Source: <code>${DATA_DIR}/boss-jobs.json</code></div>
+
+        <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button id="bossJobsRefresh" class="tabbtn" type="button" style="width:auto;">Refresh</button>
+          <span class="muted" id="bossJobsMsg"></span>
+        </div>
+
+        <div id="bossJobsList" style="margin-top:12px;"></div>
+        <div class="muted" style="margin-top:12px;">These are “operator jobs” (first-class reminders + run-now actions). Scheduling/execution can be added next.</div>
+      </div>
+
       <div id="admPanelResolutions" class="card" style="display:none;">
         <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline; flex-wrap:wrap;">
           <h1 style="margin:0; font-size:18px;">Resolutions</h1>
@@ -1753,6 +1770,87 @@ app.get('/adminonly', (req, res) => {
   <script src="/static/apps-menu.js"></script>
 </body>
 </html>`);
+});
+
+// --- Boss Jobs (adminonly) ---
+const BOSS_JOBS_FILE = path.join(DATA_DIR, 'boss-jobs.json');
+function seedBossJobs(){
+  if (fs.existsSync(BOSS_JOBS_FILE)) return;
+  const now = new Date().toISOString();
+  const items = [
+    {
+      id: 'baby-update-clawdia',
+      title: 'Baby update: Clawdia (safe git pull + restart)',
+      kind: 'chat.copy',
+      enabled: true,
+      target: 'Clawdia',
+      notes: 'Posts the safe update procedure into Clawdia\'s chat. (Does not SSH or modify the baby automatically.)',
+      body: [
+        'Safe update procedure (Clawdia):',
+        '1) cd /opt/clawdia/console',
+        '2) git status --porcelain   (must be empty)',
+        '3) git fetch --all --prune',
+        '4) git pull --ff-only       (refuses merges)',
+        '5) npm ci --omit=dev',
+        '6) sudo systemctl restart clawdia-console.service',
+        '',
+        'If step (4) fails, STOP and paste the error back here.'
+      ].join('\n')
+    }
+  ];
+  writeJson(BOSS_JOBS_FILE, { version: 1, updatedAt: now, items });
+}
+
+function adminonlyGuard(req, res){
+  res.setHeader('Cache-Control', 'no-store');
+  if (!ADMINONLY_ENABLED) { res.status(404).json({ ok:false, error:'disabled' }); return false; }
+  const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
+  if (host && host !== 'claw.nwesource.com') { res.status(404).json({ ok:false, error:'not_found' }); return false; }
+  const sess = getSessionFromReq(req);
+  if (!sess) { res.status(401).json({ ok:false, error:'no_session' }); return false; }
+  return true;
+}
+
+app.get('/admin/api/boss-jobs', (req, res) => {
+  if (!adminonlyGuard(req, res)) return;
+  try {
+    if (!fs.existsSync(BOSS_JOBS_FILE)) seedBossJobs();
+    const j = readJson(BOSS_JOBS_FILE, { version: 1, updatedAt: null, items: [] });
+    const items = Array.isArray(j.items) ? j.items : [];
+    return res.json({ ok:true, version: j.version || 1, updatedAt: j.updatedAt || null, items });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.post('/admin/api/boss-jobs/run', express.json({ limit:'50kb' }), async (req, res) => {
+  if (!adminonlyGuard(req, res)) return;
+  try {
+    if (!fs.existsSync(BOSS_JOBS_FILE)) seedBossJobs();
+    const j = readJson(BOSS_JOBS_FILE, { version: 1, updatedAt: null, items: [] });
+    const items = Array.isArray(j.items) ? j.items : [];
+    const id = String(req.body?.id || '').trim();
+    const job = items.find(it => String(it.id || '') === id);
+    if (!job) return res.status(404).json({ ok:false, error:'not_found' });
+    if (job.enabled === false) return res.status(409).json({ ok:false, error:'disabled' });
+
+    // For now, only support posting a copy into a baby chat via bridge.
+    const target = String(job.target || '').trim();
+    const body = String(job.body || '').trim();
+    if (!target || !body) return res.status(400).json({ ok:false, error:'bad_job' });
+
+    if (!BRIDGE_CHAT_PEERS_MAP[target]) return res.status(409).json({ ok:false, error:'peer_not_configured' });
+
+    // Inject locally for audit + forward via bridge.
+    const from = selfName();
+    const msg = acceptMessage({ text: `${from} -> ${target}: ${body}` });
+    bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[target], { from, to: target, text: body }).catch(() => {});
+
+    logWork('bossjobs.run', { id, target });
+    return res.json({ ok:true, ran:true, id, target, message: msg });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
 });
 
 // Branding menu API (adminonly)
@@ -6884,7 +6982,7 @@ function acceptMessage({ text, attachments, noList }) {
 }
 
 app.post('/api/message', (req, res) => {
-  const { text, attachments, noList } = req.body || {};
+  const { text, attachments, noList, copyBoss } = req.body || {};
   if (typeof text !== 'string' && !Array.isArray(attachments)) {
     return res.status(400).json({ ok: false, error: 'Expected {text, attachments}' });
   }
@@ -6893,15 +6991,20 @@ app.post('/api/message', (req, res) => {
   const nm = selfName();
 
   // Two-way chat bridge behavior:
-  // - Babies: forward *everything* to boss (if configured), inject locally as "<self> -> Boss: ...".
+  // - Babies: only forward to boss when explicitly requested (copyBoss=true).
   // - Boss: if message begins with "<self> -> <Peer>: ..." and peer is in BRIDGE_CHAT_PEERS, route it.
   try {
-    if (BRIDGE_CHAT_BOSS_URL) {
-      const full = `${nm} -> Boss: ${rawText}`;
-      const msg = acceptMessage({ text: full, attachments, noList: !!noList });
-      // async forward; don't block UI send
-      bridgeChatPost(BRIDGE_CHAT_BOSS_URL, { from: nm, to: 'Boss', text: rawText }).catch(() => {});
-      return res.json({ ok: true, message: msg, bridged: true });
+    // Explicit "copy Boss" (baby convenience)
+    if (copyBoss) {
+      // Prefer explicit BRIDGE_CHAT_BOSS_URL; otherwise fall back to paired bridge peer url.
+      const peer = readBridgePeer();
+      const bossUrl = (BRIDGE_CHAT_BOSS_URL || String(peer?.url || '')).trim().replace(/\/+$/,'');
+      if (bossUrl) {
+        // Inject locally as a normal message (no prefix) but send a copy upstream.
+        const msg = acceptMessage({ text: rawText, attachments, noList: !!noList });
+        bridgeChatPost(bossUrl, { from: nm, to: 'Boss', text: rawText }).catch(() => {});
+        return res.json({ ok: true, message: msg, bridged: true, copiedBoss: true });
+      }
     }
 
     // Boss routing (only when peers configured)
@@ -7597,6 +7700,7 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
                 <button id="btnReviewRecent" type="button" class="qbtn">Review Recent</button>
                 <button id="btnReviewWeek" type="button" class="qbtn">Review Week</button>
                 <button id="btnRepeatLast" type="button" class="qbtn">Repeat Last</button>
+                <button id="copyBoss" type="button" class="qbtn" title="Send a copy of this message to Boss via bridge">Copy Boss</button>
                 <button id="btnAddBtn" type="button" class="qbtn">Add a Button</button>
   <!-- adminonly disabled by default -->
               </div>

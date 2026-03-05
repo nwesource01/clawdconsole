@@ -1236,7 +1236,7 @@
 
   let waitingForBot = false;
 
-  async function sendMessage() {
+  async function postMessage(extra) {
     const text = ta ? ta.value : '';
     const atts = pendingAttachments;
     pendingAttachments = [];
@@ -1250,7 +1250,7 @@
       cache: 'no-store',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, attachments: atts }),
+      body: JSON.stringify({ text, attachments: atts, ...(extra || {}) }),
     });
 
     const txt = await res.text();
@@ -1270,7 +1270,16 @@
     await refreshWorklog();
   }
 
+  async function sendMessage() {
+    return postMessage(null);
+  }
+
+  async function sendMessageCopyBoss() {
+    return postMessage({ copyBoss: true });
+  }
+
   const sendBtn = document.getElementById('send');
+  const copyBossBtn = document.getElementById('copyBoss');
 
   const gwRestartBtn = document.getElementById('gwRestart');
 
@@ -2086,6 +2095,10 @@
   if (sendBtn) {
     try { sendBtn.removeEventListener('click', sendMessage); } catch {}
     sendBtn.addEventListener('click', sendMessage);
+  }
+  if (copyBossBtn) {
+    try { copyBossBtn.removeEventListener('click', sendMessageCopyBoss); } catch {}
+    copyBossBtn.addEventListener('click', sendMessageCopyBoss);
   }
 
   // Enter-to-send is enabled. Shift+Enter inserts newline.

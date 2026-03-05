@@ -43,6 +43,7 @@
       const on = !document.body.classList.contains('sidebarCollapsed');
       applySidebarCollapsed(on);
       try { localStorage.setItem(SIDEBAR_LS_KEY, on ? '1' : '0'); } catch {}
+      try { dbg('sidebarCollapsed=' + (on ? '1' : '0')); } catch {}
     });
   }
 

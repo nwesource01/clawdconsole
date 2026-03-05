@@ -7368,8 +7368,8 @@ app.get('/', (req, res) => {
     .wrap { display: grid; grid-template-columns: 300px 1.25fr 0.75fr; gap: 14px; max-width: 1920px; height: calc(100vh - 36px); overflow: hidden; }
 
     /* Sidebar collapse: icon-only rail + keep ClawdApps Open visible */
-    body.sidebarCollapsed .wrap{ grid-template-columns: 72px 1.25fr 0.75fr; }
-    body.sidebarCollapsed .sidebar{ overflow: visible; }
+    body.sidebarCollapsed .wrap{ grid-template-columns: 72px 1.25fr 0.75fr !important; }
+    body.sidebarCollapsed .sidebar{ overflow: visible; width:72px !important; }
     body.sidebarCollapsed #titleCard{ padding: 10px; }
     body.sidebarCollapsed #titleCard .titleMeta{ display:none !important; }
     body.sidebarCollapsed #titleCard #uiGear{ display:none !important; }
@@ -7381,6 +7381,8 @@ app.get('/', (req, res) => {
     body.sidebarCollapsed #appsToggle{ display:none !important; }
     body.sidebarCollapsed #appsCard #appsBody{ display:none !important; }
     body.sidebarCollapsed #appsCard .appsHeaderLeft{ display:none !important; }
+    /* In collapsed mode, make the ClawdApps Open button feel contained (no big pill) */
+    body.sidebarCollapsed #appsCard a.scriptBtn{ border:0 !important; background: transparent !important; padding: 0 !important; border-radius: 8px !important; box-shadow: none !important; }
 
     body.sidebarCollapsed #rulesCard,
     body.sidebarCollapsed #toolsCard,

@@ -864,6 +864,7 @@ app.get('/name', (req, res) => {
   <link rel="stylesheet" href="/static/apps-menu.css" />
   <style>
     :root{ --bg:#0b0f1a; --card:#11182a; --text:#e7e7e7; --muted: rgba(231,231,231,.70); --border: rgba(231,231,231,.12); --teal:#22c6c6; }
+    *,*::before,*::after{box-sizing:border-box}
     body{margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background: var(--bg); color: var(--text)}
     .wrap{max-width: 1200px; margin:0 auto; padding: 16px;}
 
@@ -3260,6 +3261,19 @@ app.post('/api/ops/secret/clear', (req, res) => {
   secretClear();
   logWork('secret.cleared', {});
   res.json({ ok:true });
+});
+
+// Consume secret once (returns value, then clears).
+// Use with extreme care: this endpoint exists to support on-box automation that can't
+// (or shouldn't) require pasting secrets into chat logs.
+app.post('/api/ops/secret/consume', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!secretPresent()) return res.status(400).json({ ok:false, error:'no_secret' });
+  const v = String(secretBox.value || '');
+  // Clear before responding to minimize exposure window.
+  secretClear();
+  logWork('secret.consumed', { bytes: v.length });
+  res.json({ ok:true, value: v });
 });
 
 app.post('/api/ops/secret/apply/together', (req, res) => {

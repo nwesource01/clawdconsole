@@ -7221,6 +7221,23 @@ function consoleBotSay(text) {
   appendJsonl(MSG_FILE, msg);
   appendTranscriptLine('assistant', msg);
 
+  // If the assistant emits an explicit route directive, forward it too.
+  // This prevents "TO: Boss:" bot messages from getting stuck only on the local box.
+  try {
+    const nm = selfName();
+    const rawText = String(msg.text || '');
+    const mTo = rawText.match(/^\s*TO\s*:\s*([^\n]{1,48})\s*:\s*([\s\S]*)$/i);
+    if (mTo) {
+      const to = String(mTo[1] || '').trim();
+      const body = String(mTo[2] || '').trim();
+      // Only special-case routing to Boss from babies (via BRIDGE_CHAT_BOSS_URL).
+      const bossUrl = (BRIDGE_CHAT_BOSS_URL || '').trim().replace(/\/+$/,'');
+      if (bossUrl && to.toLowerCase() === 'boss' && body) {
+        bridgeChatPost(bossUrl, { from: nm, to: 'Boss', text: body, msgId: msg.id }).catch(() => {});
+      }
+    }
+  } catch {}
+
   // Queue completion harvesting (writes completion reply into the PM card)
   handleQueueCompletionText(msg.text, msg.ts);
 

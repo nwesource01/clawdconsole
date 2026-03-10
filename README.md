@@ -2,6 +2,9 @@
 
 Just a better UI for you Clawdmonsters.
 
+## License
+Source‑Available EULA (commercial use, redistribution, and SaaS are **not** permitted). See LICENSE.
+
 **Clawd Console** is an operator cockpit for Clawdbot/Moltbot-style agents.
 
 Most AI UIs are *stateless chat boxes*: you can talk, but you can’t reliably **run** a workflow.

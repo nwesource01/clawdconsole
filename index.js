@@ -14,7 +14,7 @@ const { execFile, spawn } = require('child_process');
 const https = require('https');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 21337;
-const BUILD = '2026-03-03.78';
+const BUILD = '2026-03-10.01';
 
 // Telemetry (opt-in): open-source installs can optionally ping a hosted collector.
 const TELEMETRY_OPT_IN = String(process.env.TELEMETRY_OPT_IN || '').trim() === '1';
@@ -68,6 +68,18 @@ let GATEWAY_WS_URL = (codexCfg && codexCfg.gatewayWsUrl) ? String(codexCfg.gatew
 let CONSOLE_SESSION_KEY = (codexCfg && codexCfg.consoleSessionKey) ? String(codexCfg.consoleSessionKey) : CONSOLE_SESSION_KEY_DEFAULT;
 let gwLastError = null;
 let gwLastEvent = null;
+
+// Out-of-band Codex/Gateway notices (usage limits, auth failures, etc)
+const CODEX_OOB_FILE = path.join(DATA_DIR, 'codex-oob.json');
+let gwLastOob = readJson(CODEX_OOB_FILE, null);
+function setGwLastOob(o){
+  try {
+    gwLastOob = o;
+    writeJson(CODEX_OOB_FILE, o);
+  } catch {}
+}
+// runId -> tagIds (so assistant replies inherit the user's active project tags)
+const gwRunTags = new Map();
 
 // Together.ai (OpenAI-compatible) config (Qwen/Llama/etc)
 const TOGETHER_CFG_FILE = path.join(DATA_DIR, 'together-config.json');
@@ -177,6 +189,9 @@ const gwEvents = []; // ring buffer in memory
 const GW_EVENTS_MAX = 250;
 // Scheduled reports log
 const SCHED_FILE = path.join(DATA_DIR, 'scheduled.jsonl');
+
+// --- Project tags (shared across Chat/Transcript/PM) ---
+const TAGS_FILE = path.join(DATA_DIR, 'tags.json');
 
 // Telemetry local state
 const INSTALL_FILE = path.join(DATA_DIR, 'install.json');
@@ -384,6 +399,144 @@ function writeJson(filePath, obj) {
   }
 }
 
+// --- Session hooks: boot-md / command-logger / session-memory ---
+const WORKSPACE_ROOT = fs.existsSync('/home/master/clawd') ? '/home/master/clawd' : (fs.existsSync('/root/clawd') ? '/root/clawd' : '/home/master/clawd');
+const BOOT_MD_FILE = path.join(DATA_DIR, 'boot-md.md');
+const SESSION_MEMORY_FILE = path.join(DATA_DIR, 'session-memory.md');
+const COMMAND_LOG_FILE = path.join(DATA_DIR, 'command-log.jsonl');
+
+function writeBootMd(){
+  try {
+    const candidates = [
+      path.join(WORKSPACE_ROOT, 'BOOT.md'),
+      path.join(WORKSPACE_ROOT, 'boot.md'),
+      path.join(WORKSPACE_ROOT, 'BOOTSTRAP.md')
+    ];
+    let src = null;
+    for (const p of candidates){ if (fs.existsSync(p)) { src = p; break; } }
+    if (!src) return;
+    const txt = fs.readFileSync(src, 'utf8');
+    if (!txt || !txt.trim()) return;
+    ensureDir(DATA_DIR);
+    fs.writeFileSync(BOOT_MD_FILE, txt, 'utf8');
+  } catch {}
+}
+
+function writeSessionMemory(){
+  try {
+    const tfile = path.join(DATA_DIR, 'transcript.jsonl');
+    if (!fs.existsSync(tfile)) return;
+    const txt = fs.readFileSync(tfile, 'utf8');
+    const lines = txt.split(/\r?\n/).filter(Boolean).slice(-200);
+    if (!lines.length) return;
+    ensureDir(DATA_DIR);
+    fs.writeFileSync(SESSION_MEMORY_FILE, lines.join('\n') + '\n', 'utf8');
+  } catch {}
+}
+
+function logCommand(entry){
+  try {
+    ensureDir(DATA_DIR);
+    const row = Object.assign({ ts: new Date().toISOString() }, entry || {});
+    fs.appendFileSync(COMMAND_LOG_FILE, JSON.stringify(row) + '\n', 'utf8');
+  } catch {}
+}
+
+// --- Tags registry (project tags) ---
+function slugifyTagId(title){
+  return String(title||'').trim().toLowerCase()
+    .replace(/['"`]/g,'')
+    .replace(/[^a-z0-9]+/g,'-')
+    .replace(/^-+|-+$/g,'')
+    .slice(0, 40) || 'tag';
+}
+
+function readTagsState(){
+  const j = readJson(TAGS_FILE, null);
+  const tags = (j && Array.isArray(j.tags)) ? j.tags : [];
+  return { tags: tags.filter(t => t && typeof t === 'object') };
+}
+
+function writeTagsState(state){
+  try { ensureDir(DATA_DIR); } catch {}
+  return writeJson(TAGS_FILE, { tags: Array.isArray(state?.tags) ? state.tags : [] });
+}
+
+function listProjectTags(){
+  const st = readTagsState();
+  return (st.tags || []).filter(t => String(t.namespace||'project') === 'project');
+}
+
+function upsertTag(tag){
+  const st = readTagsState();
+  st.tags = Array.isArray(st.tags) ? st.tags : [];
+  const id = String(tag?.id || '').trim();
+  if (!id) return null;
+  const i = st.tags.findIndex(t => t && String(t.id||'') === id);
+  const now = new Date().toISOString();
+  const title = String(tag?.title || id).trim() || id;
+  // displayName is what we render in pills/filters; defaults to title for legacy.
+  const displayName = (typeof tag?.displayName === 'string') ? String(tag.displayName).trim().slice(0, 80)
+    : (i >= 0 && st.tags[i] && typeof st.tags[i].displayName === 'string' ? st.tags[i].displayName : '');
+
+  const next = {
+    id,
+    title,
+    displayName: displayName || title,
+    namespace: String(tag?.namespace || 'project'),
+    source: String(tag?.source || 'manual'),
+    workspaceId: tag?.workspaceId ? String(tag.workspaceId) : null,
+    createdAt: (i >= 0 && st.tags[i] && st.tags[i].createdAt) ? st.tags[i].createdAt : now,
+    updatedAt: now,
+  };
+  if (i >= 0) st.tags[i] = { ...st.tags[i], ...next };
+  else st.tags.push(next);
+  writeTagsState(st);
+  return next;
+}
+
+function deleteTagById(id){
+  const st = readTagsState();
+  st.tags = Array.isArray(st.tags) ? st.tags : [];
+  const before = st.tags.length;
+  st.tags = st.tags.filter(t => t && String(t.id||'') !== String(id||''));
+  writeTagsState(st);
+  return before - st.tags.length;
+}
+
+function ensureWorkspaceTag(workspace){
+  const wsId = String(workspace?.id || '').trim();
+  const title = String(workspace?.title || workspace?.id || '').trim();
+  if (!wsId || !title) return null;
+  // Do not create a default tag for ClawdRoot/admin.
+  if (wsId === 'admin') return null;
+  const id = 'ws-' + wsId;
+  return upsertTag({ id, title, displayName: title, namespace:'project', source:'workspace', workspaceId: wsId });
+}
+
+function pruneWorkspaceTags(validWorkspaceIds){
+  try {
+    const valid = new Set((validWorkspaceIds||[]).map(x => String(x||'').trim()).filter(Boolean));
+    const st = readTagsState();
+    st.tags = Array.isArray(st.tags) ? st.tags : [];
+    const before = st.tags.length;
+    st.tags = st.tags.filter(t => {
+      if (!t || typeof t !== 'object') return false;
+      if (String(t.source||'manual') !== 'workspace') return true;
+      const wsId = t.workspaceId ? String(t.workspaceId) : '';
+      // Never keep admin's auto tag (ClawdRoot should not generate a tag)
+      if (wsId === 'admin') return false;
+      // keep if we still have the workspace
+      return wsId && valid.has(wsId);
+    });
+    const removed = before - st.tags.length;
+    if (removed) writeTagsState(st);
+    return removed;
+  } catch {
+    return 0;
+  }
+}
+
 function ensureInstallId() {
   const cur = readJson(INSTALL_FILE, null);
   if (cur && cur.installId) return cur;
@@ -427,11 +580,13 @@ function appendTranscriptLine(role, msg, extra = null) {
     const x = (msg?.text || '').toString().replace(/\r\n/g, '\n');
     const atts = Array.isArray(msg?.attachments) ? msg.attachments : [];
     const a = atts.map(v => v && v.url).filter(Boolean);
+    const g = Array.isArray(msg?.tags) ? msg.tags.map(v => String(v||'').trim()).filter(Boolean).slice(0, 12) : [];
 
     // Tiny keys to keep the file small.
-    // base: { t: timestamp, r: role, i?: id, x: text, a?: [attachmentUrls] }
+    // base: { t: timestamp, r: role, i?: id, x: text, a?: [attachmentUrls], g?: [tagIds] }
     let obj = a.length ? { t, r, x, a } : { t, r, x };
     if (i) obj.i = i;
+    if (g.length) obj.g = g;
     if (extra && typeof extra === 'object') obj = Object.assign(obj, extra);
     fs.appendFileSync(TRANSCRIPT_FILE, JSON.stringify(obj) + '\n', 'utf8');
   } catch {
@@ -525,6 +680,21 @@ const app = express();
 const CODE_WS_ROOT = '/home/master/clawd/code/workspaces';
 const CODE_WS_FILE = path.join(DATA_DIR, 'code-workspaces.json');
 
+function guessClawdRoot(){
+  // Boss dev layout: /home/master/clawd/apps/console -> root is /home/master/clawd
+  // Bundle install layout: /opt/<name>/console -> root is /opt/<name>
+  try {
+    const parent = path.dirname(__dirname);
+    const grand = path.dirname(parent);
+    if (path.basename(__dirname) === 'console' && path.basename(parent) === 'apps') {
+      return grand;
+    }
+    return parent;
+  } catch {
+    return path.resolve(__dirname, '..');
+  }
+}
+
 function slugifyWsTitle(s){
   return String(s||'')
     .trim()
@@ -538,12 +708,53 @@ function loadCodeWs(){
     if (!fs.existsSync(CODE_WS_FILE)) throw new Error('missing');
     const j = JSON.parse(fs.readFileSync(CODE_WS_FILE, 'utf8'));
     if (!j || !Array.isArray(j.workspaces)) throw new Error('bad');
+
+    // Migration: remove legacy default workspaces (console / console-data),
+    // and ensure a single default ClawdRoot workspace exists.
+    try {
+      const wss0 = Array.isArray(j.workspaces) ? j.workspaces : [];
+      const legacyDrop = new Set(['console','clawdio-console-data']);
+      const root = guessClawdRoot();
+
+      // Keep non-legacy workspaces (user-created), but normalize admin.
+      const kept = [];
+      let sawAdmin = false;
+      for (const w of wss0){
+        if (!w || !w.id || !w.root) continue;
+        const id = String(w.id);
+        if (legacyDrop.has(id)) continue;
+        if (id === 'admin') {
+          kept.push({ id:'admin', title:'ClawdRoot', root, git: null });
+          sawAdmin = true;
+        } else {
+          kept.push(w);
+        }
+      }
+
+      // If no admin exists, add it.
+      if (!sawAdmin) kept.unshift({ id:'admin', title:'ClawdRoot', root, git: null });
+
+      // Special-case: if this install only had the old single "console" default,
+      // convert it to admin.
+      const onlyConsoleDefault = (wss0.length === 1 && String(wss0[0].id||'') === 'console');
+      if (onlyConsoleDefault) {
+        j.workspaces = [{ id:'admin', title:'ClawdRoot', root, git: null }];
+      } else {
+        j.workspaces = kept;
+      }
+
+      // If we changed anything, persist it.
+      try { fs.mkdirSync(path.dirname(CODE_WS_FILE), { recursive:true }); } catch {}
+      try { fs.writeFileSync(CODE_WS_FILE, JSON.stringify({ workspaces: j.workspaces, updatedAt: new Date().toISOString() }, null, 2), 'utf8'); } catch {}
+    } catch {}
+
     return j;
   } catch {
     // seed
     const seeded = {
       workspaces: [
-        { id:'console', title:'Console', root: path.resolve(__dirname), git: null },
+        // Default: ClawdRoot so users see SOUL/MEMORY/etc.
+        { id:'admin', title:'ClawdRoot', root: guessClawdRoot(), git: null },
       ],
     };
     try {
@@ -584,12 +795,20 @@ function listCodeWorkspaces(){
   // hide duplicates + invalid
   const seen = new Set();
   const out = [];
+  const validWsIds = [];
+
   for (const w of wss){
     if (!w || !w.id || !w.root) continue;
     if (seen.has(w.id)) continue;
     seen.add(w.id);
+
+    validWsIds.push(String(w.id));
+
     const git = w.git ? { remote: String(w.git.remote||''), branch: String(w.git.branch||'') } : null;
     const inferred = git && git.remote ? git : inferGitForRoot(String(w.root));
+    // Workspaces auto-create (and maintain) project tags (except admin).
+    try { ensureWorkspaceTag({ id: String(w.id), title: String(w.title || w.id) }); } catch {}
+
     out.push({
       id: String(w.id),
       title: String(w.title || w.id),
@@ -597,17 +816,21 @@ function listCodeWorkspaces(){
       git: inferred && inferred.remote ? { remote: String(inferred.remote||''), branch: String(inferred.branch||'') } : null,
     });
   }
+
+  // Prune orphaned workspace tags (keeps tags list clean after workspace deletions).
+  try { pruneWorkspaceTags(validWsIds); } catch {}
+
   return out;
 }
 
-function defaultCodeWsId(){ return 'console'; }
+function defaultCodeWsId(){ return 'admin'; }
 
 function currentCodeWorkspace(req){
   const sess = getSessionFromReq(req);
   const want = String(sess && sess.codeWorkspace || '').trim() || defaultCodeWsId();
   const wss = listCodeWorkspaces();
-  const ws = wss.find(w => w && w.id === want) || wss.find(w => w && w.id === 'console') || wss[0];
-  return ws || { id:'console', title:'Console', root: path.resolve(__dirname), git:null };
+  const ws = wss.find(w => w && w.id === want) || wss.find(w => w && w.id === 'admin') || wss[0];
+  return ws || { id:'admin', title:'ClawdRoot', root: guessClawdRoot(), git:null };
 }
 
 app.disable('x-powered-by');
@@ -1127,8 +1350,34 @@ app.post('/api/ops/codex/profile', async (req, res) => {
   if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
   try {
     const profileId = String(req.body?.profileId || '').trim();
-    await gwSendReq('sessions.patch', { key: CONSOLE_SESSION_KEY, authProfileOverride: profileId || '' });
-    logWork('ops.codex.profile.set', { sessionKey: CONSOLE_SESSION_KEY, profileId: profileId || '' });
+
+    // Option B: older gateways may not support sessions.patch(authProfileOverride).
+    // Update auth-profiles.json lastGood for openai-codex and mirror into :default.
+    const authPath = '/root/.clawdbot/agents/main/agent/auth-profiles.json';
+    const store = readJson(authPath, null) || {};
+    const profilesObj = (store && store.profiles && typeof store.profiles === 'object') ? store.profiles : {};
+
+    if (profileId && !profilesObj[profileId]) {
+      return res.status(400).json({ ok:false, error:'unknown_profile' });
+    }
+
+    const lastGood = (store && store.lastGood && typeof store.lastGood === 'object') ? store.lastGood : {};
+    lastGood['openai-codex'] = profileId || '';
+    store.lastGood = lastGood;
+
+    if (profileId && profilesObj[profileId]) {
+      try { profilesObj['openai-codex:default'] = Object.assign({}, profilesObj[profileId]); } catch {}
+      store.profiles = profilesObj;
+    }
+
+    const ok = writeJson(authPath, store);
+    if (!ok) return res.status(500).json({ ok:false, error:'write_failed' });
+
+    // Best-effort reconnect gateway so new creds are picked up quickly
+    try { gw.ws && gw.ws.close && gw.ws.close(); } catch {}
+    setTimeout(connectGateway, 50);
+
+    logWork('ops.codex.profile.set', { sessionKey: CONSOLE_SESSION_KEY, profileId: profileId || '', mode:'lastGood' });
     res.json({ ok:true });
   } catch (e) {
     res.status(500).json({ ok:false, error: String(e) });
@@ -1149,6 +1398,7 @@ app.get('/api/ops/codex', (req, res) => {
       connected: !!(gw && gw.connected),
       lastError: gwLastError,
       lastEvent: gwLastEvent,
+      lastOob: gwLastOob || null,
     }
   });
 });
@@ -1211,18 +1461,10 @@ function buildConsoleBundle({ name, domainDefault }){
   const con = path.join(root, 'console');
   fs.mkdirSync(con, { recursive: true });
 
-  // export tracked console files
-  // (if .git absent, fallback to rsync-like copy from __dirname)
-  const hasGit = fs.existsSync(path.join(__dirname, '.git'));
-  if (hasGit) {
-    // git archive -> tar extract
-    const tarPath = path.join(tmp, 'console.tar');
-    childProcess.execFileSync('git', ['-C', __dirname, 'archive', '--format=tar', 'HEAD', '-o', tarPath], { stdio:'ignore' });
-    childProcess.execFileSync('tar', ['-xf', tarPath, '-C', con], { stdio:'ignore' });
-  } else {
-    // minimal best-effort copy
-    childProcess.execFileSync('bash', ['-lc', `cd ${JSON.stringify(__dirname)} && tar -cf - --exclude node_modules --exclude .git --exclude console-data . | tar -xf - -C ${JSON.stringify(con)}`], { stdio:'ignore' });
-  }
+  // Export Console files from the *working tree*.
+  // We intentionally do not use `git archive HEAD` here because operators
+  // often ship bundles from an uncommitted but tested working copy.
+  childProcess.execFileSync('bash', ['-lc', `cd ${JSON.stringify(__dirname)} && tar -cf - --exclude node_modules --exclude .git --exclude console-data . | tar -xf - -C ${JSON.stringify(con)}`], { stdio:'ignore' });
 
   const quick = `# ${nm} Console — Quickstart\n\nThis bundle installs **Clawd Console + Clawdbot Gateway** as systemd services (Ubuntu).\n\n## Prereqs: Node.js 22+\n\nOn Ubuntu/Debian (NodeSource):\n\n\`\`\`bash\ncurl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -\nsudo apt-get install -y nodejs\nnode -v\nnpm -v\n\`\`\`\n\n## Install\n\n\`\`\`bash\nsudo systemctl stop ${nm}-console.service || true\nsudo systemctl stop clawdbot-gateway.service || true\nsudo rm -rf /opt/${nm}\nsudo mkdir -p /opt/${nm}\ncd /opt/${nm}\n# copy ${nm}-bundle.tar.gz here\nsudo tar -xzf ${nm}-bundle.tar.gz\nsudo bash install.sh\n\`\`\`\n\nOpen:\n\nhttp://<SERVER_IP>:21337\n\nCredentials:\n\n/etc/${nm}-console.env\n\n## Bridge pairing\n\nOn the boss box (claw), open **/apps/ops → ClawdBridge** and click **Copy**.\nOn the new box, paste into **Peer token**, set Peer URL to the boss, and click **Save**.\n\n## Domain + SSL (optional)\n\nTell the Console chat what domain you want (default: **${domainDefault || (nm + '.nwesource.com')}**) and it will generate exact Nginx + certbot commands.\n`;
 
@@ -2786,26 +3028,91 @@ app.post('/api/code/breakglass', (req, res) => {
 // --- ClawdOps (operator profile + repeated questions + brand) ---
 const OPS_PROFILE_FILE = path.join(DATA_DIR, 'ops-profile.md');
 
-// Brand / assistant name (UI only)
+// ClawdReadMe identity (UI only; non-secrets)
+// Primary file: clawdreadme.json (legacy: brand.json)
+const README_ID_FILE = path.join(DATA_DIR, 'clawdreadme.json');
 const BRAND_FILE = path.join(DATA_DIR, 'brand.json');
+
+function readReadmeIdentityFile(){
+  const j = readJson(README_ID_FILE, null);
+  if (j && typeof j === 'object') return j;
+
+  // Legacy fallback (migration): if brand.json exists, treat it as source once,
+  // then migrate into clawdreadme.json for cleanliness.
+  const legacy = readJson(BRAND_FILE, null);
+  if (legacy && typeof legacy === 'object') {
+    try { writeJson(README_ID_FILE, legacy); } catch {}
+    return legacy;
+  }
+  return {};
+}
+
+function writeReadmeIdentityFile(obj){
+  try { ensureDir(DATA_DIR); } catch {}
+  // Write ONLY the canonical file. (We no longer write brand.json.)
+  return writeJson(README_ID_FILE, obj);
+}
+
 function readBrand(){
   try {
-    const j = readJson(BRAND_FILE, null);
-    const assistantName = (j && typeof j.assistantName === 'string' && j.assistantName.trim()) ? j.assistantName.trim().slice(0, 48) : 'Clawdio';
-    return { assistantName };
+    const j = readReadmeIdentityFile() || {};
+    const assistantName = (typeof j.assistantName === 'string' && j.assistantName.trim()) ? j.assistantName.trim().slice(0, 48) : 'Clawdio';
+    let assistantEmail = (typeof j.assistantEmail === 'string') ? j.assistantEmail.trim().slice(0, 120) : '';
+
+    // Fleet default: if unset, pick the canonical <hostname>@nwesource.com.
+    // (Users can override in the identity editor.)
+    if (!assistantEmail) {
+      try {
+        const os = require('os');
+        const hn = String(os.hostname() || '').trim();
+        if (hn) assistantEmail = hn.toLowerCase() + '@nwesource.com';
+      } catch {}
+    }
+
+    // Boss convenience: if still unset, try TOOLS.md.
+    if (!assistantEmail) {
+      try {
+        const tools = fs.existsSync('/home/master/clawd/TOOLS.md') ? fs.readFileSync('/home/master/clawd/TOOLS.md', 'utf8') : '';
+        const m = tools.match(/^\s*-\s*Email\s*:\s*\*\*([^*\n]+)\*\*\s*$/mi) || tools.match(/^\s*-\s*Email\s*:\s*([^\n]+)$/mi);
+        if (m) assistantEmail = String(m[1] || '').trim().slice(0, 120);
+      } catch {}
+    }
+
+    const phone = (typeof j.phone === 'string') ? j.phone.trim().slice(0, 40) : '';
+    const hostingProvider = (typeof j.hostingProvider === 'string') ? j.hostingProvider.trim().slice(0, 80) : '';
+    const hostNotes = (typeof j.hostNotes === 'string') ? j.hostNotes.trim().slice(0, 240) : '';
+    const fleetRoleLabel = (typeof j.fleetRoleLabel === 'string') ? j.fleetRoleLabel.trim().slice(0, 80) : '';
+    const setupDoneAt = (typeof j.setupDoneAt === 'string') ? j.setupDoneAt : '';
+    return { assistantName, assistantEmail, phone, hostingProvider, hostNotes, fleetRoleLabel, setupDoneAt };
   } catch {
-    return { assistantName: 'Clawdio' };
+    return { assistantName: 'Clawdio', assistantEmail:'', phone:'', hostingProvider:'', hostNotes:'', fleetRoleLabel:'', setupDoneAt:'' };
   }
 }
+
 function writeBrand(patch){
   const cur = readBrand();
   const next = { ...cur };
-  if (patch && typeof patch.assistantName === 'string') {
-    const v = patch.assistantName.trim().slice(0, 48);
-    if (v) next.assistantName = v;
+  const set = (k, v, max) => {
+    if (typeof v !== 'string') return;
+    const t = v.trim().slice(0, max);
+    next[k] = t;
+  };
+  if (patch && typeof patch === 'object') {
+    if (typeof patch.assistantName === 'string') {
+      const v = patch.assistantName.trim().slice(0, 48);
+      if (v) next.assistantName = v;
+    }
+    set('assistantEmail', patch.assistantEmail, 120);
+    set('phone', patch.phone, 40);
+    set('hostingProvider', patch.hostingProvider, 80);
+    set('hostNotes', patch.hostNotes, 240);
+    set('fleetRoleLabel', patch.fleetRoleLabel, 80);
   }
+  // Mark setup complete on first save.
+  if (!next.setupDoneAt) next.setupDoneAt = new Date().toISOString();
+
   try {
-    writeJson(BRAND_FILE, next);
+    writeReadmeIdentityFile(next);
     return next;
   } catch {
     return null;
@@ -2823,8 +3130,15 @@ app.get('/api/ops/brand', (req, res) => {
 app.post('/api/ops/brand', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    const assistantName = String(req.body?.assistantName || '');
-    const out = writeBrand({ assistantName });
+    const patch = {
+      assistantName: (typeof req.body?.assistantName === 'string') ? String(req.body.assistantName) : undefined,
+      assistantEmail: (typeof req.body?.assistantEmail === 'string') ? String(req.body.assistantEmail) : undefined,
+      phone: (typeof req.body?.phone === 'string') ? String(req.body.phone) : undefined,
+      hostingProvider: (typeof req.body?.hostingProvider === 'string') ? String(req.body.hostingProvider) : undefined,
+      hostNotes: (typeof req.body?.hostNotes === 'string') ? String(req.body.hostNotes) : undefined,
+      fleetRoleLabel: (typeof req.body?.fleetRoleLabel === 'string') ? String(req.body.fleetRoleLabel) : undefined,
+    };
+    const out = writeBrand(patch);
     if (!out) return res.status(500).json({ ok:false, error:'write_failed' });
     logWork('ops.brand.saved', { assistantName: out.assistantName });
     return res.json({ ok:true, brand: out });
@@ -2865,6 +3179,109 @@ app.post('/api/ops/commit', (req, res) => {
     res.json({ ok:true, path: OPS_MEMORY_PATH });
   } catch (e) {
     res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+// --- Browser ops (CDP port) ---
+const CLAWDBOT_CONFIG_PATH = '/root/.clawdbot/clawdbot.json';
+function readClawdbotConfig(){
+  return readJson(CLAWDBOT_CONFIG_PATH, null) || {};
+}
+function writeClawdbotConfig(cfg){
+  ensureDir(path.dirname(CLAWDBOT_CONFIG_PATH));
+  return writeJson(CLAWDBOT_CONFIG_PATH, cfg);
+}
+
+function detectPortHolder(port){
+  return new Promise((resolve) => {
+    const p = Number(port);
+    if (!Number.isFinite(p) || p < 1 || p > 65535) return resolve({ listening:false, holder:'' });
+    execFile('bash', ['-lc', `ss -ltnp 2>/dev/null | grep ":${p} " || true`], { timeout: 2500 }, (err, stdout) => {
+      const out = String(stdout || '').trim();
+      if (!out) return resolve({ listening:false, holder:'' });
+      // Try to pick out the process name if present.
+      const m = out.match(/users:\(\("([^"]+)"/);
+      resolve({ listening:true, holder: m ? m[1] : out.split(/\s+/).slice(-1)[0] });
+    });
+  });
+}
+
+app.get('/api/ops/browser', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const cfg = readClawdbotConfig();
+    const profile = 'clawd';
+    const cdpPort = Number(cfg?.browser?.profiles?.[profile]?.cdpPort || 0) || 0;
+    return res.json({ ok:true, profile, cdpPort });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.post('/api/ops/browser', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const profile = String(req.body?.profile || 'clawd').trim() || 'clawd';
+    const cdpPort = Number(req.body?.cdpPort || 0) || 0;
+    if (!Number.isFinite(cdpPort) || cdpPort < 1 || cdpPort > 65535) return res.status(400).json({ ok:false, error:'invalid_port' });
+
+    const cfg = readClawdbotConfig();
+    cfg.browser = cfg.browser && typeof cfg.browser === 'object' ? cfg.browser : {};
+    cfg.browser.profiles = cfg.browser.profiles && typeof cfg.browser.profiles === 'object' ? cfg.browser.profiles : {};
+    cfg.browser.profiles[profile] = cfg.browser.profiles[profile] && typeof cfg.browser.profiles[profile] === 'object' ? cfg.browser.profiles[profile] : { color:'#FF4500', driver:'clawd' };
+    cfg.browser.profiles[profile].cdpPort = cdpPort;
+    if (!cfg.browser.profiles[profile].color) cfg.browser.profiles[profile].color = '#FF4500';
+    if (!cfg.browser.profiles[profile].driver) cfg.browser.profiles[profile].driver = 'clawd';
+
+    const ok = writeClawdbotConfig(cfg);
+    if (!ok) return res.status(500).json({ ok:false, error:'write_failed' });
+    logWork('ops.browser.saved', { profile, cdpPort });
+    return res.json({ ok:true, profile, cdpPort, path: CLAWDBOT_CONFIG_PATH });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.get('/api/ops/browser/check', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const port = Number(req.query.port || 0) || 0;
+    const st = await detectPortHolder(port);
+    return res.json({ ok:true, port, listening: !!st.listening, holder: st.holder || '' });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.post('/api/ops/browser/kill', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const port = Number(req.body?.port || 0) || 0;
+    if (!Number.isFinite(port) || port < 1 || port > 65535) return res.status(400).json({ ok:false, error:'invalid_port' });
+
+    // Best-effort kill. If fuser doesn't exist, fall back to pkill pattern.
+    execFile('bash', ['-lc', `command -v fuser >/dev/null 2>&1 && fuser -k ${port}/tcp || pkill -f "remote-debugging-port=${port}" || true`], { timeout: 6000 }, () => {
+      logWork('ops.browser.kill', { port });
+      return res.json({ ok:true });
+    });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
+app.post('/api/ops/gateway/restart', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const confirm = String(req.body?.confirm || '');
+    if (confirm !== 'RESTART') return res.status(400).json({ ok:false, error:'confirm_required' });
+
+    // Best-effort. (Some environments may not have systemd user services.)
+    const p = spawn('bash', ['-lc', 'HOME=/root clawdbot gateway restart || true'], { detached:true, stdio:'ignore' });
+    p.unref();
+    logWork('ops.gateway.restart', { pid: p.pid || null });
+    return res.json({ ok:true });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error: String(e) });
   }
 });
 
@@ -3226,6 +3643,93 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
 app.get('/api/messages', (req, res) => {
   const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
   res.json({ ok: true, messages: readLastJsonl(MSG_FILE, limit) });
+});
+
+// --- Tags API (project tags) ---
+app.get('/api/tags', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ns = String(req.query.namespace || 'project').trim() || 'project';
+  const tags = readTagsState().tags
+    .filter(t => t && String(t.namespace||'project') === ns)
+    .map(t => ({
+      id: String(t.id||''),
+      title: String(t.title||t.id||''),
+      namespace: String(t.namespace||'project'),
+      source: String(t.source||'manual'),
+      workspaceId: t.workspaceId ? String(t.workspaceId) : null,
+      createdAt: t.createdAt || null,
+      updatedAt: t.updatedAt || null,
+    }))
+    .filter(t => t.id);
+  tags.sort((a,b) => a.title.localeCompare(b.title));
+  res.json({ ok:true, namespace: ns, tags });
+});
+
+app.post('/api/tags/create', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const title = String(req.body?.title || '').trim();
+  if (!title) return res.status(400).json({ ok:false, error:'missing_title' });
+  const base = slugifyTagId(title);
+  const st = readTagsState();
+  const ids = new Set((st.tags||[]).map(t => String(t && t.id || '')));
+  let id = base;
+  if (ids.has(id)) {
+    // make it unique-ish
+    id = base + '-' + Math.random().toString(16).slice(2,6);
+  }
+  const displayName = String(req.body?.displayName || '').trim();
+  const tag = upsertTag({ id, title, displayName, namespace:'project', source:'manual', workspaceId:null });
+  logWork('tag.created', { id: tag.id, title: tag.title, displayName: tag.displayName, source: tag.source });
+  res.json({ ok:true, tag });
+});
+
+app.post('/api/tags/delete', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const id = String(req.body?.id || '').trim();
+  if (!id) return res.status(400).json({ ok:false, error:'missing_id' });
+  const st = readTagsState();
+  const tag = (st.tags||[]).find(t => t && String(t.id||'') === id);
+  if (!tag) return res.status(404).json({ ok:false, error:'not_found' });
+  if (String(tag.source||'manual') === 'workspace') {
+    return res.status(409).json({ ok:false, error:'workspace_tag', message:'please remove the related Workspace item before removing this tag.' });
+  }
+  const removed = deleteTagById(id);
+  if (removed) logWork('tag.deleted', { id });
+  res.json({ ok:true, removed });
+});
+
+app.post('/api/tags/update', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const id = String(req.body?.id || '').trim();
+  const title = (req.body && Object.prototype.hasOwnProperty.call(req.body,'title')) ? String(req.body?.title || '').trim() : '';
+  const displayName = (req.body && Object.prototype.hasOwnProperty.call(req.body,'displayName')) ? String(req.body?.displayName || '').trim() : '';
+  if (!id) return res.status(400).json({ ok:false, error:'missing_id' });
+  // Manual tags require a title; workspace tags may update displayName only.
+  // We'll validate once we know the tag type.
+
+  const st = readTagsState();
+  const tag = (st.tags||[]).find(t => t && String(t.id||'') === id);
+  if (!tag) return res.status(404).json({ ok:false, error:'not_found' });
+  const isWs = String(tag.source||'manual') === 'workspace';
+
+  // Workspace tags: allow displayName updates only.
+  if (isWs) {
+    if (title && title !== String(tag.title||'')) {
+      return res.status(409).json({ ok:false, error:'workspace_tag', message:'Workspace tags cannot be renamed (only display name can be changed).' });
+    }
+    if (!displayName) return res.status(400).json({ ok:false, error:'missing_displayName' });
+    const out = upsertTag({ id, title: String(tag.title||id), displayName, namespace: String(tag.namespace||'project'), source:'workspace', workspaceId: tag.workspaceId || null });
+    if (!out) return res.status(500).json({ ok:false, error:'write_failed' });
+    logWork('tag.updated', { id: out.id, title: out.title, displayName: out.displayName });
+    return res.json({ ok:true, tag: out });
+  }
+
+  // Manual tags
+  if (!title) return res.status(400).json({ ok:false, error:'missing_title' });
+  const out = upsertTag({ id, title, displayName, namespace: String(tag.namespace||'project'), source: String(tag.source||'manual'), workspaceId: tag.workspaceId || null });
+  if (!out) return res.status(500).json({ ok:false, error:'write_failed' });
+  logWork('tag.updated', { id: out.id, title: out.title, displayName: out.displayName });
+  res.json({ ok:true, tag: out });
 });
 
 // --- Secret paste (ephemeral) ---
@@ -4844,8 +5348,13 @@ function renderModulePage(key){
                 <button class="pill" id="chatToggle" type="button" title="Collapse Chat">▶</button>
                 <div class="ccTitle">Chat</div>
               </div>
-              <div class="ccHeadRow right">
-                <div class="muted ccSmall" id="chatMsg"></div>
+              <div class="ccHeadRow right" style="justify-content:flex-end;">
+                <div class="row" id="chatTagsBar" style="gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+                  <div class="row" id="chatTags" style="gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;"></div>
+                  <button class="pill off" id="chatTagClear" type="button" title="Clear tag selection + filters">Clear</button>
+                  <button class="pill" id="chatTagManage" type="button" title="Manage tags">☰</button>
+                  <div class="muted ccSmall" id="chatMsg"></div>
+                </div>
               </div>
             </div>
             <div class="ccPanelBody" style="display:flex; flex-direction:column; gap:10px;">
@@ -5068,6 +5577,11 @@ function renderModulePage(key){
                   <div class="paneIcon">${appsIcon('script')}</div>
                   <div class="title">Chat</div>
                   <div class="spacer"></div>
+                  <div class="row" id="chatTagsBar" style="gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+                    <div class="row" id="chatTags" style="gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;"></div>
+                    <button class="pill off" id="chatTagClear" type="button" title="Clear tag selection + filters">Clear</button>
+                    <button class="pill" id="chatTagManage" type="button" title="Manage tags">☰</button>
+                  </div>
                   <div class="btnGroup move"><button class="btn" data-act="left">◁</button><button class="btn" data-act="right">▷</button></div>
                   <div class="btnGroup size"><button class="btn" data-act="minus">−</button><button class="btn" data-act="plus">+</button></div>
                   <button class="btn" data-act="collapse">▸</button>
@@ -5200,6 +5714,12 @@ function renderModulePage(key){
         </div>
 
         <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+          <div style="font-weight:900; margin-bottom:8px;">Fail2ban (live)</div>
+          <div class="muted" style="margin-bottom:10px;">Live SSH protection stats from <code>fail2ban-client</code>. Updates on load.</div>
+          <div id="secF2B" class="muted">Loading…</div>
+        </div>
+
+        <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
           <div style="font-weight:900; margin-bottom:8px;">Security Recommendations (copy-safe)</div>
           <div class="muted" style="margin-bottom:10px;">Run only what you understand. These are suggestions, not auto-executed.</div>
 
@@ -5220,7 +5740,7 @@ function renderModulePage(key){
                 },
                 {
                   title: '4) Rotate AUTH_PASS',
-                  cmd: 'nano /etc/clawdio-console.env\n# update AUTH_PASS=...\nsystemctl restart clawdio-console.service',
+                  cmd: 'nano /etc/clawdrey-console.env\n# update AUTH_PASS=...\nsystemctl restart clawdrey-console.service',
                 },
               ];
               const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -5250,7 +5770,9 @@ function renderModulePage(key){
           <button class="pill" id="opsTabC" type="button">Codex</button>
           <button class="pill" id="opsTabTogether" type="button">Together</button>
           <button class="pill" id="opsTabBridge" type="button">ClawdBridge</button>
+          <button class="pill" id="opsTabBrowser" type="button">Browser</button>
           <button class="pill" id="opsTabClawd" type="button">Clawd</button>
+          <button class="pill" id="opsTabAuto" type="button">Automations</button>
           <span style="flex:1;"></span>
           <span id="opsHydration" class="muted" title="Auto-state hydration: unknown" style="display:inline-flex; align-items:center; gap:6px; user-select:none;">
             <span id="opsHydrationIcon" aria-hidden="true" style="font-weight:900;">…</span>
@@ -5359,6 +5881,25 @@ function renderModulePage(key){
           </div>
         </div><!-- /opsTabCodex -->
 
+        <div id="opsTabAutoView" style="display:none;">
+          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Automations</div>
+            <div class="muted" style="margin-bottom:10px;">Control systemd timers/services (enable/disable, start/stop, and timer cadence). We keep these quiet unless you are running an active multi-agent session.</div>
+
+            <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
+              <button class="pill" id="autoRefresh" type="button">Refresh</button>
+              <span class="muted" id="autoMsg"></span>
+            </div>
+
+            <div style="margin-top:12px; font-weight:900;">Timers</div>
+            <div id="autoTimers" style="margin-top:8px;"></div>
+
+            <div style="margin-top:16px; font-weight:900;">Services</div>
+            <div id="autoServices" style="margin-top:8px;"></div>
+          </div>
+        </div><!-- /opsTabAutoView -->
+
+
         <div id="opsTabTogetherView" style="display:none;">
           <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
             <div style="font-weight:900; margin-bottom:8px;">Together.ai (OpenAI-compatible)</div>
@@ -5436,6 +5977,7 @@ function renderModulePage(key){
 
             <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
               <button class="pill" id="bridgeRefresh" type="button">Refresh</button>
+              <span class="muted" id="bridgeLive" title="Live bridge stream status">Live: (starting…)</span>
               <span class="muted" id="bridgeMsg"></span>
             </div>
 
@@ -5465,6 +6007,57 @@ function renderModulePage(key){
           </div>
         </div><!-- /opsTabBridgeView -->
 
+        <div id="opsTabBrowserView" style="display:none;">
+          <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
+            <div style="font-weight:900; margin-bottom:8px;">Browser</div>
+            <div class="muted" style="margin-bottom:10px;">
+              This tab exists because we hit an intermittent failure where a stale Chromium process was already listening on the CDP port and the managed browser failed to start.
+              The long-term fix is: <b>make the CDP port explicit per box</b>, and keep the "what to do" steps written down here.
+            </div>
+
+            <div class="twoCol">
+              <div>
+                <div style="font-weight:900; margin-bottom:8px;">Current settings</div>
+                <div class="muted" style="margin-bottom:6px;">Profile</div>
+                <input id="browserProfile" class="inp" value="clawd" style="width:100%; max-width: 320px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />
+
+                <div class="muted" style="margin-top:10px; margin-bottom:6px;">CDP port (Chromium remote debugging)</div>
+                <input id="browserCdpPort" class="inp" placeholder="18820" style="width:100%; max-width: 320px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" />
+
+                <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+                  <button class="pill" id="browserLoad" type="button">Load</button>
+                  <button class="pill" id="browserSave" type="button">Save</button>
+                  <button class="wlbtn" id="browserCheck" type="button">Check port</button>
+                  <button class="wlbtn" id="browserKill" type="button" title="Kills whichever process is holding the port.">Kill occupant</button>
+                  <button class="pill" id="browserRestartGateway" type="button" style="border-color: rgba(255,160,160,0.55);">Restart gateway</button>
+                  <span class="muted" id="browserMsg"></span>
+                </div>
+
+                <div class="muted" style="margin-top:10px;">Writes to: <code>/root/.clawdbot/clawdbot.json</code> (browser.profiles.&lt;profile&gt;.cdpPort)</div>
+              </div>
+
+              <div>
+                <div style="font-weight:900; margin-bottom:8px;">What happened + what to do (copied from bot_19cd0441f44666b2d)</div>
+                <pre id="browserHowTo" style="white-space:pre-wrap; word-break:break-word; margin:0; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.12); max-height: 55vh; overflow:auto;">That error is exactly what it says on the tin: something was already listening on 127.0.0.1:18800, so when Clawdia tried to start a new Chromium CDP session for profile clawd, it failed and the browser control endpoint returned HTTP 500.
+
+Fast recovery:
+1) Check what’s holding the port:
+   sudo ss -ltnp | grep :18800 || true
+
+2) Kill whatever is bound to it (usually Chromium):
+   sudo fuser -k 18800/tcp || true
+   # or:
+   sudo pkill -f 'remote-debugging-port=18800' || true
+
+3) Restart the gateway so it re-spawns the managed browser cleanly:
+   sudo clawdbot gateway restart
+
+Long-term: set a non-default CDP port per box, and/or implement "probe then attach; else kill+retry" on EADDRINUSE.</pre>
+              </div>
+            </div>
+          </div>
+        </div><!-- /opsTabBrowserView -->
+
         <div id="opsTabClawdView" style="display:none;">
           <div class="card" style="margin-top:12px; background: rgba(0,0,0,0.10);">
             <div style="font-weight:900; margin-bottom:8px;">Clawd</div>
@@ -5479,7 +6072,7 @@ function renderModulePage(key){
                   <button class="pill" id="brandReload" type="button">Reload</button>
                   <span class="muted" id="brandMsg"></span>
                 </div>
-                <div class="muted" style="margin-top:10px;">Saved to: <code>${DATA_DIR}/brand.json</code></div>
+                <div class="muted" style="margin-top:10px;">Saved to: <code>${DATA_DIR}/clawdreadme.json</code></div>
               </div>
               <div>
                 <div style="font-weight:900; margin-bottom:8px;">Current</div>
@@ -6007,6 +6600,10 @@ app.get('/api/transcript/search', (req, res) => {
   const role = (req.query.role || '').toString().trim(); // "user" | "assistant" | ""
   const days = Number(req.query.days || 0) || 0; // 0 = all
   const hasList = (req.query.hasList || '').toString() === '1';
+  const tagIn = String(req.query.tagIn || '').trim();
+  const tagOut = String(req.query.tagOut || '').trim();
+  const inTags = tagIn ? tagIn.split(',').map(s => String(s||'').trim()).filter(Boolean) : [];
+  const outTags = tagOut ? tagOut.split(',').map(s => String(s||'').trim()).filter(Boolean) : [];
   const order = ((req.query.order || 'asc').toString().toLowerCase() === 'desc') ? 'desc' : 'asc';
   const offset = Math.max(0, Number(req.query.offset || 0) || 0);
   const limit = Math.max(1, Math.min(1000, Number(req.query.limit || 200) || 200));
@@ -6030,6 +6627,16 @@ app.get('/api/transcript/search', (req, res) => {
 
       if (role && obj.r !== role) continue;
       if (hasList && !obj.d) continue;
+
+      // Tag filters (OR semantics for IN, AND-NOT for OUT)
+      if (outTags.length) {
+        const g = Array.isArray(obj.g) ? obj.g.map(v => String(v||'').trim()).filter(Boolean) : [];
+        if (g.length && outTags.some(t => g.includes(t))) continue;
+      }
+      if (inTags.length) {
+        const g = Array.isArray(obj.g) ? obj.g.map(v => String(v||'').trim()).filter(Boolean) : [];
+        if (!g.length || !inTags.some(t => g.includes(t))) continue;
+      }
 
       if (sinceMs) {
         const t = Date.parse(obj.t || '');
@@ -6071,6 +6678,12 @@ app.get('/transcript', (req, res) => {
     .tbtn { background:#0d1426; }
     .tbtn.active { background:#14213f; border-color: rgba(154,208,255,0.55); }
     #hasListBtn.on { background:#1f8f4a; border-color: rgba(255,255,255,0.18); }
+
+    /* Docs-style tri-state pills */
+    .pill{ background:#0d1426; border:1px solid rgba(255,255,255,0.12); color:#e8eefc; border-radius:999px; padding: 8px 10px; cursor:pointer; font-weight:800; }
+    .pill.off{ border-color: rgba(255,255,255,0.16) !important; background: rgba(255,255,255,0.03) !important; color: rgba(232,238,252,.86) !important; }
+    .pill.in{ border-color: rgba(80,255,160,0.70) !important; background: rgba(80,255,160,0.16) !important; color: rgba(220,255,236,0.98) !important; }
+    .pill.out{ border-color: rgba(255,170,60,0.80) !important; background: rgba(255,170,60,0.18) !important; color: rgba(255,240,220,0.98) !important; }
     button:disabled { opacity:0.5; cursor: default; }
     .muted { color: rgba(255,255,255,0.65); font-size: 12px; }
     .t_row { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); }
@@ -6122,6 +6735,13 @@ app.get('/transcript', (req, res) => {
           <button class="tbtn" data-days="30" id="days30" type="button">30d</button>
           <button class="tbtn" id="hasListBtn" type="button">List</button>
         </div>
+      </div>
+
+      <div class="row" style="margin-top:10px; justify-content: space-between; width: 100%; gap:10px; align-items:center;">
+        <div class="muted" style="font-size:12px;">Tags:</div>
+        <div class="row" id="t_tags" style="gap:8px; flex:1; flex-wrap:wrap;"></div>
+        <button id="t_tags_clear" type="button" class="tbtn">Clear</button>
+        <button id="t_tags_manage" type="button" class="tbtn" title="Manage tags">☰</button>
       </div>
     </div>
 
@@ -6496,8 +7116,11 @@ app.get('/pm', (req, res) => {
     .box *::-webkit-scrollbar, #cm_todos::-webkit-scrollbar{ width:10px; height:10px; }
     .box *::-webkit-scrollbar-thumb, #cm_todos::-webkit-scrollbar-thumb{ background: rgba(231,231,231,.16); border-radius: 10px; border: 2px solid rgba(0,0,0,0.35); }
     .box *::-webkit-scrollbar-track, #cm_todos::-webkit-scrollbar-track{ background: rgba(0,0,0,0.18); border-radius: 10px; }
-    .pillbtn{border:1px solid rgba(34,198,198,.40); background: rgba(34,198,198,.10); color: rgba(231,231,231,.92); border-radius: 999px; padding:8px 10px; cursor:pointer; font-size:12px}
-    .pillbtn:hover{border-color: rgba(34,198,198,.65)}
+    .pillbtn{border:1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.03); color: rgba(231,231,231,.92); border-radius: 999px; padding:8px 10px; cursor:pointer; font-size:12px; font-weight:800}
+    .pillbtn:hover{border-color: rgba(154,208,255,0.55)}
+    .pillbtn.off{ border-color: rgba(255,255,255,0.16) !important; background: rgba(255,255,255,0.03) !important; }
+    .pillbtn.in{ border-color: rgba(80,255,160,0.70) !important; background: rgba(80,255,160,0.16) !important; color: rgba(220,255,236,0.98) !important; }
+    .pillbtn.out{ border-color: rgba(255,170,60,0.80) !important; background: rgba(255,170,60,0.18) !important; color: rgba(255,240,220,0.98) !important; }
     .pillDanger{ border-color: rgba(255,97,97,.45); background: rgba(255,97,97,.10); }
     .pillDanger:hover{ border-color: rgba(255,97,97,.70); background: rgba(255,97,97,.14); }
 
@@ -6524,6 +7147,11 @@ app.get('/pm', (req, res) => {
         <button class="btn" id="pmRefresh" type="button">Refresh</button>
       </div>
       <div id="pmMenuWrap" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; justify-self:end; width:100%;">
+        <div id="pmTagsBar" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:flex-end;">
+          <div id="pmTags" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:flex-end;"></div>
+          <button class="pillbtn" id="pmTagClear" type="button" title="Clear tag filters">Clear</button>
+          <button class="pillbtn" id="pmTagManage" type="button" title="Manage tags">☰</button>
+        </div>
         ${appsMenuHtml('/pm')}
       </div>
     </div>
@@ -6598,6 +7226,13 @@ app.get('/pm', (req, res) => {
             </select>
           </div>
           <div class="field" style="grid-column: 1 / span 2;">
+            <label>Tags</label>
+            <div class="rowbtn" style="gap:8px; flex-wrap:wrap;">
+              <div id="cm_tag_pick" class="rowbtn" style="gap:8px; flex-wrap:wrap;"></div>
+              <button class="pillbtn" id="cm_tag_manage" type="button" title="Manage tags">☰</button>
+            </div>
+          </div>
+          <div class="field" style="grid-column: 1 / span 2;">
             <label>Description (short)</label>
             <textarea id="cm_in_desc"></textarea>
           </div>
@@ -6648,6 +7283,7 @@ app.get('/pm', (req, res) => {
       return '{"columns":[]}';
     }
   })()}</script>
+  <script src="/static/pm-tags.js"></script>
   <script src="/static/pm.js"></script>
   <script src="/static/apps-menu.js"></script>
 
@@ -6786,12 +7422,21 @@ app.get('/publish', (req, res) => {
 </html>`);
 });
 
-function makeMsg({ text, attachments }) {
+function makeMsg({ text, attachments, tagIds }) {
+  const tags = Array.isArray(tagIds)
+    ? tagIds.map(x => String(x||'').trim()).filter(Boolean).slice(0, 12)
+    : [];
+  // de-dupe (stable order)
+  const seen = new Set();
+  const uniq = [];
+  for (const t of tags) { if (seen.has(t)) continue; seen.add(t); uniq.push(t); }
+
   return {
     id: `msg_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`,
     ts: new Date().toISOString(),
     text: typeof text === 'string' ? text : '',
     attachments: Array.isArray(attachments) ? attachments : [],
+    tags: uniq,
   };
 }
 
@@ -6824,13 +7469,21 @@ const BRIDGE_OUTBOX_FILE = path.join(DATA_DIR, 'bridge-outbox.md');
 const BRIDGE_LOG_FILE = path.join(DATA_DIR, 'bridge-messages.jsonl');
 
 function readBridgeToken(){
+  // Token can come from env, a local token file, or the paired peer config.
   if (BRIDGE_TOKEN_ENV) return BRIDGE_TOKEN_ENV;
   try {
     const t = fs.existsSync(BRIDGE_TOKEN_FILE) ? String(fs.readFileSync(BRIDGE_TOKEN_FILE, 'utf8')).trim() : '';
-    return t || '';
-  } catch {
-    return '';
-  }
+    if (t) return t;
+  } catch {}
+
+  // Fallback: if pairing wrote a token into bridge-peer.json, use it.
+  try {
+    const peer = readJson(BRIDGE_PEER_FILE, null);
+    const tok = (peer && peer.token) ? String(peer.token).trim() : '';
+    if (tok) return tok;
+  } catch {}
+
+  return '';
 }
 
 function writeBridgeTokenFile(tok){
@@ -6997,6 +7650,65 @@ app.get('/api/ops/bridge/list', (req, res) => {
   res.json({ ok:true, items });
 });
 
+// Live bridge stream (SSE): emits new bridge log entries as they are appended.
+app.get('/api/ops/bridge/stream', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Connection', 'keep-alive');
+  // If behind a proxy, disable buffering
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const limit = Math.max(0, Math.min(80, Number(req.query.limit || 20)));
+
+  function sse(obj){
+    try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch {}
+  }
+
+  // send hello + last few items
+  sse({ type:'hello', ts: new Date().toISOString() });
+  if (limit) {
+    const items = readLastJsonl(BRIDGE_LOG_FILE, limit);
+    for (const it of (items||[])) sse({ type:'bridge', entry: it });
+  }
+
+  let lastSize = 0;
+  try { lastSize = fs.existsSync(BRIDGE_LOG_FILE) ? fs.statSync(BRIDGE_LOG_FILE).size : 0; } catch {}
+
+  const tick = setInterval(() => {
+    try {
+      const st = fs.existsSync(BRIDGE_LOG_FILE) ? fs.statSync(BRIDGE_LOG_FILE) : null;
+      const size = st ? st.size : 0;
+      if (size <= lastSize) return;
+
+      // read appended bytes only
+      const fd = fs.openSync(BRIDGE_LOG_FILE, 'r');
+      const buf = Buffer.alloc(size - lastSize);
+      fs.readSync(fd, buf, 0, buf.length, lastSize);
+      fs.closeSync(fd);
+      lastSize = size;
+
+      const txt = buf.toString('utf8');
+      const lines = txt.split(/\r?\n/).filter(Boolean);
+      for (const line of lines) {
+        let obj = null;
+        try { obj = JSON.parse(line); } catch { obj = null; }
+        if (!obj) continue;
+        sse({ type:'bridge', entry: obj });
+      }
+    } catch {
+      // ignore
+    }
+  }, 1000);
+
+  const ka = setInterval(() => sse({ type:'keepalive', ts: new Date().toISOString() }), 25_000);
+
+  req.on('close', () => {
+    try { clearInterval(tick); } catch {}
+    try { clearInterval(ka); } catch {}
+    try { res.end(); } catch {}
+  });
+});
+
 app.post('/api/ops/bridge/post', express.json({ limit:'200kb' }), (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const dirRaw = String(req.body?.dir || 'outbox').trim().toLowerCase();
@@ -7054,6 +7766,7 @@ async function bridgeChatPost(targetUrl, payload){
 
 // Dedupe bridged messages (prevent loops and accidental double-post)
 const BRIDGE_SEEN = new Map(); // msgId -> ts
+const BRIDGE_TEXT_SEEN = new Map(); // key(from|to|text) -> ts (throttle spam even if msgIds differ)
 function bridgeSeenHas(id){
   if (!id) return false;
   const now = Date.now();
@@ -7087,6 +7800,22 @@ app.post('/api/ops/bridge/chat', express.json({ limit:'200kb' }), (req, res) => 
     bridgeSeenMark(msgId);
   }
 
+  // Text-level spam throttle (e.g., repeated WAKE UP / status unchanged loops)
+  try {
+    const now = Date.now();
+    const key = (from + '|' + to + '|' + text).slice(0, 1200);
+    const ts = BRIDGE_TEXT_SEEN.get(key);
+    if (ts && (now - ts) < (15 * 60 * 1000)) {
+      return res.json({ ok:true, dupText:true, throttled:true });
+    }
+    BRIDGE_TEXT_SEEN.set(key, now);
+    if (BRIDGE_TEXT_SEEN.size > 2000) {
+      for (const [k, tsv] of BRIDGE_TEXT_SEEN.entries()) {
+        if ((now - tsv) > (20 * 60 * 1000)) BRIDGE_TEXT_SEEN.delete(k);
+      }
+    }
+  } catch {}
+
   // Fleet status report messages (boss-only behavior)
   try {
     const host = String(req.headers.host || '').split(':')[0].trim().toLowerCase();
@@ -7117,9 +7846,22 @@ app.post('/api/ops/bridge/chat', express.json({ limit:'200kb' }), (req, res) => 
           try { fleet = JSON.parse(fs.readFileSync(FLEET_FILE, 'utf8')) || fleet; } catch {}
           fleet.updatedAt = nowIso;
           fleet.reports = fleet.reports && typeof fleet.reports === 'object' ? fleet.reports : {};
+          const prev = fleet.reports[key] || null;
           fleet.reports[key] = safe;
           try { fs.writeFileSync(FLEET_FILE, JSON.stringify(fleet, null, 2), 'utf8'); } catch {}
-          try { logWork('fleet.report', { from: key }); } catch {}
+
+          const auditSame = (a,b) => {
+            const ax = a ? JSON.stringify(a) : '';
+            const bx = b ? JSON.stringify(b) : '';
+            return ax === bx;
+          };
+          const changed = !prev || prev.commit !== safe.commit || prev.service !== safe.service || !auditSame(prev.audit, safe.audit);
+          if (changed) {
+            try { logWork('fleet.report', { from: key, changed: true }); } catch {}
+          }
+
+          // IMPORTANT: do not inject fleet heartbeat messages into main chat.
+          return res.json({ ok:true, fleet:true, changed });
         }
       }
     }
@@ -7211,15 +7953,56 @@ function handleQueueCompletionText(text, ts){
   }
 }
 
-function consoleBotSay(text) {
+// Auto-heal gateway (babies only): restart gateway service if we detect the classic "ws not connected" failure.
+let gwHealLastAt = 0;
+function autoHealGateway(reason){
+  try {
+    const host = String(process.env.HOSTNAME || require('os').hostname() || '').trim();
+    const isBoss = host.toLowerCase() === 'clawdrey' || host.toLowerCase() === 'claw' || String(process.env.IS_BOSS||'') === '1';
+    if (isBoss) return false;
+    if (String(process.env.AUTO_HEAL_GATEWAY || '1') !== '1') return false;
+
+    const now = Date.now();
+    if (gwHealLastAt && (now - gwHealLastAt) < 120_000) return false;
+    gwHealLastAt = now;
+
+    logWork('gateway.autoheal', { reason: String(reason||'') });
+
+    // Best-effort restart; requires console service to be root (bundle default).
+    childProcess.execFile('bash', ['-lc', 'systemctl restart clawdbot-gateway.service || true'], { timeout: 20_000 }, () => {
+      try { setTimeout(connectGateway, 1200).unref?.(); } catch {}
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function consoleBotSay(text, tagIds = null) {
+  const tags = Array.isArray(tagIds)
+    ? tagIds.map(x => String(x||'').trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const seen = new Set();
+  const uniq = [];
+  for (const t of tags) { if (seen.has(t)) continue; seen.add(t); uniq.push(t); }
+
   const msg = {
     id: 'bot_' + Date.now().toString(16) + crypto.randomBytes(3).toString('hex'),
     ts: new Date().toISOString(),
     text: String(text || ''),
     attachments: [],
+    tags: uniq,
   };
   appendJsonl(MSG_FILE, msg);
   appendTranscriptLine('assistant', msg);
+
+  // Trigger: gateway ws not connected → attempt auto-heal (babies only)
+  try {
+    if (/gateway ws not connected/i.test(String(msg.text||''))) {
+      autoHealGateway('bot_text');
+    }
+  } catch {}
 
   // If the assistant emits an explicit route directive, forward it too.
   // This prevents "TO: Boss:" bot messages from getting stuck only on the local box.
@@ -7400,8 +8183,33 @@ function connectGateway() {
 
       const text = extractTextFromGatewayMessage(p.message);
       if (text) {
-        consoleBotSay(text);
+        const tags = p.runId ? (gwRunTags.get(String(p.runId)) || null) : null;
+        consoleBotSay(text, tags);
+        if (p.runId) gwRunTags.delete(String(p.runId));
         logWork('gateway.reply.posted', { sessionKey: p.sessionKey, runId: p.runId });
+      } else {
+        // IMPORTANT: surface error-only finals (usage limits, auth failures, etc)
+        const sr = String(p.message.stopReason || '');
+        const em = String(p.message.errorMessage || '');
+        if (sr.toLowerCase() === 'error' && em) {
+          // Best-effort classify OOB errors (quota/usage, auth, etc)
+          let kind = 'error';
+          if (/usage limit|usage_limit|out of codex messages|usage limit reached/i.test(em)) kind = 'usage_limit';
+          else if (/unauthorized|forbidden|invalid api key|expired|login|auth/i.test(em)) kind = 'auth';
+
+          // Best-effort extract reset time if present
+          let resetAt = null;
+          try {
+            const m = em.match(/(try again after\s+)([^\n\.]+)/i);
+            if (m) resetAt = String(m[2] || '').trim();
+          } catch {}
+
+          const oob = { ts: new Date().toISOString(), kind, message: em, resetAt, sessionKey: p.sessionKey, runId: p.runId || null };
+          setGwLastOob(oob);
+
+          consoleBotSay('Codex/Gateway error\n' + em);
+          logWork('gateway.reply.error_posted', { sessionKey: p.sessionKey, runId: p.runId, stopReason: sr, kind });
+        }
       }
       // Final assistant message arrived via events; clear thinking.
       setInFlight(false);
@@ -7413,6 +8221,7 @@ function connectGateway() {
     const was = gw.connected;
     gw.connected = false;
     logWork('gateway.disconnected', { wasConnected: was });
+    if (!AI_AUTOMATION_ENABLED) return;
     setTimeout(connectGateway, 1500);
   });
 
@@ -7422,7 +8231,7 @@ function connectGateway() {
   });
 }
 
-function acceptMessage({ text, attachments, noList }) {
+function acceptMessage({ text, attachments, noList, tagIds }) {
   // Allow UI to mark messages as "no list extraction" (e.g. Quick Chat button payloads).
   // Also allow an inline marker to survive copy/paste:
   //   [[NO_CLAWDLIST]]
@@ -7433,7 +8242,7 @@ function acceptMessage({ text, attachments, noList }) {
     t = t.replace(/^\s*\[\[NO_CLAWDLIST\]\]\s*\r?\n?/gmi, '');
   }
 
-  const msg = makeMsg({ text: t, attachments });
+  const msg = makeMsg({ text: t, attachments, tagIds });
   appendJsonl(MSG_FILE, msg);
 
   // Dynamic Execution List extraction: if user message contains a 3+ item list.
@@ -7469,6 +8278,7 @@ function acceptMessage({ text, attachments, noList }) {
         const runId = msg.id; // reuse for idempotency
 
         setInFlight(true);
+        try { gwRunTags.set(String(runId), Array.isArray(msg.tags) ? msg.tags : []); } catch {}
         await gwSendReq('chat.send', {
           sessionKey: CONSOLE_SESSION_KEY,
           idempotencyKey: runId,
@@ -7493,7 +8303,8 @@ function acceptMessage({ text, attachments, noList }) {
           const txt = extractTextFromGatewayMessage(latest);
           if (txt && txt !== lastTxt) {
             lastTxt = txt;
-            consoleBotSay(txt);
+            consoleBotSay(txt, Array.isArray(msg.tags) ? msg.tags : null);
+            try { gwRunTags.delete(String(runId)); } catch {}
             logWork('gateway.reply.posted', { sessionKey: CONSOLE_SESSION_KEY, runId });
             setInFlight(false);
             return;
@@ -7516,13 +8327,22 @@ function acceptMessage({ text, attachments, noList }) {
 }
 
 app.post('/api/message', (req, res) => {
-  const { text, attachments, noList, copyBoss } = req.body || {};
+  const { text, attachments, noList, copyBoss, tagIds } = req.body || {};
   if (typeof text !== 'string' && !Array.isArray(attachments)) {
     return res.status(400).json({ ok: false, error: 'Expected {text, attachments}' });
   }
 
   const rawText = (typeof text === 'string') ? text : '';
   const nm = selfName();
+
+  // Guard: drop empty/whitespace-only sends (prevents INVALID_REQUEST from Codex)
+  if (!rawText || !String(rawText).trim()) {
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+    if (!hasAttachments) {
+      logWork('chat.send.skip.empty', {});
+      return res.json({ ok: true, skipped: true, reason: 'empty' });
+    }
+  }
 
   // Mesh chat routing (explicit only; prevents duplication/loops)
   // - Default: local-only
@@ -7540,7 +8360,7 @@ app.post('/api/message', (req, res) => {
       const bossUrl = (BRIDGE_CHAT_BOSS_URL || String(peer?.url || '')).trim().replace(/\/+$/,'');
       if (bossUrl) {
         // Routed teammate comms should never generate ClawdList/DEL.
-        const msg = acceptMessage({ text: rawText, attachments, noList: true });
+        const msg = acceptMessage({ text: rawText, attachments, noList: true, tagIds });
         bridgeChatPost(bossUrl, { from: nm, to: 'Boss', text: `[${xid}] ${rawText}`, msgId }).catch(() => {});
         return res.json({ ok: true, message: msg, bridged: true, copiedBoss: true });
       }
@@ -7555,14 +8375,14 @@ app.post('/api/message', (req, res) => {
         // Special-case: babies can route TO: Boss via BRIDGE_CHAT_BOSS_URL
         const bossUrl = (BRIDGE_CHAT_BOSS_URL || '').trim().replace(/\/+$/,'');
         if (bossUrl && to.toLowerCase() === 'boss') {
-          const msg = acceptMessage({ text: `${nm} -> Boss: ${body}`, attachments, noList: true });
+          const msg = acceptMessage({ text: `${nm} -> Boss: ${body}`, attachments, noList: true, tagIds });
           bridgeChatPost(bossUrl, { from: nm, to: 'Boss', text: `[${xid}] ${body}`, msgId }).catch(() => {});
           return res.json({ ok: true, message: msg, bridged: true });
         }
 
         if (BRIDGE_CHAT_PEERS_MAP[to]) {
           // Routed teammate comms should never generate ClawdList/DEL.
-          const msg = acceptMessage({ text: `${nm} -> ${to}: ${body}`, attachments, noList: true });
+          const msg = acceptMessage({ text: `${nm} -> ${to}: ${body}`, attachments, noList: true, tagIds });
           bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from: nm, to, text: `[${xid}] ${body}`, msgId }).catch(() => {});
           return res.json({ ok: true, message: msg, bridged: true });
         }
@@ -7577,14 +8397,14 @@ app.post('/api/message', (req, res) => {
       const body = String(m[3] || '').trim();
       if (from && body && from.toLowerCase() === nm.toLowerCase() && BRIDGE_CHAT_PEERS_MAP[to]) {
         // Routed teammate comms should never generate ClawdList/DEL.
-        const msg = acceptMessage({ text: `${from} -> ${to}: ${body}`, attachments, noList: true });
+        const msg = acceptMessage({ text: `${from} -> ${to}: ${body}`, attachments, noList: true, tagIds });
         bridgeChatPost(BRIDGE_CHAT_PEERS_MAP[to], { from, to, text: `[${xid}] ${body}`, msgId }).catch(() => {});
         return res.json({ ok: true, message: msg, bridged: true });
       }
     }
   } catch {}
 
-  const msg = acceptMessage({ text: rawText, attachments, noList: !!noList });
+  const msg = acceptMessage({ text: rawText, attachments, noList: !!noList, tagIds });
   res.json({ ok: true, message: msg });
 });
 
@@ -7960,6 +8780,11 @@ app.get('/', (req, res) => {
 
     .statusline { display:flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
     .pill { border: 1px solid var(--border); background: #0d1426; border-radius: 999px; padding: 6px 10px; font-size: 12px; color: var(--muted); }
+    /* Docs-style tri-state for tag pills */
+    .pill.off{ border-color: rgba(255,255,255,0.16) !important; background: rgba(255,255,255,0.03) !important; color: rgba(232,238,252,.86) !important; }
+    .pill.in{ border-color: rgba(80,255,160,0.70) !important; background: rgba(80,255,160,0.16) !important; color: rgba(220,255,236,0.98) !important; }
+    .pill.out{ border-color: rgba(255,170,60,0.80) !important; background: rgba(255,170,60,0.18) !important; color: rgba(255,240,220,0.98) !important; }
+
     select.inp{ background: rgba(9,14,26,0.85); color: rgba(231,231,231,0.92); }
 
     /* Rules accordion (tight + no bold titles) */
@@ -8181,6 +9006,103 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         </div> <!-- /appsBody -->
       </div>
 
+      <div class="card" style="margin-top:14px;" id="readmeCard">
+        <div class="statusline" style="justify-content: space-between; align-items:center;">
+          <div class="row" style="gap:10px; align-items:center;">
+            <h2 style="margin:0">ClawdReadMe</h2>
+          </div>
+          <div class="row" style="gap:8px; align-items:center;">
+            <button id="readmeToggle" type="button" class="wlbtn" title="Collapse">▾</button>
+          </div>
+        </div>
+        <div id="readmeBody" style="margin-top: 10px; line-height:1.55;">
+          ${(() => {
+            try {
+              const os = require('os');
+              const hn = String(os.hostname() || '').trim() || '(unknown-host)';
+              const assistant = (readBrand() && readBrand().assistantName) ? String(readBrand().assistantName) : 'ClawdBot';
+              const isBoss = (hn.toLowerCase() === 'clawdrey') || (hn.toLowerCase() === 'claw') || ADMINONLY_ENABLED;
+              const role = isBoss ? 'FLEET LEADER' : 'FLEET MEMBER';
+
+              let osName = '';
+              try {
+                const raw = fs.existsSync('/etc/os-release') ? fs.readFileSync('/etc/os-release','utf8') : '';
+                const m = raw.match(/^PRETTY_NAME="?([^"\n]+)"?/m);
+                osName = m ? String(m[1]) : '';
+              } catch {}
+
+              const cores = (os.cpus && os.cpus()) ? os.cpus().length : null;
+              const ramGb = os.totalmem ? (os.totalmem() / (1024*1024*1024)) : null;
+
+              let disk = '';
+              try {
+                const out = String(childProcess.execFileSync('df', ['-k', '/'], { stdio:['ignore','pipe','ignore'] }) || '');
+                const lines = out.split(/\r?\n/).filter(Boolean);
+                const last = lines[lines.length - 1] || '';
+                const parts = last.trim().split(/\s+/);
+                const kbTotal = Number(parts[1] || 0) || 0;
+                const kbAvail = Number(parts[3] || 0) || 0;
+                const gbTotal = kbTotal ? (kbTotal / (1024*1024)) : 0;
+                const gbAvail = kbAvail ? (kbAvail / (1024*1024)) : 0;
+                if (gbTotal) disk = gbTotal.toFixed(0) + ' GB total, ' + gbAvail.toFixed(0) + ' GB free';
+              } catch {}
+
+              const hasGit = fs.existsSync(path.join(__dirname, '.git'));
+              const updates = hasGit ? 'Git working tree present' : 'Bundle install (no .git)';
+
+              const b = readBrand();
+              const email = b && b.assistantEmail ? String(b.assistantEmail) : '';
+              const phone = b && b.phone ? String(b.phone) : '';
+              const provider = b && b.hostingProvider ? String(b.hostingProvider) : '';
+              const hostNotes = b && b.hostNotes ? String(b.hostNotes) : '';
+              const fleetRoleLabel = b && b.fleetRoleLabel ? String(b.fleetRoleLabel) : '';
+
+              return `
+                <div class="muted">Hello! I am <b>${escHtml(assistant)}</b>.</div>
+
+                <div style="margin-top:10px;">
+                  <div class="muted" style="font-size:12px;">Role</div>
+                  <div style="margin-top:3px; font-size:12px; color: rgba(232,238,252,.92);">${escHtml(fleetRoleLabel || role)}</div>
+                  ${isBoss ? (`<div class=\"muted\" style=\"margin-top:6px; font-size:12px;\">Team members: <span style=\"color: rgba(232,238,252,.92);\">Clawdia, Clawdwell, Clawdius</span></div>`) : ''}
+                </div>
+
+                <div style="margin-top:10px;">
+                  <div class="muted" style="font-size:12px;">Assigned email</div>
+                  <div style="margin-top:3px; font-size:12px; color: rgba(232,238,252,.92);">${escHtml(email || '(not set)')}</div>
+                </div>
+
+                <div style="margin-top:10px;">
+                  <div class="muted" style="font-size:12px;">Phone number</div>
+                  <div style="margin-top:3px; font-size:12px; color: rgba(232,238,252,.92);">${escHtml(phone || '(pending)')}</div>
+                </div>
+
+                <div style="margin-top:10px;">
+                  <div class="muted" style="font-size:12px;">Host</div>
+                  <div style="margin-top:3px; font-size:12px; color: rgba(232,238,252,.92);">${escHtml(hn)}</div>
+                  <div style="margin-top:4px; font-size:12px; color: rgba(232,238,252,.92);">${escHtml(provider || '(hosting provider not set)')}</div>
+                  <div style="margin-top:6px; font-size:12px; color: rgba(232,238,252,.92);">
+                    ${escHtml(osName || 'Ubuntu/Linux')} • ${cores ? escHtml(String(cores) + ' vCPU') : 'vCPU: (unknown)'} • ${ramGb ? escHtml(ramGb.toFixed(1) + ' GB RAM') : 'RAM: (unknown)'}${disk ? (' • ' + escHtml(disk)) : ''}
+                  </div>
+                  ${hostNotes ? ('<div style="margin-top:6px; font-size:12px; color: rgba(232,238,252,.92);">' + escHtml(hostNotes) + '</div>') : ''}
+                </div>
+
+                <div style="margin-top:10px;">
+                  <div class="muted" style="font-size:12px;">Clawd Console</div>
+                  <div style="margin-top:4px; font-size:12px; color: rgba(232,238,252,.92);">Build: <code>${escHtml(BUILD)}</code></div>
+                  <div style="margin-top:4px; font-size:12px; color: rgba(232,238,252,.92);">Updates: ${escHtml(updates)}</div>
+                </div>
+
+                <div style="margin-top:12px; display:flex; justify-content:flex-end;">
+                  <button class="pill" id="identityEdit" type="button" style="font-weight:700;">Edit details…</button>
+                </div>
+              `;
+            } catch (e) {
+              return '<div class="muted">ClawdReadMe failed to render: ' + escHtml(String(e)) + '</div>';
+            }
+          })()}
+        </div>
+      </div>
+
       <div class="card" style="margin-top: 14px;" id="rulesCard">
         <div class="statusline" style="justify-content: space-between; align-items:center;">
           <div class="row" style="gap:10px; align-items:center;">
@@ -8235,16 +9157,16 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
         </div>
       </div>
 
-      <div class="card" style="margin-top:14px;" id="readmeCard">
+      <div class="card" style="margin-top:14px; display:none;" id="readmeCardOld">
         <div class="statusline" style="justify-content: space-between; align-items:center;">
           <div class="row" style="gap:10px; align-items:center;">
             <h2 style="margin:0">ClawdReadMe</h2>
           </div>
           <div class="row" style="gap:8px; align-items:center;">
-            <button id="readmeToggle" type="button" class="wlbtn" title="Collapse">▾</button>
+            <button id="readmeToggleOld" type="button" class="wlbtn" title="Collapse">▾</button>
           </div>
         </div>
-        <div id="readmeBody" style="margin-top: 10px; line-height:1.55;">
+        <div id="readmeBodyOld" style="margin-top: 10px; line-height:1.55;">
           <div class="muted">Short operational notes + hard-won lessons (so we don't repeat mistakes).</div>
           <div style="margin-top:12px; font-weight:800;">Browser Relay (Chrome extension)</div>
           <div class="muted" style="margin-top:6px;">If using it: confirm extension installed, tab attached (badge ON), and use profile="chrome" in automations.</div>
@@ -8286,7 +9208,15 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
       </div>
 
       <div class="card">
-        <h2 style="margin:0 0 10px 0">Chat</h2>
+        <div class="row" style="justify-content: space-between; align-items:center; flex-wrap:wrap; gap:10px; margin:0 0 10px 0;">
+          <h2 style="margin:0">Chat</h2>
+          <div class="row" id="chatTagsBar" style="gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+            <div class="row" id="chatTags" style="gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;"></div>
+            <button class="pill off" id="chatTagClear" type="button" title="Clear tag selection + filters">Clear</button>
+            <button class="pill" id="chatTagManage" type="button" title="Manage tags">☰</button>
+            <div class="muted" id="chatTagMsg" style="font-size:12px;"></div>
+          </div>
+        </div>
         <div id="chatlog"></div>
 
         <div id="composer" style="margin-top: 12px;">
@@ -8410,6 +9340,14 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
           </div>
 
           <div>
+            <div class="muted" style="margin-bottom:6px;">Tags</div>
+            <div class="row" style="gap:8px; flex-wrap:wrap; align-items:center;">
+              <div id="pm_tag_pick" class="row" style="gap:8px; flex-wrap:wrap;"></div>
+              <button class="pill" id="pm_tag_manage" type="button" title="Manage tags">☰</button>
+            </div>
+          </div>
+
+          <div>
             <div class="muted" style="margin-bottom:6px;">Description (short)</div>
             <textarea id="pm_body" style="min-height: 120px;"></textarea>
           </div>
@@ -8427,6 +9365,58 @@ sudo systemctl restart clawdio-console.service</code></pre></div>
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Button modal -->
+  <!-- Identity modal -->
+  <div class="modalOverlay" id="identityModal" style="display:none;">
+    <div class="modal">
+      <div class="modalRow">
+        <div class="modalTitle">Install details</div>
+        <button class="wlbtn modalClose" id="identityClose" type="button">Close</button>
+      </div>
+      <div class="muted" style="margin-top:6px;">Non-secret metadata for this install (shown in ClawdReadMe).</div>
+      <div class="modalHr"></div>
+
+      <div class="modalRow" style="gap:12px; align-items:flex-start;">
+        <div style="flex:1; min-width:260px;">
+          <div class="muted" style="font-size:12px; margin-bottom:6px;">Clawdbot name</div>
+          <input id="identityName" class="inp" placeholder="Clawdio" style="width:100%;" />
+        </div>
+        <div style="flex:1; min-width:260px;">
+          <div class="muted" style="font-size:12px; margin-bottom:6px;">Assigned email</div>
+          <input id="identityEmail" class="inp" placeholder="name@example.com" style="width:100%;" />
+        </div>
+      </div>
+
+      <div class="modalRow" style="gap:12px; align-items:flex-start; margin-top:10px;">
+        <div style="flex:1; min-width:260px;">
+          <div class="muted" style="font-size:12px; margin-bottom:6px;">Phone number</div>
+          <input id="identityPhone" class="inp" placeholder="(pending)" style="width:100%;" />
+        </div>
+        <div style="flex:1; min-width:260px;">
+          <div class="muted" style="font-size:12px; margin-bottom:6px;">Hosting provider</div>
+          <input id="identityProvider" class="inp" placeholder="DigitalOcean / AWS / Self-hosted" style="width:100%;" />
+        </div>
+      </div>
+
+      <div class="modalRow" style="gap:12px; align-items:flex-start; margin-top:10px;">
+        <div style="flex:1; min-width:260px;">
+          <div class="muted" style="font-size:12px; margin-bottom:6px;">Fleet role label</div>
+          <input id="identityFleetRole" class="inp" placeholder="fleet member" style="width:100%;" />
+        </div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <div class="muted" style="font-size:12px; margin-bottom:6px;">Host notes (optional)</div>
+        <textarea id="identityHostNotes" class="inp" style="width:100%; min-height: 90px;" placeholder="Example: 1 vCPU / 2GB RAM / 80GB SSD • Region: NYC1"></textarea>
+      </div>
+
+      <div class="modalRow" style="justify-content: space-between; margin-top:12px;">
+        <div class="muted" id="identityMsg"></div>
+        <button class="pill" id="identitySave" type="button">Save</button>
       </div>
     </div>
   </div>
@@ -8575,6 +9565,45 @@ async function runTelemetry(kind){
   }
 }
 
+function startOpsHeartbeat(){
+  // Non-AI ops heartbeat: periodically report to Boss via Bridge so the fleet view stays fresh.
+  // Runs best-effort; failures are silent.
+  try {
+    const host = String(process.env.HOSTNAME || require('os').hostname() || '').trim() || 'unknown';
+    const isBoss = host.toLowerCase() === 'clawdrey' || host.toLowerCase() === 'claw' || String(process.env.IS_BOSS||'') === '1';
+    if (isBoss) return;
+
+    const peer = readBridgePeer();
+    const bossUrl = (BRIDGE_CHAT_BOSS_URL || String(peer?.url || '')).trim().replace(/\/+$/,'');
+    if (!bossUrl) return;
+
+    const intervalMs = Math.max(30_000, Math.min(10 * 60_000, Number(process.env.OPS_HEARTBEAT_MS || 90_000) || 90_000));
+
+    const send = async () => {
+      try {
+        const rep = {
+          name: host,
+          host,
+          ts: new Date().toISOString(),
+          // Fleet dot logic expects "active".
+          service: 'active',
+          gateway: gw.connected ? 'active' : 'down',
+          commit: null,
+          build: BUILD,
+          gatewayConnected: !!gw.connected,
+          audit: { critical: 0, moderate: 0 },
+        };
+        const msgId = 'fleet_' + host.toLowerCase().replace(/[^a-z0-9]+/g,'').slice(0, 16) + '_' + Date.now().toString(16);
+        await bridgeChatPost(bossUrl, { from: host, to: 'Boss', text: 'FLEET_REPORT: ' + JSON.stringify(rep), msgId });
+      } catch {}
+    };
+
+    // initial + interval
+    setTimeout(() => { send(); }, 10_000).unref?.();
+    setInterval(() => { send(); }, intervalMs).unref?.();
+  } catch {}
+}
+
 function startTelemetry(){
   if (!TELEMETRY_OPT_IN) return;
   // fire install once per process start if never succeeded
@@ -8600,11 +9629,202 @@ function startTelemetry(){
   logWork('telemetry.opt_in', { base: TELEMETRY_BASE_URL, installUrl: TELEMETRY_INSTALL_URL, dailyUrl: TELEMETRY_DAILY_URL });
 }
 
+
+
+// --- Ops: Automations (systemd timers/services) ---
+function sysctlAllowlisted(name){
+  const n = String(name||'').trim();
+  if (!n) return false;
+  return /^clawd[-.]/.test(n) || /^clawdbot[-.]/.test(n) || /console\.service$/.test(n);
+}
+
+function shOut(cmd){
+  const execFileSync = require('child_process').execFileSync;
+  return String(execFileSync('bash', ['-lc', cmd], { stdio:['ignore','pipe','pipe'] }) || '').trim();
+}
+
+function parseSystemctlShow(txt){
+  const out = {};
+  for (const ln of String(txt||'').split(/\r?\n/)){
+    const i = ln.indexOf('=');
+    if (i < 0) continue;
+    out[ln.slice(0,i)] = ln.slice(i+1);
+  }
+  return out;
+}
+
+function parseFail2banStatus(raw){
+  const out = { jails: [] };
+  const line = String(raw||'').split(/\r?\n/).find(l => l.toLowerCase().includes('jail list')) || '';
+  const m = line.split(':');
+  if (m.length > 1){
+    out.jails = m.slice(1).join(':').split(',').map(s => s.trim()).filter(Boolean);
+  }
+  return out;
+}
+
+function parseFail2banJail(raw){
+  const getNum = (re) => {
+    const m = String(raw||'').match(re);
+    return m ? Number(m[1]) : 0;
+  };
+  const getStr = (re) => {
+    const m = String(raw||'').match(re);
+    return m ? String(m[1]).trim() : '';
+  };
+  return {
+    currentlyBanned: getNum(/Currently banned:\s*(\d+)/i),
+    totalBanned: getNum(/Total banned:\s*(\d+)/i),
+    currentlyFailed: getNum(/Currently failed:\s*(\d+)/i),
+    totalFailed: getNum(/Total failed:\s*(\d+)/i),
+    fileList: getStr(/File list:\s*(.+)/i),
+  };
+}
+
+app.get('/api/sec/fail2ban', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  try {
+    const base = shOut('fail2ban-client status');
+    const info = parseFail2banStatus(base);
+    const jails = [];
+    for (const name of info.jails){
+      try {
+        const jr = shOut('fail2ban-client status ' + name);
+        jails.push({ name, ...parseFail2banJail(jr) });
+      } catch {
+        jails.push({ name, error:'status_failed' });
+      }
+    }
+    return res.json({ ok:true, jails });
+  } catch (e) {
+    return res.json({ ok:false, error:'fail2ban_not_available' });
+  }
+});
+
+app.get('/api/ops/automations/list', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  try {
+    const timers = [];
+    const rawT = shOut("systemctl list-timers --all --no-legend --no-pager --plain | awk '{print $(NF-1)}'");
+    for (const line of rawT.split(/\r?\n/)){
+      const s = String(line||'').trim();
+      if (!s) continue;
+      const unit = s;
+      if (!unit || !unit.endsWith('.timer')) continue;
+      if (!sysctlAllowlisted(unit)) continue;
+      const show = parseSystemctlShow(shOut('systemctl show --no-pager --property=Id,Description,ActiveState,SubState,UnitFileState,NextElapseUSecRealtime,LastTriggerUSecRealtime,OnUnitActiveSec -- ' + unit));
+      timers.push({
+        unit,
+        desc: show.Description || '',
+        state: show.ActiveState || '',
+        sub: show.SubState || '',
+        unitFileState: show.UnitFileState || '',
+        onUnitActiveSec: show.OnUnitActiveSec || '',
+        nextElapseUSecRealtime: show.NextElapseUSecRealtime || '',
+        lastTriggerUSecRealtime: show.LastTriggerUSecRealtime || '',
+      });
+    }
+
+    const services = [];
+    const rawS = shOut("systemctl list-units --type=service --all --no-legend --no-pager --plain | sed 's/\s\+/ /g'");
+    for (const line of rawS.split(/\r?\n/)){
+      const s = String(line||'').trim();
+      if (!s) continue;
+      const cols = s.split(' ');
+      const unit = cols[0] || '';
+      if (!unit.endsWith('.service')) continue;
+      if (!sysctlAllowlisted(unit)) continue;
+      const show = parseSystemctlShow(shOut('systemctl show --no-pager --property=Id,Description,ActiveState,SubState,UnitFileState,Result,ExecMainStatus,ExecMainCode -- ' + unit));
+      services.push({
+        unit,
+        desc: show.Description || '',
+        state: show.ActiveState || '',
+        sub: show.SubState || '',
+        unitFileState: show.UnitFileState || '',
+        result: show.Result || '',
+        execMainCode: show.ExecMainCode || '',
+        execMainStatus: show.ExecMainStatus || '',
+      });
+    }
+
+    timers.sort((a,b)=>a.unit.localeCompare(b.unit));
+    services.sort((a,b)=>a.unit.localeCompare(b.unit));
+
+    res.json({ ok:true, timers, services });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:String(e) });
+  }
+});
+
+app.post('/api/ops/automations/unit', express.json({ limit:'20kb' }), (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  try {
+    const unit = String(req.body?.unit || '').trim();
+    const action = String(req.body?.action || '').trim();
+    if (!unit || !sysctlAllowlisted(unit)) return res.status(400).json({ ok:false, error:'bad_unit' });
+    const allowed = new Set(['start','stop','restart','enable','disable']);
+    if (!allowed.has(action)) return res.status(400).json({ ok:false, error:'bad_action' });
+    shOut('systemctl ' + action + ' -- ' + unit + ' || true');
+    logWork('ops.automation.unit', { unit, action });
+    logCommand({ kind:'systemctl', unit, action });
+    res.json({ ok:true });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:String(e) });
+  }
+});
+
+app.post('/api/ops/automations/timer', express.json({ limit:'50kb' }), (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sess = getSessionFromReq(req);
+  if (!sess) return res.status(401).json({ ok:false, error:'no_session' });
+  try {
+    const unit = String(req.body?.unit || '').trim();
+    const onUnitActiveSec = String(req.body?.onUnitActiveSec || '').trim();
+    if (!unit.endsWith('.timer') || !sysctlAllowlisted(unit)) return res.status(400).json({ ok:false, error:'bad_unit' });
+    if (!onUnitActiveSec) return res.status(400).json({ ok:false, error:'missing_onUnitActiveSec' });
+
+    const fs = require('fs');
+    const path = require('path');
+    const dir = path.join('/etc/systemd/system', unit + '.d');
+    try { fs.mkdirSync(dir, { recursive:true }); } catch {}
+    const f = path.join(dir, 'override.conf');
+    fs.writeFileSync(f, '[Timer]\nOnUnitActiveSec=' + onUnitActiveSec + '\n', 'utf8');
+
+    shOut('systemctl daemon-reload');
+    shOut('systemctl restart ' + unit);
+    logWork('ops.automation.timer', { unit, onUnitActiveSec });
+    logCommand({ kind:'systemctl-timer', unit, onUnitActiveSec });
+    res.json({ ok:true });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:String(e) });
+  }
+});
+
 const BIND = process.env.BIND || process.env.HOST || '127.0.0.1';
+const AI_AUTOMATION_ENABLED = String(process.env.AI_AUTOMATION_ENABLED || '1') === '1';
+
 server.listen(PORT, BIND, () => {
   console.log(`Clawd Console listening on http://${BIND}:${PORT}`);
-  // Start gateway bridge
-  connectGateway();
+
+  // Start gateway bridge (Codex / AI automation)
+  if (AI_AUTOMATION_ENABLED) {
+    connectGateway();
+  } else {
+    try { logWork('ai.disabled', { reason: 'AI_AUTOMATION_ENABLED=0' }); } catch {}
+  }
+
+  // Start fleet ops heartbeat (Bridge)
+  startOpsHeartbeat();
   // Start opt-in telemetry pinger
   startTelemetry();
+
+  // Session hooks
+  writeBootMd();
+  writeSessionMemory();
 });

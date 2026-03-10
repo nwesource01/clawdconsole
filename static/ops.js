@@ -215,6 +215,8 @@
   const tabClawd = $('opsTabClawd');
   const tabClawdwell = $('opsTabClawdwell');
   const tabBridge = $('opsTabBridge');
+  const tabBrowser = $('opsTabBrowser');
+  const tabAuto = $('opsTabAuto');
   const tabRes = $('opsTabRes');
   const tabUpd = $('opsTabUpd');
   const tabMsg = $('opsTabMsg');
@@ -225,6 +227,8 @@
   const viewClawd = $('opsTabClawdView');
   const viewClawdwell = $('opsTabClawdwellView');
   const viewBridge = $('opsTabBridgeView');
+  const viewBrowser = $('opsTabBrowserView');
+  const viewAuto = $('opsTabAutoView');
   const viewRes = $('opsTabResView');
   const viewUpd = $('opsTabUpdView');
 
@@ -251,6 +255,8 @@
     if (viewClawd) viewClawd.style.display = (which === 'clawd') ? '' : 'none';
     if (viewClawdwell) viewClawdwell.style.display = (which === 'clawdwell') ? '' : 'none';
     if (viewBridge) viewBridge.style.display = (which === 'bridge') ? '' : 'none';
+    if (viewBrowser) viewBrowser.style.display = (which === 'browser') ? '' : 'none';
+    if (viewAuto) viewAuto.style.display = (which === 'auto') ? '' : 'none';
     if (viewRes) viewRes.style.display = (which === 'res') ? '' : 'none';
     if (viewUpd) viewUpd.style.display = (which === 'upd') ? '' : 'none';
   }
@@ -268,7 +274,19 @@
     showTab('bridge');
     // Opening the tab marks everything as seen.
     loadBridge();
+    // Live updates
+    bridgeStreamStart();
   });
+  if (tabBrowser) tabBrowser.addEventListener('click', () => {
+    showTab('browser');
+    loadBrowser();
+  });
+
+  if (tabAuto) tabAuto.addEventListener('click', () => {
+    showTab('auto');
+    loadAutomations();
+  });
+
   if (tabRes) tabRes.addEventListener('click', () => {
     showTab('res');
     loadResources();
@@ -278,8 +296,235 @@
     loadUpdates();
   });
 
+
+
+  // --- Automations tab ---
+  const autoRefresh = $('autoRefresh');
+  const autoMsg = $('autoMsg');
+  const autoTimers = $('autoTimers');
+  const autoServices = $('autoServices');
+
+  function setAutoMsg(t){ if (autoMsg) autoMsg.textContent = t || ''; }
+
+  async function apiPostJson(url, payload){
+    const res = await fetch(url, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      credentials:'include',
+      cache:'no-store',
+      body: JSON.stringify(payload || {})
+    });
+    const j = await res.json().catch(() => null);
+    if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+    return j;
+  }
+
+  function esc(s){
+    return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function renderAutomationList(){
+    // noop placeholder; we render inline in loadAutomations
+  }
+
+  async function loadAutomations(){
+    setAutoMsg('Loading…');
+    try {
+      const res = await fetch('/api/ops/automations/list', { credentials:'include', cache:'no-store' });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+
+      const timers = Array.isArray(j.timers) ? j.timers : [];
+      const services = Array.isArray(j.services) ? j.services : [];
+
+      if (autoTimers) autoTimers.innerHTML = timers.length ? timers.map(x => {
+        const u = esc(x.unit);
+        return `
+          <div style="border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; background: rgba(255,255,255,0.03); margin:8px 0;">
+            <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+              <div style="font-weight:900;">${u}</div>
+              <div class="muted">${esc(x.state)} / ${esc(x.sub)} • ${esc(x.unitFileState)}</div>
+            </div>
+            <div class="muted" style="margin-top:6px;">${esc(x.desc||'')}</div>
+            <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+              <button class="pill" data-auto-action="enable" data-auto-unit="${u}">Enable</button>
+              <button class="pill" data-auto-action="disable" data-auto-unit="${u}">Disable</button>
+              <button class="pill" data-auto-action="restart" data-auto-unit="${u}">Restart</button>
+              <span style="flex:1;"></span>
+              <label class="muted">Cadence <input class="inp" data-auto-cadence="1" data-auto-unit="${u}" placeholder="24h" style="width:110px;" /></label>
+              <button class="pill" data-auto-setcadence="1" data-auto-unit="${u}">Set</button>
+            </div>
+          </div>
+        `;
+      }).join('') : '<div class="muted">(no timers found)</div>';
+
+      if (autoServices) autoServices.innerHTML = services.length ? services.map(x => {
+        const u = esc(x.unit);
+        return `
+          <div style="border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; background: rgba(255,255,255,0.03); margin:8px 0;">
+            <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+              <div style="font-weight:900;">${u}</div>
+              <div class="muted">${esc(x.state)} / ${esc(x.sub)} • ${esc(x.unitFileState)}</div>
+            </div>
+            <div class="muted" style="margin-top:6px;">${esc(x.desc||'')}</div>
+            <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+              <button class="pill" data-auto-action="enable" data-auto-unit="${u}">Enable</button>
+              <button class="pill" data-auto-action="disable" data-auto-unit="${u}">Disable</button>
+              <button class="pill" data-auto-action="start" data-auto-unit="${u}">Start</button>
+              <button class="pill" data-auto-action="stop" data-auto-unit="${u}">Stop</button>
+              <button class="pill" data-auto-action="restart" data-auto-unit="${u}">Restart</button>
+            </div>
+          </div>
+        `;
+      }).join('') : '<div class="muted">(no services found)</div>';
+
+      // wire buttons
+      const root = viewAuto;
+      if (root) {
+        root.querySelectorAll('[data-auto-action]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const unit = btn.getAttribute('data-auto-unit');
+            const action = btn.getAttribute('data-auto-action');
+            if (!unit || !action) return;
+            setAutoMsg(`systemctl ${action} ${unit}…`);
+            await apiPostJson('/api/ops/automations/unit', { unit, action });
+            setTimeout(loadAutomations, 350);
+          });
+        });
+        root.querySelectorAll('[data-auto-setcadence]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const unit = btn.getAttribute('data-auto-unit');
+            const inp = root.querySelector('input[data-auto-cadence][data-auto-unit="' + unit + '"]');
+            const cadence = inp ? String(inp.value||'').trim() : '';
+            if (!unit || !cadence) return;
+            setAutoMsg(`Set ${unit} cadence=${cadence}…`);
+            await apiPostJson('/api/ops/automations/timer', { unit, onUnitActiveSec: cadence });
+            setTimeout(loadAutomations, 350);
+          });
+        });
+      }
+
+      setAutoMsg(`Loaded ${timers.length} timer(s), ${services.length} service(s).`);
+      setTimeout(() => setAutoMsg(''), 1200);
+    } catch (e) {
+      setAutoMsg('Load failed: ' + String(e));
+      if (autoTimers) autoTimers.innerHTML = '';
+      if (autoServices) autoServices.innerHTML = '';
+    }
+  }
+
+  if (autoRefresh) autoRefresh.addEventListener('click', () => loadAutomations());
+
   // default
   showTab('q');
+
+  // --- Browser tab ---
+  const brProfile = $('browserProfile');
+  const brPort = $('browserCdpPort');
+  const brLoad = $('browserLoad');
+  const brSave = $('browserSave');
+  const brCheck = $('browserCheck');
+  const brKill = $('browserKill');
+  const brRestartGw = $('browserRestartGateway');
+  const brMsgEl = $('browserMsg');
+
+  function setBMsg(t){ if (brMsgEl) brMsgEl.textContent = t || ''; }
+
+  async function loadBrowser(){
+    setBMsg('Loading…');
+    try {
+      const res = await fetch('/api/ops/browser', { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+      if (brProfile) brProfile.value = String(j.profile || 'clawd');
+      if (brPort) brPort.value = String(j.cdpPort || '');
+      setBMsg('Loaded.');
+      setTimeout(() => setBMsg(''), 900);
+    } catch (e) {
+      setBMsg('Load failed: ' + String(e));
+    }
+  }
+
+  async function saveBrowser(){
+    const profile = brProfile ? String(brProfile.value||'').trim() : 'clawd';
+    const cdpPort = brPort ? Number(String(brPort.value||'').trim()) : 0;
+    if (!profile) return setBMsg('Profile required.');
+    if (!Number.isFinite(cdpPort) || cdpPort < 1 || cdpPort > 65535) return setBMsg('Invalid port.');
+
+    setBMsg('Saving…');
+    try {
+      const res = await fetch('/api/ops/browser', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        cache:'no-store',
+        body: JSON.stringify({ profile, cdpPort })
+      });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+      setBMsg('Saved. Restart gateway to apply.');
+    } catch (e) {
+      setBMsg('Save failed: ' + String(e));
+    }
+  }
+
+  async function checkBrowserPort(){
+    const cdpPort = brPort ? Number(String(brPort.value||'').trim()) : 0;
+    if (!Number.isFinite(cdpPort) || cdpPort < 1 || cdpPort > 65535) return setBMsg('Invalid port.');
+
+    setBMsg('Checking…');
+    try {
+      const res = await fetch('/api/ops/browser/check?port=' + encodeURIComponent(String(cdpPort)), { credentials:'include', cache:'no-store' });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+      setBMsg(j.listening ? ('IN USE: ' + (j.holder || '(unknown)')) : 'Free.');
+    } catch (e) {
+      setBMsg('Check failed: ' + String(e));
+    }
+  }
+
+  async function killBrowserOccupant(){
+    const cdpPort = brPort ? Number(String(brPort.value||'').trim()) : 0;
+    if (!Number.isFinite(cdpPort) || cdpPort < 1 || cdpPort > 65535) return setBMsg('Invalid port.');
+    const ok = confirm('Kill whichever process is holding TCP port ' + cdpPort + '?');
+    if (!ok) return;
+
+    setBMsg('Killing…');
+    try {
+      const res = await fetch('/api/ops/browser/kill', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'include',
+        cache:'no-store',
+        body: JSON.stringify({ port: cdpPort })
+      });
+      const j = await res.json();
+      if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+      setBMsg('Killed (best-effort).');
+    } catch (e) {
+      setBMsg('Kill failed: ' + String(e));
+    }
+  }
+
+  async function restartGateway(){
+    const ok = confirm('Restart clawdbot gateway now?');
+    if (!ok) return;
+    setBMsg('Restarting gateway…');
+    try {
+      const res = await fetch('/api/ops/gateway/restart', { method:'POST', headers:{ 'Content-Type':'application/json' }, credentials:'include', cache:'no-store', body: JSON.stringify({ confirm:'RESTART' }) });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j || !j.ok) throw new Error((j && j.error) ? j.error : ('http ' + res.status));
+      setBMsg('Gateway restart requested.');
+    } catch (e) {
+      setBMsg('Gateway restart failed: ' + String(e));
+    }
+  }
+
+  if (brLoad) brLoad.addEventListener('click', loadBrowser);
+  if (brSave) brSave.addEventListener('click', saveBrowser);
+  if (brCheck) brCheck.addEventListener('click', checkBrowserPort);
+  if (brKill) brKill.addEventListener('click', killBrowserOccupant);
+  if (brRestartGw) brRestartGw.addEventListener('click', restartGateway);
 
   function setTgMsg(t){ if (tgMsg) tgMsg.textContent = t || ''; }
   function setTgTestMsg(t){ if (tgTestMsg) tgTestMsg.textContent = t || ''; }
@@ -464,8 +709,8 @@
   loadClawdwellNotes();
   refreshHydration();
   setInterval(() => { try { refreshHydration(); } catch {} }, 5000);
-  // Bridge is loaded on demand when tab is opened, but we also poll for a "new" indicator.
-  setInterval(() => { try { loadBridge({ silent:true }); } catch {} }, 8000);
+  // Bridge is loaded on demand when tab is opened; we keep it instant via SSE when available.
+  setInterval(() => { try { loadBridge({ silent:true }); } catch {} }, 15000);
 
   // --- Clawdwell notes ---
   const cwTa = $('cwNotes');
@@ -516,6 +761,7 @@
   const brText = $('bridgeText');
   const brPost = $('bridgePost');
   const brMsg = $('bridgeMsg');
+  const brLive = $('bridgeLive');
   const brList = $('bridgeList');
 
   const brBossTok = $('bridgeBossToken');
@@ -527,7 +773,7 @@
   const brPeerStatus = $('bridgePeerStatus');
 
   const setBrMsg = (t) => { try { if (brMsg) brMsg.textContent = t || ''; } catch {} };
-  const esc = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const setBrLive = (t) => { try { if (brLive) brLive.textContent = String(t||''); } catch {} };
 
   function renderBridge(items){
     if (!brList) return;
@@ -566,10 +812,77 @@
   }
 
   let bridgeLastSeenTs = 0;
+  let bridgeStream = null;
+  let bridgeCache = [];
+
+  function bridgeMaybeMarkNew(items){
+    let newest = 0;
+    for (const it of (items||[])){
+      const t = Date.parse(it && it.ts ? String(it.ts) : '');
+      if (Number.isFinite(t) && t > newest) newest = t;
+    }
+    if (!bridgeLastSeenTs) bridgeLastSeenTs = newest;
+
+    const bridgeOpen = viewBridge && viewBridge.style.display !== 'none';
+    if (bridgeOpen) {
+      bridgeLastSeenTs = newest;
+      if (tabBridge) tabBridge.textContent = 'ClawdBridge';
+    } else {
+      if (newest > bridgeLastSeenTs) {
+        if (tabBridge) tabBridge.textContent = 'ClawdBridge • new';
+      }
+    }
+  }
+
+  function bridgeStreamStop(){
+    try { if (bridgeStream) bridgeStream.close(); } catch {}
+    bridgeStream = null;
+    setBrLive('Live: off');
+  }
+
+  function bridgeStreamStart(){
+    if (bridgeStream) return;
+    try {
+      setBrLive('Live: connecting…');
+      const es = new EventSource('/api/ops/bridge/stream?limit=20');
+      bridgeStream = es;
+      es.onopen = () => { setBrLive('Live: on'); };
+      es.onmessage = (ev) => {
+        try {
+          const j = JSON.parse(ev.data || '{}');
+          if (!j || j.type !== 'bridge' || !j.entry) return;
+          bridgeCache = Array.isArray(bridgeCache) ? bridgeCache : [];
+          bridgeCache.push(j.entry);
+          // de-dupe by id
+          const seen = new Set();
+          bridgeCache = bridgeCache.filter(x => {
+            const id = x && x.id ? String(x.id) : '';
+            if (!id) return false;
+            if (seen.has(id)) return false;
+            seen.add(id);
+            return true;
+          });
+          // keep last ~160 in memory
+          if (bridgeCache.length > 160) bridgeCache = bridgeCache.slice(-160);
+
+          renderBridge(bridgeCache);
+          bridgeMaybeMarkNew(bridgeCache);
+        } catch {}
+      };
+      es.onerror = () => {
+        // fallback to polling; don't spam
+        setBrLive('Live: error (polling)');
+        bridgeStreamStop();
+      };
+    } catch {
+      bridgeStream = null;
+    }
+  }
 
   async function loadBridge(opts = {}){
     const silent = !!opts.silent;
     if (!silent) setBrMsg('Loading…');
+    if (!bridgeStream) setBrLive('Live: off');
     try {
       // load config (boss token + peer)
       try {
@@ -586,27 +899,10 @@
       const j = await res.json();
       if (!res.ok || !j || !j.ok) throw new Error('http ' + res.status);
       const items = Array.isArray(j.items) ? j.items : [];
+      bridgeCache = items;
       renderBridge(items);
+      bridgeMaybeMarkNew(items);
       if (!silent) setBrMsg('');
-
-      // indicator: if there are messages newer than last seen, mark the tab.
-      let newest = 0;
-      for (const it of items){
-        const t = Date.parse(it && it.ts ? String(it.ts) : '');
-        if (Number.isFinite(t) && t > newest) newest = t;
-      }
-      if (!bridgeLastSeenTs) bridgeLastSeenTs = newest;
-
-      // If bridge tab is visible, we consider everything seen.
-      const bridgeOpen = viewBridge && viewBridge.style.display !== 'none';
-      if (bridgeOpen) {
-        bridgeLastSeenTs = newest;
-        if (tabBridge) tabBridge.textContent = 'ClawdBridge';
-      } else {
-        if (newest > bridgeLastSeenTs) {
-          if (tabBridge) tabBridge.textContent = 'ClawdBridge • new';
-        }
-      }
 
     } catch (e) {
       if (!silent) setBrMsg('Load failed: ' + String(e));
@@ -891,7 +1187,13 @@
         const conn = j.gateway && j.gateway.connected ? 'connected' : 'disconnected';
         cStatus.textContent = conn + ' • ' + String(eff.gatewayWsUrl || '') + ' • sessionKey=' + String(eff.consoleSessionKey || '');
       }
-      if (cErr) cErr.textContent = (j.gateway && j.gateway.lastError) ? fmt(j.gateway.lastError) : '';
+      if (cErr) {
+        const out = {
+          wsLastError: (j.gateway && j.gateway.lastError) ? j.gateway.lastError : null,
+          lastOob: (j.gateway && j.gateway.lastOob) ? j.gateway.lastOob : null,
+        };
+        cErr.textContent = (out.wsLastError || out.lastOob) ? fmt(out) : '';
+      }
     } catch (e) {
       if (cStatus) cStatus.textContent = 'Failed to load: ' + String(e);
     }

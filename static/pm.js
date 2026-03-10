@@ -31,6 +31,14 @@
   let PM = bootPM();
   let ACTIVE = null; // { colId, cardId }
 
+  // Tags (provided by pm-tags.js)
+  function inTags(){
+    try { return (window.__clawPmTags && window.__clawPmTags.inTags) ? window.__clawPmTags.inTags() : []; } catch { return []; }
+  }
+  function outTags(){
+    try { return (window.__clawPmTags && window.__clawPmTags.outTags) ? window.__clawPmTags.outTags() : []; } catch { return []; }
+  }
+
   const $ = (id) => document.getElementById(id);
   const modal = $('cardModal');
   const cmClose = $('cm_close');
@@ -49,6 +57,8 @@
 
   const cmInDesc = $('cm_in_desc');
   const cmInContent = $('cm_in_content');
+  const cmTagPick = $('cm_tag_pick');
+  const cmTagManage = $('cm_tag_manage');
 
   function priClass(p){
     const v = String(p || 'planning').toLowerCase();
@@ -90,12 +100,15 @@
 
     if (!card.desc && card.body) card.desc = card.body;
     if (!card.content) card.content = '';
+    if (!Array.isArray(card.tags)) card.tags = [];
 
     $('cm_title').textContent = card.title || 'Card';
     $('cm_in_title').value = card.title || '';
     $('cm_in_desc').value = card.desc || '';
     $('cm_in_content').value = card.content || '';
     $('cm_in_pri').value = String(card.priority || 'normal');
+
+    renderCardTagPicker();
 
     const qtxt = String(card.queuedCompletionReply || '').trim();
     if (cmQReply) cmQReply.textContent = qtxt || '(none yet)';
@@ -104,6 +117,42 @@
     renderTodos();
     if (cmMsg) cmMsg.textContent = '';
     if (modal) { modal.classList.add('open'); modal.style.display = 'flex'; }
+  }
+
+  function allTags(){
+    try {
+      const st = window.__clawPmTags;
+      if (st && typeof st.allTags === 'function') return st.allTags();
+      // fallback: pm-tags.js exposes loadTags; but no tags list
+      return [];
+    } catch { return []; }
+  }
+
+  function renderCardTagPicker(){
+    if (!cmTagPick) return;
+    const fc = findCard();
+    if (!fc) { cmTagPick.innerHTML = ''; return; }
+    const card = fc.card;
+    card.tags = Array.isArray(card.tags) ? card.tags.map(x => String(x||'').trim()).filter(Boolean).slice(0, 12) : [];
+
+    const tags = (allTags() || []).slice().sort((a,b) => String(a.title||a.id||'').localeCompare(String(b.title||b.id||'')));
+    cmTagPick.innerHTML = tags.map(t => {
+      const id = String(t.id||'');
+      const title = String(t.title||id||'');
+      const on = card.tags.includes(id);
+      // selected = IN style
+      return '<button type="button" class="pillbtn ' + (on ? 'in' : 'off') + '" data-cmtag="' + esc(id) + '">' + esc(title) + '</button>';
+    }).join('');
+
+    Array.from(cmTagPick.querySelectorAll('button[data-cmtag]')).forEach(b => {
+      b.addEventListener('click', () => {
+        const id = b.getAttribute('data-cmtag') || '';
+        const cur = Array.isArray(card.tags) ? card.tags : [];
+        card.tags = cur.includes(id) ? cur.filter(x => x !== id) : cur.concat([id]);
+        card.tags = card.tags.slice(0, 12);
+        renderCardTagPicker();
+      });
+    });
   }
 
   function closeModal(){
@@ -434,7 +483,18 @@
       const el = document.createElement('div');
       el.className = 'col';
 
-      const cards = Array.isArray(col.cards) ? col.cards : [];
+      const cardsAll = Array.isArray(col.cards) ? col.cards : [];
+      const ins = inTags();
+      const outs = outTags();
+      const cards = cardsAll.filter((c) => {
+        const g = Array.isArray(c && c.tags) ? c.tags.map(x => String(x||'').trim()).filter(Boolean) : [];
+        if (outs.length && g.length && outs.some(t => g.includes(t))) return false;
+        if (ins.length) {
+          if (!g.length) return false;
+          if (!ins.some(t => g.includes(t))) return false;
+        }
+        return true;
+      });
 
       const cardsHtml = cards.map((c) => {
         const q = (c.queueStatus || (c.completedAt ? 'done' : (c.queuedAt ? 'queued' : '')));
@@ -545,6 +605,18 @@
   if (cmGen) cmGen.addEventListener('click', generateTodos);
   if (cmMoveUp) cmMoveUp.addEventListener('click', () => moveCard(-1));
   if (cmMoveDn) cmMoveDn.addEventListener('click', () => moveCard(+1));
+
+  if (cmTagManage) cmTagManage.addEventListener('click', () => {
+    try {
+      const b = document.getElementById('pmTagManage');
+      if (b) b.click();
+    } catch {}
+  });
+
+  window.addEventListener('claw_pm_tags_changed', () => {
+    try { render(); } catch {}
+    try { renderCardTagPicker(); } catch {}
+  });
 
   if (cmSendConsole) cmSendConsole.addEventListener('click', async () => {
     const fc = findCard();
